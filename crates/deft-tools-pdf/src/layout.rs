@@ -470,14 +470,25 @@ fn fill_row(line: &[Run], columns: &[(f64, f64)]) -> Vec<String> {
     row
 }
 
+/// A sentence leading into a table, such as `Costs follow.` A capital before the
+/// full stop is left alone, because headers abbreviate: `Params. Acc.`
+fn ends_sentence(line: &[Run]) -> bool {
+    let text = line[0].text.trim_end();
+    let word = text.rsplit(' ').next().unwrap_or("");
+    text.ends_with(':') || (text.ends_with('.') && word.starts_with(char::is_lowercase))
+}
+
 /// The line above a table as its header, if it is one. Tight headers arrive as one
-/// piece across several columns, so its words must match those columns one to one.
+/// piece across several columns, so its words must match those columns one to one,
+/// and it must reach them all but the row labels. Prose that happens to lie over
+/// some of the columns does neither.
 fn header_row(line: &[Run], columns: &[(f64, f64)]) -> Option<Vec<String>> {
-    if is_caption(line) {
+    if is_caption(line) || (line.len() == 1 && ends_sentence(line)) {
         return None;
     }
     let mut row = vec![String::new(); columns.len()];
     let mut filled = 0;
+    let mut spread = false;
     for run in line {
         let under: Vec<usize> = (0..columns.len())
             .filter(|&i| columns[i].0 < run.x + run.width && run.x < columns[i].1)
@@ -495,11 +506,13 @@ fn header_row(line: &[Run], columns: &[(f64, f64)]) -> Option<Vec<String>> {
                 row[*at] = word.to_string();
             }
             filled += under.len();
+            spread = true;
         } else {
             return None;
         }
     }
-    (filled >= 2 && filled * 2 >= columns.len()).then_some(row)
+    let enough = !spread || filled + 1 >= columns.len();
+    (enough && filled >= 2 && filled * 2 >= columns.len()).then_some(row)
 }
 
 fn page_tables(lines: &[Vec<Run>]) -> Vec<Found> {

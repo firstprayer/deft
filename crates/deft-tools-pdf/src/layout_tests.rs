@@ -203,3 +203,27 @@ fn authors_are_not_a_table() {
     ];
     assert!(page_tables(&lines).is_empty());
 }
+
+fn prose_above_table(above: &str, x: f64) -> Vec<Vec<String>> {
+    let lines = vec![
+        line(700.0, &[(x, above)]),
+        line(680.0, &[(80.0, "Item"), (140.0, "Unit"), (200.0, "Price")]),
+        line(666.0, &[(80.0, "Pen"), (140.0, "Box"), (200.0, "4")]),
+        line(652.0, &[(80.0, "Ink"), (140.0, "Pack"), (200.0, "9")]),
+    ];
+    page_tables(&lines).remove(0).rows
+}
+
+#[test]
+fn a_sentence_above_a_table_stays_out_of_it() {
+    // It lies over two of the three columns, with as many words.
+    assert_eq!(prose_above_table("Costs follow here.", 70.0)[0][0], "Item");
+    assert_eq!(prose_above_table("Costs follow", 70.0)[0][0], "Item");
+    assert_eq!(prose_above_table("The costs:", 70.0)[0][0], "Item");
+}
+
+#[test]
+fn an_abbreviated_header_is_not_a_sentence() {
+    let line = line(700.0, &[(80.0, "Model Params. Acc.")]);
+    assert!(!ends_sentence(&line));
+}
