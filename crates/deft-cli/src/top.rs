@@ -454,16 +454,29 @@ pub fn plugins() -> Vec<String> {
         };
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
-            if let Some(n) = name.strip_prefix("deft-") {
-                let n = n.trim_end_matches(".exe").to_string();
-                if !n.is_empty() && !found.contains(&n) {
-                    found.push(n);
-                }
+            if let Some(n) = plugin_name(&name, cfg!(windows))
+                && !found.iter().any(|f| f == n)
+            {
+                found.push(n.to_string());
             }
         }
     }
     found.sort();
     found
+}
+
+/// The group a file on the PATH adds. Only programs count, so a Windows `.pdb`
+/// or `.d` file beside one does not, and neither does Cargo's `deft-<hash>` build
+/// output, which is on the PATH while tests run on Windows.
+fn plugin_name(file: &str, windows: bool) -> Option<&str> {
+    let name = file.strip_prefix("deft-")?;
+    let name = if windows {
+        name.strip_suffix(".exe")?
+    } else {
+        name
+    };
+    let hash = name.len() == 16 && name.bytes().all(|b| b.is_ascii_hexdigit());
+    (!name.is_empty() && !name.contains('.') && !hash).then_some(name)
 }
 
 pub fn plugin_path(name: &str) -> Option<PathBuf> {
@@ -488,4 +501,21 @@ pub fn run_plugin(path: &Path, args: &[String]) -> Result<Outcome> {
         stderr: out.stderr,
         code: out.status.code().unwrap_or(1),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::plugin_name;
+
+    #[test]
+    fn only_programs_are_plugins() {
+        assert_eq!(plugin_name("deft-audio2", false), Some("audio2"));
+        assert_eq!(plugin_name("deft-audio2.exe", true), Some("audio2"));
+        assert_eq!(plugin_name("deft-audio2.pdb", true), None);
+        assert_eq!(plugin_name("deft-audio2.d", false), None);
+        assert_eq!(plugin_name("deft-audio2", true), None);
+        assert_eq!(plugin_name("deft-1312041eab5a1b86.exe", true), None);
+        assert_eq!(plugin_name("deft-", false), None);
+        assert_eq!(plugin_name("other", false), None);
+    }
 }
