@@ -1,0 +1,19 @@
+name: Confusing help text
+description: Help or an error misled you or an agent
+labels: [help-text]
+body:
+  - type: textarea
+    id: text
+    attributes:
+      label: The text
+      description: The help or error text, and the command that printed it.
+      render: console
+    validations:
+      required: true
+  - type: textarea
+    id: wrong
+    attributes:
+      label: What went wrong
+      description: What you or the agent understood, and what happened next.
+    validations:
+      required: true

@@ -1,0 +1,15 @@
+---
+source: crates/deft-cli/../../tests/unit/help.rs
+expression: "help::group(g.name)"
+---
+deft doc - commands (input -> output)
+  info       doc -> report  Title, author, words, headings, tables, images
+  from-html  html -> docx   Convert the content to a Word document
+  from-md    md -> docx     Write a Word document with headings, lists, tables, images
+  from-pdf   pdf -> docx    Editable Word file, layout not kept [beta]
+  replace    docx -> docx   Find and replace text in Word, keeping the formatting
+  to-html    doc -> html    Convert to a web page
+  to-md      doc -> md      Convert to Markdown, keeping headings, lists and tables
+  to-pdf     doc -> pdf     Typeset as PDF, content not layout [beta]
+  to-text    doc -> txt     Extract plain text
+More: deft doc <command> --help

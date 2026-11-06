@@ -1,0 +1,30 @@
+use deft_core::prelude::*;
+
+pub static GROUP: Group = Group {
+    name: "sheet",
+    summary: "Excel/CSV/ODS tables: filter, sort, join, pivot, convert",
+    aliases: &["excel", "xlsx", "csv", "table", "spreadsheet"],
+    synonyms: &[
+        ("range", "extract"),
+        ("markdown", "to-md"),
+        ("where", "filter"),
+        ("sql", "query"),
+        ("sqlite", "query"),
+        ("grep", "filter"),
+        ("order", "sort"),
+        ("unique", "dedupe"),
+        ("uniq", "dedupe"),
+        ("distinct", "dedupe"),
+        ("duplicates", "dedupe"),
+        ("vlookup", "join"),
+        ("lookup", "join"),
+        ("crosstab", "pivot"),
+        ("columns", "select"),
+        ("cut", "select"),
+        ("aggregate", "group"),
+        ("groupby", "group"),
+        ("describe", "stats"),
+        ("summary", "stats"),
+    ],
+    order: 45,
+};

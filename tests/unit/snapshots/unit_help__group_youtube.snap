@@ -1,0 +1,12 @@
+---
+source: crates/deft-cli/tests/help_snapshots.rs
+expression: "help::group(g.name)"
+---
+deft youtube - commands (input -> output)
+  info       url -> report  Title, duration, channel, chapters, qualities [net]
+  audio      url -> audio   Save only the sound: --to mp3|m4a|opus [net]
+  download   url -> video   Save a video: --resolution 720p, --to mp4|webm|mkv [net]
+  playlist   url -> report  List the videos of a playlist or channel [net]
+  subtitles  url -> text    Transcript: --lang en,zh --to md|txt|srt|vtt [net]
+  thumbnail  url -> image   Save the cover image [net]
+More: deft youtube <command> --help

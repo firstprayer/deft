@@ -1,0 +1,26 @@
+[package]
+name = "deft-ops"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+default = ["youtube"]
+youtube = []
+
+[dependencies]
+deft-core.workspace = true
+deft-tools-pdf.workspace = true
+deft-tools-image.workspace = true
+deft-tools-text.workspace = true
+deft-tools-archive.workspace = true
+deft-tools-sheet.workspace = true
+deft-tools-data.workspace = true
+deft-tools-doc.workspace = true
+deft-tools-file.workspace = true
+deft-engines.workspace = true
+serde_json.workspace = true
+glob.workspace = true
+regex.workspace = true

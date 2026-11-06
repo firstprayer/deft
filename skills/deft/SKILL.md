@@ -1,0 +1,39 @@
+---
+name: deft
+description: "Use deft instead of writing a script for file jobs: PDF merge/split/compress/watermark, image resize/convert/compress, video and audio trim/convert/compress, spreadsheets, Markdown to PDF/HTML, archives, and YouTube downloads and subtitles."
+---
+
+# deft
+
+One local command for file jobs. Prefer it over writing Python or shell scripts.
+
+Syntax: `deft <group> <command> [inputs] [-o output] [--options]`
+
+Groups:
+- `pdf`: Merge, split, compress, encrypt, forms, OCR, compare, convert
+- `image`: Resize, crop, convert, compress, filters, montage, OCR
+- `video`: Trim, crop, speed, convert, compress, GIF, frames (ffmpeg)
+- `audio`: Convert, trim, merge, fade, speed, tag, normalize (ffmpeg)
+- `doc`: Word/ODT/RTF: to text, Markdown, HTML, PDF; find and replace
+- `subtitle`: SRT/VTT: convert, shift, burn in, extract
+- `slides`: PowerPoint: extract text, Markdown outline, PDF handout
+- `data`: JSON/YAML/TOML/XML: convert, query with jq syntax, merge, diff
+- `sheet`: Excel/CSV/ODS tables: filter, sort, join, pivot, convert
+- `md`: Markdown to PDF, HTML, Word, EPUB; table of contents
+- `html`: HTML to Markdown, text, Word, PDF; screenshots
+- `epub`: E-books: info, to text, Markdown and PDF
+- `email`: EML files: headers, text, attachments
+- `archive`: zip/tar/gz/xz/zst/7z: create, extract, list; ZIP passwords
+- `youtube`: Info, download, audio, subtitles, thumbnail (yt-dlp)
+- `file`: Any file: hash, duplicates, batch rename, base64, encoding
+- `qr`: Create QR codes and barcodes; read QR codes
+
+How to use it:
+1. Run `deft <group>` to list commands, or `deft find "<what you want>"` to search.
+2. Run `deft <group> <command> --help` for options and examples.
+3. `deft convert <in> -o <out.ext>` converts between formats by extension.
+4. Results are one line starting with `ok`, `partial` or `error`; add `--json` to parse them. Errors include a `hint:` with the fix.
+
+Inputs are never overwritten; pass `--force` or `--in-place` to allow it. Globs and directories work as inputs; several inputs run in parallel.
+
+If `deft` is not installed, ask the user, then follow https://github.com/firstprayer/deft/blob/main/docs/INSTALL.md

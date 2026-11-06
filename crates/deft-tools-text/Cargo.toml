@@ -1,0 +1,16 @@
+[package]
+name = "deft-tools-text"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+deft-core.workspace = true
+pulldown-cmark.workspace = true
+typst.workspace = true
+typst-pdf.workspace = true
+typst-kit.workspace = true
+typst-layout.workspace = true
+deft-tools-image.workspace = true

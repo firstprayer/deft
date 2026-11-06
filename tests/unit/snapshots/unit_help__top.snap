@@ -1,0 +1,32 @@
+---
+source: crates/deft-cli/../../tests/unit/help.rs
+expression: "help::top()"
+---
+deft 0.1.0 - local file toolkit. Usage: deft <group> <command> [inputs] [-o output]
+
+Groups:
+  pdf      Merge, split, compress, encrypt, forms, OCR, compare, convert
+  image    Resize, crop, convert, compress, filters, montage, OCR
+  video    Trim, crop, speed, convert, compress, GIF, frames (ffmpeg)
+  audio    Convert, trim, merge, fade, speed, tag, normalize (ffmpeg)
+  doc      Word/ODT/RTF: to text, Markdown, HTML, PDF; find and replace
+  subtitle SRT/VTT: convert, shift, burn in, extract
+  slides   PowerPoint: extract text, Markdown outline, PDF handout
+  data     JSON/YAML/TOML/XML: convert, query with jq syntax, merge, diff
+  sheet    Excel/CSV/ODS tables: filter, sort, join, pivot, convert
+  md       Markdown to PDF, HTML, Word, EPUB; table of contents
+  html     HTML to Markdown, text, Word, PDF; screenshots
+  epub     E-books: info, to text, Markdown and PDF
+  email    EML files: headers, text, attachments
+  archive  zip/tar/gz/xz/zst/7z: create, extract, list; ZIP passwords
+  youtube  Info, download, audio, subtitles, thumbnail (yt-dlp)
+  file     Any file: hash, duplicates, batch rename, base64, encoding
+  qr       Create QR codes and barcodes; read QR codes
+
+Any file:
+  convert  <in>... -o <out>   Any-to-any by extension, e.g. deft convert a.png -o a.pdf
+  info     <file>...          Type, size, pages, dimensions, duration
+  find     <words>            Search commands by intent
+
+Next: deft <group> | deft <group> <command> --help | deft help common
+Other: schema, engine, skill, doctor. Results are one line; add --json for structure.

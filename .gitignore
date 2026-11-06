@@ -1,0 +1,8 @@
+target/
+*.deft-tmp
+/review/
+/catalog/
+/evals/data/cache/
+/evals/results/*/transcripts/
+/evals/results/*/artifacts/
+dist/

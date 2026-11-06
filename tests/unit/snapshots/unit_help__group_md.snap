@@ -1,0 +1,15 @@
+---
+source: crates/deft-cli/../../tests/unit/help.rs
+expression: "help::group(g.name)"
+---
+deft md - commands (input -> output)
+  from-docx  doc -> md      Convert to Markdown, keeping headings, lists and tables
+  from-html  html -> md     Convert to Markdown; scripts and styles are dropped
+  from-pdf   pdf -> md      Text as Markdown paragraphs [beta]
+  to-docx    md -> docx     Write a Word document with headings, lists, tables, images
+  to-epub    md... -> epub  Make an e-book; each top-level heading starts a chapter
+  to-html    md -> html     Render to a styled HTML page, or --fragment
+  to-pdf     md -> pdf      Typeset Markdown as PDF
+  to-pptx    md -> pptx     Make a deck: each heading or --- starts a slide [beta]
+  toc        md -> md       Insert a table of contents from the headings
+More: deft md <command> --help

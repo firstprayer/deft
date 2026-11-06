@@ -1,0 +1,12 @@
+---
+source: crates/deft-cli/../../tests/unit/help.rs
+expression: "help::group(g.name)"
+---
+deft data - commands (input -> output)
+  convert   data -> data       Change format: --to json|yaml|toml|xml|jsonl
+  diff      data... -> report  Compare two documents by structure, across formats
+  format    data -> data       Pretty-print or minify: --compact, --sort-keys
+  merge     data... -> data    Deep-merge documents; later files win
+  query     data -> data       Query or edit with jq syntax: --expr '.items[].name'
+  validate  data -> report     Check syntax, or a JSON Schema with --schema
+More: deft data <command> --help

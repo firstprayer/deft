@@ -1,0 +1,19 @@
+[package]
+name = "deft-tools-data"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+deft-core.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+toml.workspace = true
+roxmltree.workspace = true
+jaq-core.workspace = true
+jaq-std.workspace = true
+jaq-json.workspace = true
+boon.workspace = true
+serde.workspace = true

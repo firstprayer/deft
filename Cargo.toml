@@ -1,0 +1,220 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "xtask"]
+default-members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+license = "LicenseRef-PolyForm-Shield-1.0.0"
+repository = "https://github.com/firstprayer/deft"
+
+[workspace.dependencies]
+deft-core = { path = "crates/deft-core" }
+deft-tools-pdf = { path = "crates/deft-tools-pdf" }
+deft-tools-image = { path = "crates/deft-tools-image" }
+deft-tools-text = { path = "crates/deft-tools-text" }
+deft-tools-archive = { path = "crates/deft-tools-archive" }
+deft-tools-sheet = { path = "crates/deft-tools-sheet" }
+deft-tools-data = { path = "crates/deft-tools-data" }
+deft-tools-doc = { path = "crates/deft-tools-doc" }
+deft-tools-file = { path = "crates/deft-tools-file" }
+deft-engines = { path = "crates/deft-engines" }
+deft-ops = { path = "crates/deft-ops", default-features = false }
+deft-testkit = { path = "crates/deft-testkit" }
+# Versions pinned to releases at least two weeks old (checked 2026-11-04).
+lopdf = { version = "=0.46.0", default-features = false }
+hayro = "=0.8.0"
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp", "tiff", "bmp", "ico", "avif", "rayon"] }
+fast_image_resize = { version = "6.1.0", features = ["image"] }
+oxipng = { version = "10.2.1", default-features = false, features = ["parallel"] }
+resvg = "=0.48.1"
+pulldown-cmark = { version = "=0.13.4", default-features = false, features = ["html"] }
+typst = "0.15.1"
+typst-pdf = "0.15.1"
+typst-layout = "0.15.1"
+typst-assets = { version = "0.15.1", features = ["fonts"] }
+typst-kit = { version = "0.15.1", default-features = false, features = ["scan-fonts"] }
+zip = { version = "=8.6.0", default-features = false, features = ["deflate", "aes-crypto"] }
+tar = "0.4.46"
+flate2 = "1.1.10"
+bzip2 = "=0.6.1"
+lzma-rust2 = { version = "=0.21.0", default-features = false, features = ["std", "xz", "encoder"] }
+ruzstd = "=0.9.0"
+sevenz-rust2 = { version = "=0.23.0", default-features = false, features = ["util", "compress", "bzip2", "aes256"] }
+calamine = "=0.37.0"
+rust_xlsxwriter = "=0.99.1"
+csv = "1.4.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
+glob = "0.3.4"
+tempfile = "3.27.0"
+sha2 = "0.11.1"
+ureq = "=3.4.2"
+jaq-core = "=3.1.2"
+jaq-std = "=3.0.4"
+jaq-json = { version = "=2.0.3", features = ["serde"] }
+serde_yaml = "=0.9.34"
+toml = "=0.8.23"
+roxmltree = "=0.21.2"
+regex = "1.13.1"
+encoding_rs = "=0.8.44"
+chardetng = "=1.0.0"
+md-5 = "=0.11.0"
+sha1 = "=0.11.0"
+blake3 = { version = "=1.8.7", features = ["pure"] }
+crc32fast = "=1.5.4"
+base64 = "=0.22.1"
+qrcode = { version = "=0.14.1", default-features = false, features = ["svg"] }
+rqrr = "=0.11.0"
+barcoders = "=2.0.0"
+htmd = "=0.5.5"
+similar = "=2.7.0"
+mailparse = "=0.17.0"
+boon = "=0.6.1"
+getrandom = "=0.3.4"
+kamadak-exif = "=0.6.1"
+insta = "1.49.0"
+proptest = "1.12.0"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"
+
+[profile.dev.package."*"]
+opt-level = 2
+
+# Typesetting and document parsing have plenty of time in their budgets, so they
+# are built for size. Together these keep the binary under its 52 MB budget.
+# Leave the hot paths out: rendering (hayro), PNG (oxipng) and AVIF (rav1e). Do
+# not add typst, typst-kit, typst-utils, comemo or deftcli: that links a second
+# copy of the bundled fonts.
+[profile.release.package.typst-library]
+opt-level = "z"
+[profile.release.package.typst-layout]
+opt-level = "z"
+[profile.release.package.typst-eval]
+opt-level = "z"
+[profile.release.package.typst-realize]
+opt-level = "z"
+[profile.release.package.typst-html]
+opt-level = "z"
+[profile.release.package.typst-pdf]
+opt-level = "z"
+[profile.release.package.typst-svg]
+opt-level = "z"
+[profile.release.package.typst-syntax]
+opt-level = "z"
+[profile.release.package.krilla]
+opt-level = "z"
+[profile.release.package.krilla-svg]
+opt-level = "z"
+[profile.release.package.hayagriva]
+opt-level = "z"
+[profile.release.package.citationberg]
+opt-level = "z"
+[profile.release.package.biblatex]
+opt-level = "z"
+[profile.release.package.syntect]
+opt-level = "z"
+[profile.release.package.wasmi]
+opt-level = "z"
+[profile.release.package.html5ever]
+opt-level = "z"
+[profile.release.package.jaq-core]
+opt-level = "z"
+[profile.release.package.jaq-std]
+opt-level = "z"
+[profile.release.package.boon]
+opt-level = "z"
+[profile.release.package.sevenz-rust2]
+opt-level = "z"
+[profile.release.package.rust_xlsxwriter]
+opt-level = "z"
+[profile.release.package.read-fonts]
+opt-level = "z"
+[profile.release.package.write-fonts]
+opt-level = "z"
+[profile.release.package.skrifa]
+opt-level = "z"
+[profile.release.package.subsetter]
+opt-level = "z"
+[profile.release.package.usvg]
+opt-level = "z"
+[profile.release.package.calamine]
+opt-level = "z"
+[profile.release.package.hayro-postscript]
+opt-level = "z"
+[profile.release.package.hayro-cmap]
+opt-level = "z"
+[profile.release.package.icu_collator]
+opt-level = "z"
+[profile.release.package.icu_segmenter]
+opt-level = "z"
+[profile.release.package.icu_properties]
+opt-level = "z"
+[profile.release.package.icu_locale]
+opt-level = "z"
+[profile.release.package.icu_locale_core]
+opt-level = "z"
+[profile.release.package.icu_normalizer]
+opt-level = "z"
+[profile.release.package.icu_provider]
+opt-level = "z"
+[profile.release.package.icu_collections]
+opt-level = "z"
+[profile.release.package.plist]
+opt-level = "z"
+[profile.release.package.quick-xml]
+opt-level = "z"
+[profile.release.package.pulldown-cmark]
+opt-level = "z"
+[profile.release.package.rqrr]
+opt-level = "z"
+[profile.release.package.htmd]
+opt-level = "z"
+[profile.release.package.markup5ever]
+opt-level = "z"
+[profile.release.package.web_atoms]
+opt-level = "z"
+[profile.release.package.xml5ever]
+opt-level = "z"
+[profile.release.package.lzma-rust2]
+opt-level = "z"
+[profile.release.package.ruzstd]
+opt-level = "z"
+[profile.release.package.jiff]
+opt-level = "z"
+[profile.release.package.jaq-json]
+opt-level = "z"
+[profile.release.package.chardetng]
+opt-level = "z"
+[profile.release.package.mailparse]
+opt-level = "z"
+[profile.release.package.deft-ops]
+opt-level = "z"
+[profile.release.package.deft-tools-data]
+opt-level = "z"
+[profile.release.package.deft-tools-doc]
+opt-level = "z"
+[profile.release.package.deft-tools-file]
+opt-level = "z"
+[profile.release.package.deft-tools-sheet]
+opt-level = "z"
+[profile.release.package.ecow]
+opt-level = "z"
+[profile.release.package.hifijson]
+opt-level = "z"
+[profile.release.package.unicode-normalization]
+opt-level = "z"
+[profile.release.package.rustybuzz]
+opt-level = "z"
+
+# Used for published builds: about 3 MB smaller, much slower to compile.
+[profile.dist]
+inherits = "release"
+lto = "fat"

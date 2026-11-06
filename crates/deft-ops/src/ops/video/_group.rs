@@ -1,0 +1,31 @@
+use deft_core::prelude::*;
+
+pub static GROUP: Group = Group {
+    name: "video",
+    summary: "Trim, crop, speed, convert, compress, GIF, frames (ffmpeg)",
+    aliases: &["mp4", "movie"],
+    synonyms: &[
+        ("gif", "to-gif"),
+        ("audio", "extract-audio"),
+        ("screenshot", "frames"),
+        ("poster", "thumbnail"),
+        ("loop", "repeat"),
+        ("slideshow", "from-images"),
+        ("timelapse", "speed"),
+        ("slow", "speed"),
+        ("slowmo", "speed"),
+        ("letterbox", "pad"),
+        ("music", "add-audio"),
+        ("soundtrack", "add-audio"),
+        ("segment", "chunk"),
+        ("hstack", "stack"),
+        ("vstack", "stack"),
+        ("backwards", "reverse"),
+        ("burn", "add-subtitles"),
+        ("subtitle", "add-subtitles"),
+        ("subtitles", "add-subtitles"),
+        ("stamp", "watermark"),
+        ("logo", "watermark"),
+    ],
+    order: 30,
+};

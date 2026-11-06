@@ -1,0 +1,18 @@
+[package]
+name = "deft-tools-pdf"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+deft-core.workspace = true
+lopdf.workspace = true
+hayro.workspace = true
+image.workspace = true
+flate2.workspace = true
+deft-tools-image.workspace = true
+similar.workspace = true
+getrandom.workspace = true
+serde_json.workspace = true

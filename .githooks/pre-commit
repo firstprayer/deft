@@ -1,0 +1,6 @@
+#!/bin/sh
+# Blocks commits that are not formatted. Enable with: cargo xtask setup
+if ! cargo xtask fmt --check >/dev/null 2>&1; then
+    echo "Code is not formatted. Run: cargo xtask fmt" >&2
+    exit 1
+fi

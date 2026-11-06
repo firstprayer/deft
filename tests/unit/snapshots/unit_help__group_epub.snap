@@ -1,0 +1,11 @@
+---
+source: crates/deft-cli/../../tests/unit/help.rs
+expression: "help::group(g.name)"
+---
+deft epub - commands (input -> output)
+  info     epub -> report  Title, author, language, chapters, images, words
+  from-md  md... -> epub   Make an e-book; each top-level heading starts a chapter
+  to-md    epub -> md      Convert the whole book to Markdown
+  to-pdf   epub -> pdf     Typeset the book as PDF
+  to-text  epub -> txt     Extract plain text in reading order
+More: deft epub <command> --help

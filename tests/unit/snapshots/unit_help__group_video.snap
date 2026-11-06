@@ -1,0 +1,34 @@
+---
+source: crates/deft-cli/../../tests/unit/help.rs
+expression: "help::group(g.name)"
+---
+deft video - commands (input -> output)
+  info               video -> report      Duration, size, frame rate, codecs
+  add-audio          video -> video       Replace or mix the soundtrack: --audio song.mp3
+  add-subtitles      video -> video       Add subtitles: burned into the picture, or --soft
+  chunk              video -> video...    Cut into equal parts: --length 10:00
+  compress           video -> mp4         Smaller file: --level, --target-size, --max-height
+  convert            video|gif -> video   Change container and codec: --to mp4|webm|mov|mkv
+  crop               video -> video       Cut a region: --box or --aspect 1:1
+  download           url -> video         Save a video: --resolution 720p, --to mp4|webm|mkv [net]
+  extract-audio      video -> audio       Save the soundtrack: --to mp3|m4a|wav|flac|ogg
+  extract-subtitles  video -> srt|vtt     Save an embedded subtitle track: --to srt|vtt
+  fade               video -> video       Fade: --fade-in 1 --fade-out 2
+  frames             video -> png|jpg...  Save frames as images: --fps 1 or --at 0:05,0:10
+  from-images        image... -> video    Slideshow: --duration, --fps, --audio
+  merge              video... -> mp4      Join videos; --transition fades
+  mute               video -> video       Remove the audio track
+  pad                video -> video       Fit into a frame with bars: --size 1080x1920
+  repeat             video -> video       Repeat a video: --count 3 plays it three times
+  resize             video -> video       Scale: --size 1280x, x720, 50%
+  reverse            video -> video       Play backwards, picture and sound
+  rotate             video -> video       Turn clockwise: --angle 90
+  speed              video -> video       Speed up or slow down: --factor 2 or --factor 0.5
+  split              video -> video       Cut out a part: --from 0:10 --to-time 0:25
+  stabilize          video -> video       Steady shaky footage, or --denoise grain
+  stack              video... -> mp4      Play side by side: --direction
+  strip              video -> video       Remove metadata; no re-encode
+  thumbnail          video -> image       One frame as an image, or --at a time
+  to-gif             video -> gif         Animated GIF: --fps, --size, --from, --to-time
+  watermark          video -> video       Add text or a logo: --text, --image, --position
+More: deft video <command> --help

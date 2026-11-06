@@ -1,0 +1,4 @@
+# One compiler, formatter and linter everywhere: local machines and CI.
+[toolchain]
+channel = "1.94.1"
+components = ["rustfmt", "clippy"]

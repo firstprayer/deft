@@ -1,0 +1,23 @@
+---
+source: crates/deft-cli/../../tests/unit/help.rs
+expression: "help::group(g.name)"
+---
+deft sheet - commands (input -> output)
+  info       sheet -> report           Sheet names, rows, columns
+  convert    sheet -> sheet            Change format: --to csv|xlsx|json
+  dedupe     sheet -> sheet            Drop repeated rows, by whole row or --columns
+  extract    sheet -> sheet            Take a sheet or range: --sheet, --range A1:D20
+  filter     sheet -> sheet            Keep matching rows: --where "age > 30 and city = 'Oslo'"
+  from-pdf   pdf -> sheet              Pull tables out by text position [beta]
+  group      sheet -> sheet            Group and total: --columns city --values sales --agg sum
+  join       sheet... -> sheet         Join two tables on a key: --on id --how left
+  merge      sheet... -> sheet         Stack tables; a shared header is kept once
+  pivot      sheet -> sheet            Pivot table: --rows city --columns year --values sales
+  query      sheet|sqlite... -> sheet  Run SQL over tables or a SQLite file: --sql 'select ...'
+  select     sheet -> sheet            Keep, reorder or --drop columns
+  sort       sheet -> sheet            Sort rows: --columns age,name --descending
+  split      sheet -> sheet...         Split up: --sheets, --columns city or --every 1000
+  stats      sheet -> report           Per-column counts, empties, min, max, mean, sum
+  to-md      sheet -> md               Markdown table (first row is the header)
+  transpose  sheet -> sheet            Swap rows and columns
+More: deft sheet <command> --help

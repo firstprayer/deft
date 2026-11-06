@@ -1,0 +1,4 @@
+[alias]
+xtask = "run --quiet --package xtask --"
+test-unit = "test --workspace --lib --bins --test unit_*"
+test-e2e = "test -p deftcli --test e2e_*"

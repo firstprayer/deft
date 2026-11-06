@@ -1,0 +1,39 @@
+---
+source: crates/deft-cli/../../tests/unit/help.rs
+expression: "help::group(g.name)"
+---
+deft pdf - commands (input -> output)
+  info            pdf -> report      Pages, size, metadata, fonts, images
+  compare         pdf... -> report   Compare two PDFs: text and pixels
+  compress        pdf -> pdf         Make smaller: --level, --target-size 2MB
+  crop            pdf -> pdf         Trim pages: --margin, --box, --auto
+  decrypt         pdf -> pdf         Remove a password you know
+  delete          pdf -> pdf         Remove pages: --pages 2,5-7
+  encrypt         pdf -> pdf         Protect with a password (AES-256)
+  extract-images  pdf -> image...    Save embedded pictures, unchanged
+  fields          pdf -> report      List form fields and their values
+  fill            pdf -> pdf         Fill a form from JSON: --data values.json
+  flatten         pdf -> pdf         Bake forms and annotations into pages
+  from-images     image... -> pdf    One page per image
+  from-md         md -> pdf          Typeset Markdown as PDF
+  grayscale       pdf -> pdf         Remove colour, keeping text as text (Ghostscript)
+  merge           pdf... -> pdf      Join PDFs in the given order
+  meta            pdf -> pdf         Read metadata and bookmarks, or set --title --author
+  number          pdf -> pdf         Add page numbers: --format
+  ocr             pdf -> pdf|txt     Make a scan searchable
+  redact          pdf -> pdf         Black out for good: --box or --text
+  repair          pdf -> pdf         Rebuild a damaged PDF (Ghostscript)
+  resize          pdf -> pdf         Fit pages to --page-size a4
+  rotate          pdf -> pdf         Turn pages clockwise: --angle 90, --pages
+  search          pdf -> report      Find text: --text invoice
+  select          pdf -> pdf         Keep and reorder pages
+  split           pdf -> pdf...      Split: per page, --every N, --ranges
+  strip           pdf -> pdf         Remove metadata
+  to-docx         pdf -> docx        Editable Word file, layout not kept [beta]
+  to-images       pdf -> png|jpg...  Render pages: --dpi, --pages
+  to-md           pdf -> md          Text as Markdown paragraphs [beta]
+  to-pdfa         pdf -> pdf         Convert for archiving as PDF/A-2 (Ghostscript) [beta]
+  to-sheet        pdf -> sheet       Pull tables out by text position [beta]
+  to-text         pdf -> txt         Extract text
+  watermark       pdf -> pdf         Stamp text or an image on pages
+More: deft pdf <command> --help

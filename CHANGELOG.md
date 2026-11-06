@@ -1,0 +1,29 @@
+# Changelog
+
+Deft follows semantic versioning. Before 1.0, a minor version may change commands or options.
+
+## Unreleased: 0.1.0
+
+First version, not released yet. These notes are a draft for the release. See [docs/COMMANDS.md](docs/COMMANDS.md) for the full command list.
+
+### Added
+
+- Command groups: `pdf`, `image`, `video`, `audio`, `doc`, `subtitle`, `slides`, `data`, `sheet`, `md`, `html`, `epub`, `email`, `archive`, `youtube`, `file`, `qr`.
+- Top-level commands: `convert`, `info`, `find`, `schema`, `engine`, `skill`, `doctor`.
+- One-line results starting with `ok`, `partial` or `error`, and `--json` for structure.
+- Stable error codes, with a `hint:` when there is a concrete fix.
+- Three layers of help with token budgets enforced by tests, and `deft find` to search by intent.
+- A generated skill for Claude Code and Codex: `deft skill install --agent all`.
+- External plugins: a `deft-<group>` program on the PATH acts as a group.
+- Watermarks, page numbers and subtitles in any script, including Chinese.
+
+### Known limits
+
+- `video`, `audio` and `subtitle` burn-in need ffmpeg, which must be installed by hand. `youtube` needs yt-dlp.
+- WebP is written losslessly only.
+- PDF rendering uses pure-Rust hayro; quality on complex PDFs still needs checking.
+- macOS is the only platform regularly built. Linux and Windows are untested.
+
+### Measured
+
+On the 85 supported tasks of a 100-task benchmark, with Codex (gpt-6-luna, medium effort), counting the latest attempt: 85 solved with deft and 78 without, 27% fewer tokens, 57% less time, 3 failed commands against 70. Method and limits are in [the README](README.md#measured).

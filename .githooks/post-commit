@@ -1,0 +1,7 @@
+#!/bin/sh
+# Refreshes catalog/index.html after a commit, pull or checkout. It only runs in
+# a checkout that has already built xtask: a new worktree must not start a full
+# build, and only one refresh runs at a time, at low priority.
+[ -x target/debug/xtask ] || exit 0
+mkdir target/.catalog-lock 2>/dev/null || exit 0
+nohup sh -c 'nice -n 19 cargo --locked xtask catalog; rmdir target/.catalog-lock' >/dev/null 2>&1 &

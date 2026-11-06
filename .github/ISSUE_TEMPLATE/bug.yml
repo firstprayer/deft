@@ -1,0 +1,45 @@
+name: Bug report
+description: A command did the wrong thing
+labels: [bug]
+body:
+  - type: textarea
+    id: command
+    attributes:
+      label: Command and output
+      description: The exact command and everything it printed. Add --json if it helps.
+      render: console
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: deft version
+      description: Output of `deft version`
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: deft doctor
+      description: Output of `deft doctor`, and your operating system
+      render: console
+  - type: textarea
+    id: file
+    attributes:
+      label: Input file
+      description: Attach or link a file that reproduces this, if you can share one. Remove anything private first.
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Who ran it
+      options:
+        - A person
+        - Claude Code
+        - Codex
+        - Another agent

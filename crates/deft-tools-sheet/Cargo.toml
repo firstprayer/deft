@@ -1,0 +1,15 @@
+[package]
+name = "deft-tools-sheet"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+deft-core.workspace = true
+calamine.workspace = true
+rust_xlsxwriter.workspace = true
+csv.workspace = true
+serde_json.workspace = true
+regex.workspace = true

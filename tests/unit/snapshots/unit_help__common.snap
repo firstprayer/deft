@@ -1,0 +1,23 @@
+---
+source: crates/deft-cli/tests/help_snapshots.rs
+expression: "help::common()"
+---
+Options available on every command:
+  -o, --output <value>         Output file or directory; - writes to stdout
+  --force                      Overwrite an existing output
+  --dry-run                    Show what would happen; write nothing
+  --json                       Structured result (or set DEFT_JSON=1)
+  -q, --quiet                  No output on success
+  -j, --jobs <value>           Parallel jobs (default: CPU cores)
+  -r, --recursive              Descend into directories given as input
+  --in-place                   Replace the input file (atomically)
+  --stdin-format <value>       Format of stdin when it cannot be detected
+  --install-engines            Download missing engines (or DEFT_AUTO_INSTALL=1)
+  --offline                    Refuse all network access (or DEFT_OFFLINE=1)
+  --timeout <value>            Time limit for engine calls, e.g. 5m
+  --keep-metadata              Keep original metadata where supported
+  -h, --help                   Show help
+
+Inputs: files, globs (expanded by deft), directories, - for stdin.
+Outputs never overwrite inputs or existing files unless asked.
+Value syntax: deft help values. Error codes: deft help errors.

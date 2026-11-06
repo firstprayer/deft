@@ -1,0 +1,22 @@
+name: A job deft cannot do
+description: Your agent still writes a script for this
+labels: [job-request]
+body:
+  - type: textarea
+    id: job
+    attributes:
+      label: The job
+      description: Say it the way you would say it to an agent.
+      placeholder: Take every scanned PDF in this folder and make the text searchable.
+    validations:
+      required: true
+  - type: textarea
+    id: today
+    attributes:
+      label: What happens today
+      description: The script or tools the agent reaches for, and what goes wrong.
+  - type: textarea
+    id: sample
+    attributes:
+      label: Example input
+      description: A file or link. It may become a benchmark case, so share only what can be public.

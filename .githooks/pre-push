@@ -1,0 +1,4 @@
+#!/bin/sh
+# A push runs the full local check first.
+# Skip once with: git push --no-verify
+exec cargo xtask check

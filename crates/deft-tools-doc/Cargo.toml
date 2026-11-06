@@ -1,0 +1,16 @@
+[package]
+name = "deft-tools-doc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+deft-core.workspace = true
+zip.workspace = true
+roxmltree.workspace = true
+htmd.workspace = true
+pulldown-cmark.workspace = true
+regex.workspace = true
+mailparse.workspace = true

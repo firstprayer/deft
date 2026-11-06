@@ -1,0 +1,13 @@
+---
+source: crates/deft-cli/tests/help_snapshots.rs
+expression: "help::values()"
+---
+Value syntax shared by all commands:
+  <pages>  1-3,5,8- (8 to end), last, -2 (second to last), odd, even, all
+  <time>  90, 1:30, 01:02:03.5, 1m30s, 500ms
+  <times>  comma-separated times: 0:05,0:10,1m
+  <size>  1920x1080, 800x (width, keep ratio), x600 (height), 50%
+  <length>  10mm, 1cm, 0.5in, 36pt, 20px
+  <bytes>  500KB, 1.5MB, 2GB (1KB = 1024 bytes)
+  <color>  #ff0000, #f00, #ff000080 (with alpha), red, black, white, gray
+  <position>  top-left, top, top-right, left, center, right, bottom-left, bottom, bottom-right
