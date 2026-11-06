@@ -30,14 +30,15 @@ Merge, split, compress, encrypt, forms, OCR, compare, convert
 | `deft pdf delete` | Remove pages: --pages 2,5-7 |  | `deft pdf delete three-pages.pdf --pages 2 -o shorter.pdf` |
 | `deft pdf encrypt` | Protect with a password (AES-256) |  | `deft pdf encrypt report.pdf --new-password s3cret -o locked.pdf` |
 | `deft pdf extract-images` | Save embedded pictures, unchanged |  | `deft pdf extract-images photos.pdf -o pictures/` |
-| `deft pdf fields` | List form fields and their values |  | `deft pdf fields form.pdf --json` |
+| `deft pdf extract-sheets` | Save each table apart |  | `deft pdf extract-sheets tables.pdf -o out/` |
+| `deft pdf fields` | List form fields |  | `deft pdf fields form.pdf --json` |
 | `deft pdf fill` | Fill a form from JSON: --data values.json |  | `deft pdf fill form.pdf --data form-values.json -o filled.pdf` |
-| `deft pdf flatten` | Bake forms and annotations into pages |  | `deft pdf flatten form.pdf -o flat.pdf` |
+| `deft pdf flatten` | Bake forms into pages |  | `deft pdf flatten form.pdf -o flat.pdf` |
 | `deft pdf from-images` | One page per image |  | `deft image to-pdf photo-1.jpg photo-2.jpg -o album.pdf` |
 | `deft pdf from-md` | Typeset Markdown as PDF |  | `deft md to-pdf notes.md -o notes.pdf` |
-| `deft pdf grayscale` | Remove colour, keeping text as text (Ghostscript) | gs | `deft pdf grayscale photos.pdf -o gray.pdf` |
+| `deft pdf grayscale` | Remove colour (Ghostscript) | gs | `deft pdf grayscale photos.pdf -o gray.pdf` |
 | `deft pdf merge` | Join PDFs in the given order |  | `deft pdf merge report.pdf appendix.pdf -o all.pdf` |
-| `deft pdf meta` | Read metadata and bookmarks, or set --title --author |  | `deft pdf meta report.pdf --title 'Q3 report' --author Ada -o titled.pdf` |
+| `deft pdf meta` | Read or set metadata and bookmarks |  | `deft pdf meta report.pdf --title 'Q3 report' --author Ada -o titled.pdf` |
 | `deft pdf number` | Add page numbers: --format |  | `deft pdf number three-pages.pdf -o numbered.pdf` |
 | `deft pdf ocr` | Make a scan searchable | tesseract | `deft pdf ocr scan.pdf -o searchable.pdf` |
 | `deft pdf redact` | Black out for good: --box or --text |  | `deft pdf redact report.pdf --box 50,60,300,40 --pages 1 -o safe.pdf` |
@@ -51,8 +52,8 @@ Merge, split, compress, encrypt, forms, OCR, compare, convert
 | `deft pdf to-docx` | Editable Word file, layout not kept |  | `deft pdf to-docx report.pdf -o report.docx` |
 | `deft pdf to-images` | Render pages: --dpi, --pages |  | `deft pdf to-images three-pages.pdf -o pages/` |
 | `deft pdf to-md` | Text as Markdown paragraphs |  | `deft pdf to-md report.pdf -o report.md` |
-| `deft pdf to-pdfa` | Convert for archiving as PDF/A-2 (Ghostscript) | gs | `deft pdf to-pdfa report.pdf -o archive.pdf` |
-| `deft pdf to-sheet` | Pull tables out by text position |  | `deft pdf to-sheet report.pdf --to xlsx -o tables.xlsx` |
+| `deft pdf to-pdfa` | Archive as PDF/A-2 (Ghostscript) | gs | `deft pdf to-pdfa report.pdf -o archive.pdf` |
+| `deft pdf to-sheet` | All text as one table |  | `deft pdf to-sheet report.pdf --to xlsx -o tables.xlsx` |
 | `deft pdf to-text` | Extract text |  | `deft pdf to-text report.pdf -o report.txt` |
 | `deft pdf watermark` | Stamp text or an image on pages |  | `deft pdf watermark three-pages.pdf --text DRAFT -o draft.pdf` |
 
@@ -200,7 +201,7 @@ Excel/CSV/ODS tables: filter, sort, join, pivot, convert
 | `deft sheet dedupe` | Drop repeated rows, by whole row or --columns |  | `deft sheet dedupe people.csv -o unique.csv` |
 | `deft sheet extract` | Take a sheet or range: --sheet, --range A1:D20 |  | `deft sheet extract people.xlsx --range A1:B2 -o part.csv` |
 | `deft sheet filter` | Keep matching rows: --where "age > 30 and city = 'Oslo'" |  | `deft sheet filter people.csv --where 'age > 30' -o older.csv` |
-| `deft sheet from-pdf` | Pull tables out by text position |  | `deft pdf to-sheet report.pdf --to xlsx -o tables.xlsx` |
+| `deft sheet from-pdf` | All text as one table |  | `deft pdf to-sheet report.pdf --to xlsx -o tables.xlsx` |
 | `deft sheet group` | Group and total: --columns city --values sales --agg sum |  | `deft sheet group sales.csv --columns city --values amount --agg mean -o totals.csv` |
 | `deft sheet join` | Join two tables on a key: --on id --how left |  | `deft sheet join people.csv cities.csv --on name -o joined.csv` |
 | `deft sheet merge` | Stack tables; a shared header is kept once |  | `deft sheet merge people.csv people2.csv -o all.csv` |

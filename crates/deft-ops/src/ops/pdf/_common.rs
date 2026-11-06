@@ -55,3 +55,18 @@ pub fn text_image(
         h,
     ))
 }
+
+/// A cell read from a PDF, as a number where that loses nothing.
+pub fn table_cell(text: &str) -> deft_tools_sheet::Cell {
+    use deft_tools_sheet::Cell;
+    if text.is_empty() {
+        return Cell::Empty;
+    }
+    let clean = text.replace(',', "");
+    match clean.parse::<f64>() {
+        Ok(n) if !text.starts_with('0') || text.starts_with("0.") || text == "0" => {
+            Cell::Decimal(n, text.to_string())
+        }
+        _ => Cell::Text(text.to_string()),
+    }
+}

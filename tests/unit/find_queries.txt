@@ -79,3 +79,5 @@ ics to csv | calendar to-csv
 turn this spreadsheet into calendar events | calendar from-csv
 gpx to kml | gps convert
 how far was this ride | gps info
+extract all the tables from a pdf | pdf extract-sheets
+pdf has several tables, save each one | pdf extract-sheets

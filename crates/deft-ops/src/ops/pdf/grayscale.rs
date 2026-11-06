@@ -3,7 +3,7 @@ use deft_core::prelude::*;
 
 pub static OP: Op = Op {
     id: "pdf.grayscale",
-    summary: "Remove colour, keeping text as text (Ghostscript)",
+    summary: "Remove colour (Ghostscript)",
     input: Input::each(&[Format::Pdf], "pdf"),
     output: Output::one(&[Format::Pdf], "pdf"),
     params: &[PASSWORD],

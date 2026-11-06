@@ -3,7 +3,7 @@ use deft_core::prelude::*;
 
 pub static OP: Op = Op {
     id: "pdf.fields",
-    summary: "List form fields and their values",
+    summary: "List form fields",
     input: Input::each(&[Format::Pdf], "pdf"),
     output: Output::report(),
     params: &[PASSWORD],

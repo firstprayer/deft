@@ -1,12 +1,12 @@
-use super::_common::{PASSWORD, open, resolve};
+use super::_common::{PASSWORD, open, resolve, table_cell};
 use deft_core::prelude::*;
-use deft_tools_sheet::{Cell, Table};
+use deft_tools_sheet::Table;
 
 const OUT: &[Format] = &[Format::Csv, Format::Xlsx, Format::Json];
 
 pub static OP: Op = Op {
     id: "pdf.to-sheet",
-    summary: "Pull tables out by text position",
+    summary: "All text as one table",
     details: &[
         "Columns come from left edges that repeat down the page; check the result.",
         "Ruled and multi-line cells may split. Scans need pdf ocr first, and still may not work.",
@@ -37,19 +37,6 @@ pub static OP: Op = Op {
     ..Op::DEFAULT
 };
 
-fn cell(text: &str) -> Cell {
-    if text.is_empty() {
-        return Cell::Empty;
-    }
-    let clean = text.replace(',', "");
-    match clean.parse::<f64>() {
-        Ok(n) if !text.starts_with('0') || text.starts_with("0.") || text == "0" => {
-            Cell::Decimal(n, text.to_string())
-        }
-        _ => Cell::Text(text.to_string()),
-    }
-}
-
 fn run(job: &Job) -> Result<OpResult> {
     let doc = open(job.input(), job.params)?;
     let ids = deft_tools_pdf::page_ids(&doc);
@@ -57,7 +44,7 @@ fn run(job: &Job) -> Result<OpResult> {
     let mut rows = Vec::new();
     for &i in &indexes {
         for row in deft_tools_pdf::layout::table(&doc, ids[i]) {
-            rows.push(row.iter().map(|c| cell(c)).collect());
+            rows.push(row.iter().map(|c| table_cell(c)).collect());
         }
     }
     let table = Table {

@@ -3,7 +3,7 @@ use deft_core::prelude::*;
 
 pub static OP: Op = Op {
     id: "pdf.to-pdfa",
-    summary: "Convert for archiving as PDF/A-2 (Ghostscript)",
+    summary: "Archive as PDF/A-2 (Ghostscript)",
     details: &["Not validated: check with veraPDF when an archive demands strict conformance."],
     input: Input::each(&[Format::Pdf], "pdf"),
     output: Output::one(&[Format::Pdf], "pdf"),

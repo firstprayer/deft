@@ -2,6 +2,27 @@
 
 Deft follows semantic versioning. Before 1.0, a minor version may change commands or options.
 
+## Unreleased
+
+### Added
+
+- `contact` group: VCF address books to and from CSV.
+- `calendar` group: ICS calendars to and from CSV.
+- `gps` group: GPX and KML conversion, distance, time and climb.
+- `pdf extract-sheets`: each table in a PDF as its own CSV, or as a sheet in one XLSX.
+- `video frames --interval` and `--from`.
+- `deft find` says when no command does a job.
+
+### Changed
+
+- `video stabilize` uses two passes where ffmpeg has vidstab, which removes far more shake.
+- `video compress --target-size` uses two passes and the whole size budget.
+- YAML output quotes strings such as `yes`, `on` and dates, which older parsers misread.
+
+### Removed
+
+- The `archive` and `subtitle` groups, and `audio waveform`. Subtitles stay in `video add-subtitles` and `video extract-subtitles`.
+
 ## 0.1.0
 
 First version. See [docs/COMMANDS.md](docs/COMMANDS.md) for the full command list.

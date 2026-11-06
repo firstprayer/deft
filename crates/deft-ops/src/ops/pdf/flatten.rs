@@ -3,7 +3,7 @@ use deft_core::prelude::*;
 
 pub static OP: Op = Op {
     id: "pdf.flatten",
-    summary: "Bake forms and annotations into pages",
+    summary: "Bake forms into pages",
     details: &["Nothing can be edited afterwards. Links stay."],
     input: Input::each(&[Format::Pdf], "pdf"),
     output: Output::one(&[Format::Pdf], "pdf"),

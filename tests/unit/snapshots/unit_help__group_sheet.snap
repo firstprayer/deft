@@ -8,7 +8,7 @@ deft sheet - commands (input -> output)
   dedupe     sheet -> sheet            Drop repeated rows, by whole row or --columns
   extract    sheet -> sheet            Take a sheet or range: --sheet, --range A1:D20
   filter     sheet -> sheet            Keep matching rows: --where "age > 30 and city = 'Oslo'"
-  from-pdf   pdf -> sheet              Pull tables out by text position [beta]
+  from-pdf   pdf -> sheet              All text as one table [beta]
   group      sheet -> sheet            Group and total: --columns city --values sales --agg sum
   join       sheet... -> sheet         Join two tables on a key: --on id --how left
   merge      sheet... -> sheet         Stack tables; a shared header is kept once

@@ -151,10 +151,9 @@ fn rows(mut all: Vec<Run>) -> Vec<Vec<Run>> {
     rows
 }
 
-/// Rows of cells from a page. Column starts are the left edges that recur
-/// down the page, so plain paragraphs fall into the first column.
-pub fn table(doc: &Document, page: ObjectId) -> Vec<Vec<String>> {
-    let lines = rows(runs(doc, page));
+/// Left edges that recur down these lines, so plain paragraphs fall into the
+/// first column.
+fn column_starts(lines: &[Vec<Run>]) -> Vec<f64> {
     let mut starts: Vec<(f64, usize)> = Vec::new();
     for run in lines.iter().flatten() {
         match starts.iter_mut().find(|(x, _)| (*x - run.x).abs() < 6.0) {
@@ -172,6 +171,10 @@ pub fn table(doc: &Document, page: ObjectId) -> Vec<Vec<String>> {
     if columns.is_empty() {
         columns.push(0.0);
     }
+    columns
+}
+
+fn grid(lines: &[Vec<Run>], columns: &[f64]) -> Vec<Vec<String>> {
     lines
         .iter()
         .map(|row| {
@@ -186,6 +189,146 @@ pub fn table(doc: &Document, page: ObjectId) -> Vec<Vec<String>> {
             cells
         })
         .collect()
+}
+
+/// Rows of cells from a page, as one grid.
+pub fn table(doc: &Document, page: ObjectId) -> Vec<Vec<String>> {
+    let lines = rows(runs(doc, page));
+    grid(&lines, &column_starts(&lines))
+}
+
+/// A table found on a page, with the left edges of its columns.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Found {
+    pub columns: Vec<f64>,
+    pub rows: Vec<Vec<String>>,
+    /// Its last line is the last thing on the page, so it may go on overleaf.
+    pub at_end: bool,
+}
+
+/// Joins pieces of one phrase. Prose is often drawn in several pieces, and only a
+/// clear gap starts a new cell. Widths are estimated at half an em per character.
+fn cells(line: &[Run]) -> Vec<Run> {
+    let mut out: Vec<Run> = Vec::new();
+    for run in line {
+        match out.last_mut() {
+            Some(last)
+                if run.x - (last.x + last.text.chars().count() as f64 * last.size * 0.5)
+                    < last.size * 0.7 =>
+            {
+                last.text.push(' ');
+                last.text.push_str(&run.text);
+            }
+            _ => out.push(run.clone()),
+        }
+    }
+    out
+}
+
+/// Whether these lines read as a table: columns shared by most rows, and short
+/// cells. Two columns of prose line up too, but their cells are long.
+fn is_table(block: &[Vec<Run>], columns: &[f64]) -> bool {
+    if block.len() < 2 || columns.len() < 2 {
+        return false;
+    }
+    let all: Vec<&Run> = block.iter().flatten().collect();
+    let aligned = all
+        .iter()
+        .filter(|r| columns.iter().any(|c| (c - r.x).abs() < 6.0))
+        .count();
+    let long = all.iter().filter(|r| r.text.chars().count() > 40).count();
+    let letters: usize = all.iter().map(|r| r.text.chars().count()).sum();
+    // A font with no usable encoding decodes to replacement characters.
+    let garbled = all
+        .iter()
+        .flat_map(|r| r.text.chars())
+        .filter(|c| *c == '\u{FFFD}')
+        .count();
+    let full = block.iter().filter(|l| l.len() >= columns.len()).count();
+    aligned * 10 >= all.len() * 9
+        && long * 2 < all.len()
+        && full * 5 >= block.len() * 3
+        && letters <= all.len() * 32
+        && garbled * 10 < letters
+}
+
+/// Lines with several pieces of text, in unbroken runs. A single-piece line ends
+/// a block, and so does a gap much taller than the rows above it.
+fn blocks(lines: &[Vec<Run>]) -> Vec<(usize, usize)> {
+    let mut found = Vec::new();
+    let mut start = None;
+    let mut gap = f64::MAX;
+    for (i, line) in lines.iter().enumerate() {
+        let spread = i > 0 && lines[i - 1][0].y - line[0].y > gap * 1.8;
+        if let Some(s) = start
+            && (line.len() < 2 || spread)
+        {
+            found.push((s, i));
+            start = None;
+        }
+        if line.len() >= 2 && start.is_none() {
+            start = Some(i);
+            gap = f64::MAX;
+        } else if start.is_some_and(|s| s < i) {
+            let step = lines[i - 1][0].y - line[0].y;
+            gap = if gap == f64::MAX { step } else { gap.max(step) };
+        }
+    }
+    if let Some(s) = start {
+        found.push((s, lines.len()));
+    }
+    found
+}
+
+fn page_tables(lines: &[Vec<Run>]) -> Vec<Found> {
+    let mut out = Vec::new();
+    for (start, end) in blocks(lines) {
+        let block = &lines[start..end];
+        let columns = column_starts(block);
+        if is_table(block, &columns) {
+            let rows = grid(block, &columns);
+            out.push(Found {
+                columns,
+                rows,
+                at_end: end == lines.len(),
+            });
+        }
+    }
+    out
+}
+
+/// Each table on a page, kept apart. Unlike `table`, text outside tables is left out.
+pub fn tables(doc: &Document, page: ObjectId) -> Vec<Found> {
+    let lines: Vec<Vec<Run>> = rows(runs(doc, page)).iter().map(|l| cells(l)).collect();
+    page_tables(&lines)
+}
+
+/// Joins tables that carry on from one page to the next: the same columns, with
+/// the first ending the page. A repeated header is dropped.
+pub fn join_pages(pages: Vec<Vec<Found>>) -> Vec<Vec<Vec<String>>> {
+    let mut out: Vec<Found> = Vec::new();
+    for (n, page) in pages.into_iter().enumerate() {
+        for (i, mut table) in page.into_iter().enumerate() {
+            let same = |a: &Found| {
+                a.columns.len() == table.columns.len()
+                    && a.columns
+                        .iter()
+                        .zip(&table.columns)
+                        .all(|(x, y)| (x - y).abs() < 6.0)
+            };
+            match out.last_mut() {
+                Some(last) if n > 0 && i == 0 && last.at_end && same(last) => {
+                    if last.rows.first() == table.rows.first() {
+                        table.rows.remove(0);
+                    }
+                    last.rows.append(&mut table.rows);
+                    last.at_end = table.at_end;
+                }
+                _ => out.push(table),
+            }
+        }
+    }
+    out.into_iter().map(|t| t.rows).collect()
 }
 
 /// Regions, in points from the top-left of the page, of the runs holding `text`.
@@ -204,3 +347,7 @@ pub fn find(doc: &Document, page: ObjectId, text: &str) -> Vec<[f64; 4]> {
         })
         .collect()
 }
+
+#[cfg(test)]
+#[path = "layout_tests.rs"]
+mod tests;

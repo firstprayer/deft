@@ -4,7 +4,7 @@ use serde_json::Value as Json;
 
 pub static OP: Op = Op {
     id: "pdf.meta",
-    summary: "Read metadata and bookmarks, or set --title --author",
+    summary: "Read or set metadata and bookmarks",
     details: &["With no options it prints the fields. With options it writes a copy."],
     input: Input::each(&[Format::Pdf], "pdf"),
     output: Output::one(&[Format::Pdf], "pdf"),
