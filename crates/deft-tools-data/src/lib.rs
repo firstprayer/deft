@@ -5,7 +5,11 @@ use deft_core::error::{ErrorCode, Result, err};
 use deft_core::format::Format;
 use serde_json::{Map, Value, json};
 
+pub mod geo;
+pub mod ical;
+mod lines;
 mod query;
+pub mod vcard;
 mod xml;
 
 pub use query::query;
@@ -173,7 +177,7 @@ pub fn render(value: &Value, format: Format, style: Style) -> Result<(Vec<u8>, V
             }
             s
         }
-        Format::Yaml => serde_yaml::to_string(&v).map_err(|e| unable(&e))?,
+        Format::Yaml => to_yaml(&v).map_err(|e| unable(&e))?,
         Format::Toml => {
             if !v.is_object() {
                 return Err(err(
@@ -240,6 +244,62 @@ impl Change {
         }
         Value::Object(m)
     }
+}
+
+/// YAML 1.1 parsers such as PyYAML read `yes`, `on` and `2026-11-06` as a bool or a
+/// date. serde_yaml writes them bare, because they are plain strings in YAML 1.2.
+fn ambiguous_in_yaml(s: &str) -> bool {
+    const WORDS: &[&str] = &["y", "n", "yes", "no", "on", "off"];
+    let digits = |t: &str| !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit());
+    let date = s.len() >= 10
+        && s.is_char_boundary(10)
+        && digits(&s[..4])
+        && digits(&s[5..7])
+        && digits(&s[8..10])
+        && s.as_bytes()[4] == b'-'
+        && s.as_bytes()[7] == b'-';
+    let sexagesimal = s.contains(':') && s.split(':').all(digits);
+    WORDS.contains(&s.to_ascii_lowercase().as_str()) || date || sexagesimal
+}
+
+/// Stands in for each ambiguous string, so it can be quoted after writing.
+fn mark_ambiguous(v: &Value, found: &mut Vec<String>) -> Value {
+    let mut mark = |s: &str| {
+        if ambiguous_in_yaml(s) {
+            found.push(s.to_string());
+            format!("deft-yaml-quote-{}-end", found.len() - 1)
+        } else {
+            s.to_string()
+        }
+    };
+    match v {
+        Value::String(s) => Value::String(mark(s)),
+        Value::Array(a) => Value::Array(a.iter().map(|x| mark_ambiguous(x, found)).collect()),
+        Value::Object(o) => {
+            let mut out = Map::new();
+            for (k, x) in o {
+                let key = if ambiguous_in_yaml(k) {
+                    found.push(k.clone());
+                    format!("deft-yaml-quote-{}-end", found.len() - 1)
+                } else {
+                    k.clone()
+                };
+                out.insert(key, mark_ambiguous(x, found));
+            }
+            Value::Object(out)
+        }
+        other => other.clone(),
+    }
+}
+
+fn to_yaml(v: &Value) -> std::result::Result<String, serde_yaml::Error> {
+    let mut found = Vec::new();
+    let marked = mark_ambiguous(v, &mut found);
+    let mut text = serde_yaml::to_string(&marked)?;
+    for (n, s) in found.iter().enumerate().rev() {
+        text = text.replace(&format!("deft-yaml-quote-{n}-end"), &format!("'{s}'"));
+    }
+    Ok(text)
 }
 
 /// Structural differences, with paths in jq syntax such as `.a.b[2]`.

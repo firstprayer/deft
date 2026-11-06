@@ -71,6 +71,10 @@ formats! {
     Odp => "odp", "application/vnd.oasis.opendocument.presentation", "odp";
     Epub => "epub", "application/epub+zip", "epub";
     Eml => "eml", "message/rfc822", "eml";
+    Vcf => "vcf" | "vcard", "text/vcard", "vcf";
+    Ics => "ics" | "ical", "text/calendar", "ics";
+    Gpx => "gpx", "application/gpx+xml", "gpx";
+    Kml => "kml", "application/vnd.google-earth.kml+xml", "kml";
     Sqlite => "sqlite" | "db" | "sqlite3", "application/vnd.sqlite3", "sqlite";
     Md => "md" | "markdown" | "mdown", "text/markdown", "md";
     Html => "html" | "htm" | "xhtml", "text/html", "html";
@@ -131,7 +135,23 @@ impl Format {
         use Format::*;
         matches!(
             self,
-            Md | Html | Txt | Csv | Json | Jsonl | Yaml | Toml | Xml | Srt | Vtt | Ass | Svg | Eml
+            Md | Html
+                | Txt
+                | Csv
+                | Json
+                | Jsonl
+                | Yaml
+                | Toml
+                | Xml
+                | Srt
+                | Vtt
+                | Ass
+                | Svg
+                | Eml
+                | Vcf
+                | Ics
+                | Gpx
+                | Kml
         )
     }
 }

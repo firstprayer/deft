@@ -72,3 +72,10 @@ translate this pdf to french | -
 transcribe this audio | -
 sign a pdf | -
 speech to text | -
+vcf to csv | contact to-csv
+export my contacts to excel | contact to-csv
+csv to vcf | contact from-csv
+ics to csv | calendar to-csv
+turn this spreadsheet into calendar events | calendar from-csv
+gpx to kml | gps convert
+how far was this ride | gps info

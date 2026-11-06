@@ -1,0 +1,8 @@
+---
+source: crates/deft-cli/../../tests/unit/help.rs
+expression: "help::group(g.name)"
+---
+deft gps - commands (input -> output)
+  info     gpx|kml -> report       Distance, time, climb and point counts
+  convert  gpx|kml -> gpx|kml|csv  Change format: --to gpx|kml|csv
+More: deft gps <command> --help

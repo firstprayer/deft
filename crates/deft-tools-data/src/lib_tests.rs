@@ -93,3 +93,48 @@ fn json_schema() {
     );
     assert!(validate_schema(&json!({}), &json!({"type": "nope"})).is_err());
 }
+
+#[test]
+fn yaml_quotes_what_older_parsers_would_misread() {
+    let v = serde_json::json!({"on": true, "yes": "no", "date": "2026-11-06", "at": "1:30", "name": "deft"});
+    let (bytes, _) = render(&v, Format::Yaml, Style::default()).unwrap();
+    let text = String::from_utf8(bytes).unwrap();
+    assert!(text.contains("'on': true"), "{text}");
+    assert!(text.contains("'yes': 'no'"), "{text}");
+    assert!(text.contains("date: '2026-11-06'"), "{text}");
+    assert!(text.contains("at: '1:30'"), "{text}");
+    assert!(text.contains("name: deft"), "{text}");
+    assert_eq!(parse(text.as_bytes(), Format::Yaml).unwrap(), v);
+}
+
+#[test]
+fn vcards_read_folded_escaped_and_old_style_lines() {
+    let text = "BEGIN:VCARD\r\nVERSION:2.1\r\nN;CHARSET=UTF-8;ENCODING=QUOTED-PRINTABLE:=E5=BC=A0;=E4=B8=89;;;\r\nTEL;CELL:+1 555\r\nitem1.EMAIL:a@b.c\r\nNOTE:one\\, two\r\n  more\r\nEND:VCARD\r\n";
+    let c = &vcard::parse(text)[0];
+    assert_eq!(c.name, "三 张");
+    assert_eq!(c.phones, ["+1 555"]);
+    assert_eq!(c.emails, ["a@b.c"]);
+    assert_eq!(c.note, "one, two more");
+}
+
+#[test]
+fn vcards_survive_csv_and_back() {
+    let csv = b"Name,Company,Phone,Email\nAda Lovelace,Analytical,+1 555; +1 666,ada@x.io\n";
+    let contacts = vcard::from_csv(csv).unwrap();
+    assert_eq!(contacts[0].phones.len(), 2);
+    let back = vcard::parse(&vcard::write(&contacts));
+    assert_eq!(back, contacts);
+}
+
+#[test]
+fn events_keep_their_times_and_zones() {
+    let text = "BEGIN:VEVENT\nDTSTART;TZID=Europe/Oslo:20261106T090000\nDTEND;TZID=Europe/Oslo:20261106T103000\nSUMMARY:Review\\, Q4\nEND:VEVENT\nBEGIN:VEVENT\nDTSTART;VALUE=DATE:20261105\nSUMMARY:Holiday\nEND:VEVENT\n";
+    let events = ical::parse(text);
+    assert_eq!(events[0].summary, "Holiday");
+    assert_eq!(events[0].start, "2026-11-05");
+    assert_eq!(events[1].start, "2026-11-06 09:00");
+    assert_eq!(events[1].timezone, "Europe/Oslo");
+    assert_eq!(events[1].summary, "Review, Q4");
+    let back = ical::parse(&ical::write(&events).unwrap());
+    assert_eq!(back, events);
+}
