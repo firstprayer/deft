@@ -15,6 +15,12 @@ pub static OP: Op = Op {
             },
             "Frames per second",
         ),
+        param(
+            "interval",
+            Kind::Duration,
+            "Time between frames, such as 2 or 0:30",
+        ),
+        param("from", Kind::Duration, "Start time for --fps or --interval").default("0"),
         param("at", Kind::Times, "Exact times"),
         param("to", Kind::Choice(&["png", "jpg"]), "Image format").default("jpg"),
     ],
@@ -22,6 +28,7 @@ pub static OP: Op = Op {
     examples: &[
         "deft video frames clip.mp4 --at 0:01 -o shots/",
         "deft video frames clip.mp4 --fps 1 --to png -o frames/",
+        "deft video frames clip.mp4 --from 1 --interval 2 -o frames/",
     ],
     tags: &[
         "screenshot",
@@ -42,9 +49,32 @@ fn run(job: &Job) -> Result<OpResult> {
     let stem = job.input().stem();
     let src = input_path(job)?;
     let mut outputs = Vec::new();
-    match (p.opt_times("at"), p.opt_float("fps")) {
-        (Some(_), Some(_)) => return Err(err(ErrorCode::BadOption, "use --at or --fps, not both")),
-        (None, None) => return Err(err(ErrorCode::BadOption, "--at or --fps is required")),
+    let rate = match (p.opt_float("fps"), p.opt_seconds("interval")) {
+        (Some(_), Some(_)) => {
+            return Err(err(
+                ErrorCode::BadOption,
+                "use --fps or --interval, not both",
+            ));
+        }
+        (None, Some(gap)) if gap <= 0.0 => {
+            return Err(bad_value("interval", "must be more than 0"));
+        }
+        (None, Some(gap)) => Some(1.0 / gap),
+        (fps, None) => fps,
+    };
+    match (p.opt_times("at"), rate) {
+        (Some(_), Some(_)) => {
+            return Err(err(
+                ErrorCode::BadOption,
+                "use --at, or --fps or --interval, not both",
+            ));
+        }
+        (None, None) => {
+            return Err(err(
+                ErrorCode::BadOption,
+                "--at, --fps or --interval is required",
+            ));
+        }
         (Some(times), None) => {
             let length = duration(&probe(job, job.input(), OP.id)?);
             for (n, t) in times.iter().enumerate() {
@@ -75,7 +105,8 @@ fn run(job: &Job) -> Result<OpResult> {
             let dir = job.ctx.temp_path("frames");
             std::fs::create_dir_all(&dir)?;
             let pattern = dir.join(format!("{stem}-%04d.{}", format.ext()));
-            let mut args = strs(&["-i"]);
+            let from = p.opt_seconds("from").unwrap_or(0.0);
+            let mut args = vec!["-ss".to_string(), format!("{from}"), "-i".to_string()];
             args.push(src);
             args.extend([
                 "-vf".to_string(),

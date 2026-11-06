@@ -102,6 +102,11 @@ const CLOSED_SINCE_LAST_RUN: &[&str] = &[
     "video/crop-square",
 ];
 
+/// Cases removed since the last run. Their results are still part of the totals
+/// that run published, so they stay in until the agents run again; then empty
+/// this list.
+const REMOVED_SINCE_LAST_RUN: &[&str] = &["subtitle/count-lines", "video/burn-chinese-subtitles"];
+
 /// The last row of `evals/lift-history.jsonl`: the run the page publishes.
 fn published_run() -> Result<Value, String> {
     let path = crate::root().join("evals/lift-history.jsonl");
@@ -136,6 +141,15 @@ fn evals() -> Result<Evals, String> {
                 .or_default()
                 .add(with, without);
         }
+    }
+    for id in REMOVED_SINCE_LAST_RUN {
+        let result = |arm: &str| results.get(&format!("{id}|{arm}"));
+        let (Some(with), Some(without)) = (result(ARM), result(BASELINE)) else {
+            return Err(format!("removed case {id} has no result for both arms"));
+        };
+        let group = id.split('/').next().unwrap_or(id).to_string();
+        total.add(with, without);
+        groups.entry(group).or_default().add(with, without);
     }
     let mut picks = Vec::new();
     for id in PICKS {
