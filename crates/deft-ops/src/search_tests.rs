@@ -91,3 +91,27 @@ fn an_operation_is_listed_once() {
     ids.dedup();
     assert_eq!(ids.len(), hits.len());
 }
+
+#[test]
+fn a_job_no_command_knows_is_reported() {
+    let unknown = |q: &str| registry().unknown_job(q);
+    assert_eq!(unknown("translate pdf to french"), ["translate", "french"]);
+    assert_eq!(unknown("transcribe audio"), ["transcribe"]);
+}
+
+#[test]
+fn a_known_job_is_not_reported() {
+    for query in [
+        "shrink pdf",
+        "pdf",
+        "compress my holiday pdf",
+        "resize image",
+        "compres pdf",
+        "rezise image",
+        "把 销售.csv 转成 Excel",
+        "merge pdfs",
+        "png to jpg",
+    ] {
+        assert!(registry().unknown_job(query).is_empty(), "{query}");
+    }
+}

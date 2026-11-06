@@ -29,7 +29,7 @@ Groups:
 - `qr`: Create QR codes and barcodes; read QR codes
 
 How to use it:
-1. Run `deft <group>` to list commands, or `deft find "<what you want>"` to search.
+1. Run `deft <group>` to list commands, or `deft find "<what you want>"` to search. If it says `no command does this`, use another tool.
 2. Run `deft <group> <command> --help` for options and examples.
 3. `deft convert <in> -o <out.ext>` converts between formats by extension.
 4. Results are one line starting with `ok`, `partial` or `error`; add `--json` to parse them. Errors include a `hint:` with the fix.

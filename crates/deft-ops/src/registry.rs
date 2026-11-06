@@ -198,6 +198,11 @@ impl Registry {
         search::find(self, query)
     }
 
+    /// Words of a query that name a job no command knows. See `search`.
+    pub fn unknown_job(&self, query: &str) -> Vec<String> {
+        search::unknown_job(self, query)
+    }
+
     /// The search index as data, for pages that search without the binary.
     pub fn search_index(&self) -> serde_json::Value {
         search::export(self)

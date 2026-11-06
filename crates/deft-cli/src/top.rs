@@ -24,12 +24,13 @@ pub fn find(rest: &[String]) -> Result<Outcome> {
         );
     }
     let hits = registry().find(&query);
+    let unknown = registry().unknown_job(&query);
     if rest.iter().any(|a| a == "--json") {
         let list: Vec<_> =
             hits.iter().map(|(p, op, _)| json!({"command": format!("deft {p}"), "op": op.id, "summary": op.summary, "signature": op.signature()})).collect();
         return Ok(Outcome::text(format!(
             "{}\n",
-            json!({"v": 1, "ok": true, "matches": list})
+            json!({"v": 1, "ok": true, "matches": list, "unknown_words": unknown})
         )));
     }
     if hits.is_empty() {
@@ -44,6 +45,13 @@ pub fn find(rest: &[String]) -> Result<Outcome> {
         .max()
         .unwrap_or(0);
     let mut s = String::new();
+    if !unknown.is_empty() {
+        let _ = writeln!(
+            s,
+            "no command does this: nothing knows {:?}. Results below only share a file type.",
+            unknown.join(" ")
+        );
+    }
     for (path, op, _) in &hits {
         let _ = writeln!(s, "{path:<w$}  {:<sw$}  {}", op.signature(), op.summary);
     }
@@ -327,7 +335,7 @@ pub fn skill_text() -> String {
     }
     s.push_str("\nHow to use it:\n");
     s.push_str(
-        "1. Run `deft <group>` to list commands, or `deft find \"<what you want>\"` to search.\n",
+        "1. Run `deft <group>` to list commands, or `deft find \"<what you want>\"` to search. If it says `no command does this`, use another tool.\n",
     );
     s.push_str("2. Run `deft <group> <command> --help` for options and examples.\n");
     s.push_str("3. `deft convert <in> -o <out.ext>` converts between formats by extension.\n");

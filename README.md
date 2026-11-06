@@ -2,6 +2,8 @@
 
 **One command instead of a throwaway script.**
 
+[deftcli.com](https://deftcli.com)
+
 When an AI agent has a file job, it writes a script, debugs it, checks the output and throws the script away. Deft is one binary that turns those jobs into single commands: PDF, images, video, audio, subtitles, spreadsheets, Markdown, archives and YouTube. The agent spends fewer tokens and less time, and fails less often.
 
 ```console

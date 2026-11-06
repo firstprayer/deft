@@ -28,6 +28,22 @@ const ACCEPTS_INPUT: f32 = 1.5;
 const KEEP: u32 = 60;
 const MAX_HITS: usize = 5;
 
+/// How sure a spelling correction two letters away is. See `corrections`.
+const DOUBTFUL: f32 = 0.5;
+
+/// Words for a kind of file, which name no job.
+const FILE_WORDS: &[&str] = &[
+    "document",
+    "documents",
+    "file",
+    "files",
+    "photo",
+    "photos",
+    "picture",
+    "pictures",
+    "text",
+];
+
 /// Sentence words that say nothing about the job, on top of `STOP`.
 const FILLER: &[&str] = &[
     "all", "are", "as", "at", "be", "but", "by", "called", "can", "do", "how", "i", "is", "it",
@@ -170,7 +186,7 @@ impl Index {
                 found.push(term.clone());
             }
         }
-        let sure = if best <= 1 { 0.7 } else { 0.5 };
+        let sure = if best <= 1 { 0.7 } else { DOUBTFUL };
         found.into_iter().map(|t| (t, sure)).collect()
     }
 }
@@ -271,6 +287,46 @@ pub(super) fn export(reg: &Registry) -> Value {
         "keep": KEEP,
         "max_hits": MAX_HITS,
     })
+}
+
+/// Words that name the job when no command knows them. A query whose only known
+/// words are file types has found nothing for the job itself, however good its
+/// hits look: "translate pdf" matches every PDF command. Empty when hits can be
+/// trusted.
+pub(super) fn unknown_job(reg: &Registry, query: &str) -> Vec<String> {
+    let index = index(reg);
+    let job: Vec<String> = words(query)
+        .filter(|w| !STOP.contains(&w.as_str()) && !FILLER.contains(&w.as_str()))
+        .collect();
+    // The index is English, so it cannot tell what another language asks for.
+    if job.iter().any(|w| !w.is_ascii()) {
+        return vec![];
+    }
+    let names_a_type = |w: &str| {
+        reg.group(w).is_some()
+            || Format::from_name(&normalize(w)).is_some()
+            || FILE_WORDS.contains(&w)
+    };
+    // A guess two letters away says nothing: it reads "translate" as "transpose".
+    // Swapped letters are the exception, because "rezise" is plainly a typo.
+    let letters = |w: &str| {
+        let mut l: Vec<char> = w.chars().collect();
+        l.sort_unstable();
+        l
+    };
+    let spelled = |w: &str| {
+        let terms = index.terms(w);
+        terms
+            .iter()
+            .any(|t| t.1 > DOUBTFUL || letters(&t.0) == letters(w))
+    };
+    let (known, unknown): (Vec<_>, Vec<_>) =
+        job.into_iter().partition(|w| names_a_type(w) || spelled(w));
+    if known.iter().all(|w| names_a_type(w)) {
+        unknown
+    } else {
+        vec![]
+    }
 }
 
 /// Search commands by intent. Returns (path, op, score), best first.

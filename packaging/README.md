@@ -2,7 +2,7 @@
 
 Nothing here has been published, and no release exists. `build-release.sh` and `install.sh` have been run on macOS arm64 from local files, including a refused tampered archive. No other platform, and nothing against a real GitHub release, has been tested.
 
-Releases are built by hand today, with the plain scripts below.
+`.github/workflows/release.yml` builds the archives with the scripts here.
 
 | File | What it is |
 |---|---|
@@ -18,17 +18,12 @@ Run from the repository root.
 cargo xtask check                        # the gate
 cargo xtask notices                      # refresh third-party notices
 git tag v0.1.0
-
-packaging/build-release.sh               # host target, dist profile
-packaging/build-release.sh x86_64-apple-darwin
-# Linux needs a Linux machine or a cross toolchain with the musl target.
-
-gh release create v0.1.0 dist/* --draft --notes-file <notes>
+git push origin v0.1.0
 ```
 
-Test each archive on a clean machine before removing `--draft`. Nothing has been built or run for Linux or Windows yet.
+The tag runs `.github/workflows/release.yml`. It builds macOS and Linux archives, runs each packaged binary and leaves a draft release with the archives and `install.sh`. Run the workflow by hand to build without a release.
 
-Then copy `packaging/install.sh` to where the site serves it, fill the version and checksums into `homebrew/deft.rb`, and push that to the tap repository.
+Test each archive on a clean machine, then publish the draft. Fill the version and checksums into `homebrew/deft.rb`, and push that to the tap repository.
 
 ## Why not `homebrew/core`
 
