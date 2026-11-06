@@ -1,6 +1,6 @@
 //! Where text sits on a page, read from the content stream. It gives rows and
-//! columns for table extraction; widths are not computed, so a run's start is
-//! exact and its end is an estimate.
+//! columns for table extraction. Widths come from the font where it lists them,
+//! and otherwise are an estimate of half an em per character.
 
 use crate::num;
 use lopdf::{Document, Encoding, Object, ObjectId};
@@ -13,6 +13,7 @@ pub struct Run {
     pub y: f64,
     pub size: f64,
     pub text: String,
+    pub width: f64,
 }
 
 type Matrix = [f64; 6];
@@ -33,27 +34,108 @@ fn matrix(o: &[Object]) -> Option<Matrix> {
     <[f64; 6]>::try_from(v).ok()
 }
 
-fn decode(encoding: Option<&Encoding>, o: &Object, out: &mut String) {
-    match o {
-        Object::String(bytes, _) => match encoding {
-            Some(e) => out.push_str(&Document::decode_text(e, bytes).unwrap_or_default()),
-            None => out.push_str(&String::from_utf8_lossy(bytes)),
-        },
-        Object::Array(items) => {
-            for item in items {
-                match item {
-                    // A large negative kern is a gap between words.
-                    Object::Integer(_) | Object::Real(_) => {
-                        if num(item).is_some_and(|k| k < -200.0) && !out.ends_with(' ') {
-                            out.push(' ');
-                        }
-                    }
-                    other => decode(encoding, other, out),
+/// Glyph widths of a simple font, in thousandths of an em.
+#[derive(Default)]
+struct Widths {
+    first: i64,
+    glyphs: Vec<f64>,
+    /// Composite fonts spend two bytes on a glyph.
+    composite: bool,
+}
+
+impl Widths {
+    fn of(doc: &Document, font: &lopdf::Dictionary) -> Widths {
+        let resolve = |o: &Object| match o {
+            Object::Reference(id) => doc.get_object(*id).ok().cloned(),
+            other => Some(other.clone()),
+        };
+        let first = font
+            .get(b"FirstChar")
+            .ok()
+            .and_then(resolve)
+            .and_then(|o| o.as_i64().ok());
+        let glyphs = font.get(b"Widths").ok().and_then(resolve);
+        let glyphs = glyphs.as_ref().and_then(|o| o.as_array().ok());
+        Widths {
+            composite: font
+                .get(b"Subtype")
+                .is_ok_and(|t| t.as_name().is_ok_and(|n| n == b"Type0")),
+            first: first.unwrap_or(0),
+            glyphs: glyphs
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|o| resolve(o).as_ref().and_then(num))
+                        .collect()
+                })
+                .unwrap_or_default(),
+        }
+    }
+
+    /// The advance of these bytes, in ems.
+    fn advance(&self, bytes: &[u8]) -> f64 {
+        if self.composite {
+            return bytes.len() as f64 * 0.25;
+        }
+        if self.glyphs.is_empty() {
+            return bytes.len() as f64 * 0.5;
+        }
+        let glyph = |b: &u8| {
+            let at = i64::from(*b) - self.first;
+            usize::try_from(at)
+                .ok()
+                .and_then(|i| self.glyphs.get(i))
+                .copied()
+        };
+        bytes.iter().map(|b| glyph(b).unwrap_or(500.0)).sum::<f64>() / 1000.0
+    }
+}
+
+/// A kern this wide, in thousandths of an em, is a gap between words.
+const WORD_GAP: f64 = 200.0;
+/// One this wide separates cells: LaTeX writes a whole table row in one operator.
+const CELL_GAP: f64 = 700.0;
+
+/// Text drawn by one operator, split at wide gaps, as (start, text, width) in ems,
+/// and the total advance.
+fn pieces(
+    encoding: Option<&Encoding>,
+    widths: Option<&Widths>,
+    o: &Object,
+) -> (Vec<(f64, String, f64)>, f64) {
+    let mut out = Vec::new();
+    let (mut x, mut start) = (0.0, 0.0);
+    let mut text = String::new();
+    let items = match o {
+        Object::Array(items) => items.as_slice(),
+        other => std::slice::from_ref(other),
+    };
+    for item in items {
+        match item {
+            Object::String(bytes, _) => {
+                match encoding {
+                    Some(e) => text.push_str(&Document::decode_text(e, bytes).unwrap_or_default()),
+                    None => text.push_str(&String::from_utf8_lossy(bytes)),
+                }
+                x += widths.map_or(bytes.len() as f64 * 0.5, |w| w.advance(bytes));
+            }
+            Object::Integer(_) | Object::Real(_) => {
+                let kern = num(item).unwrap_or(0.0);
+                if kern <= -CELL_GAP {
+                    out.push((start, std::mem::take(&mut text), x - start));
+                    x -= kern / 1000.0;
+                    start = x;
+                    continue;
+                }
+                x -= kern / 1000.0;
+                if kern < -WORD_GAP && !text.ends_with(' ') {
+                    text.push(' ');
                 }
             }
+            _ => {}
         }
-        _ => {}
     }
+    out.push((start, text, x - start));
+    (out, x)
 }
 
 /// Every run of text on a page, in drawing order.
@@ -65,6 +147,10 @@ pub fn runs(doc: &Document, page: ObjectId) -> Vec<Run> {
     let encodings: BTreeMap<Vec<u8>, Encoding> = fonts
         .iter()
         .filter_map(|(name, f)| Some((name.clone(), f.get_font_encoding(doc).ok()?)))
+        .collect();
+    let widths: BTreeMap<Vec<u8>, Widths> = fonts
+        .iter()
+        .map(|(name, f)| (name.clone(), Widths::of(doc, f)))
         .collect();
     let identity: Matrix = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
     let mut ctm = identity;
@@ -114,19 +200,24 @@ pub fn runs(doc: &Document, page: ObjectId) -> Vec<Run> {
                     line = multiply([1.0, 0.0, 0.0, 1.0, 0.0, -leading], line);
                     tm = line;
                 }
-                let mut text = String::new();
-                if let Some(last) = args.last() {
-                    decode(encodings.get(&font), last, &mut text);
+                let Some(last) = args.last() else {
+                    continue;
+                };
+                let (found, advance) = pieces(encodings.get(&font), widths.get(&font), last);
+                let m = multiply(tm, ctm);
+                let scale = size * m[0].abs().max(m[1].abs());
+                for (start, text, width) in found {
+                    if !text.trim().is_empty() {
+                        out.push(Run {
+                            x: m[4] + start * scale,
+                            y: m[5],
+                            size: size * m[3].abs().max(m[0].abs()),
+                            text: text.trim().to_string(),
+                            width: width * scale,
+                        });
+                    }
                 }
-                if !text.trim().is_empty() {
-                    let m = multiply(tm, ctm);
-                    out.push(Run {
-                        x: m[4],
-                        y: m[5],
-                        size: size * m[3].abs().max(m[0].abs()),
-                        text: text.trim().to_string(),
-                    });
-                }
+                tm = multiply([1.0, 0.0, 0.0, 1.0, advance * size, 0.0], tm);
             }
             _ => {}
         }
@@ -206,18 +297,15 @@ pub struct Found {
     pub at_end: bool,
 }
 
-/// Joins pieces of one phrase. Prose is often drawn in several pieces, and only a
-/// clear gap starts a new cell. Widths are estimated at half an em per character.
+/// Joins pieces of one phrase, and only a clear gap starts a new cell.
 fn cells(line: &[Run]) -> Vec<Run> {
     let mut out: Vec<Run> = Vec::new();
     for run in line {
         match out.last_mut() {
-            Some(last)
-                if run.x - (last.x + last.text.chars().count() as f64 * last.size * 0.5)
-                    < last.size * 0.7 =>
-            {
+            Some(last) if run.x - (last.x + last.width) < last.size * 0.7 => {
                 last.text.push(' ');
                 last.text.push_str(&run.text);
+                last.width = run.x + run.width - last.x;
             }
             _ => out.push(run.clone()),
         }
@@ -225,53 +313,48 @@ fn cells(line: &[Run]) -> Vec<Run> {
     out
 }
 
-/// Whether these lines read as a table: columns shared by most rows, and short
-/// cells. Two columns of prose line up too, but their cells are long.
-fn is_table(block: &[Vec<Run>], columns: &[f64]) -> bool {
-    if block.len() < 2 || columns.len() < 2 {
-        return false;
-    }
-    let all: Vec<&Run> = block.iter().flatten().collect();
-    let aligned = all
-        .iter()
-        .filter(|r| columns.iter().any(|c| (c - r.x).abs() < 6.0))
-        .count();
-    let long = all.iter().filter(|r| r.text.chars().count() > 40).count();
-    let letters: usize = all.iter().map(|r| r.text.chars().count()).sum();
-    // A font with no usable encoding decodes to replacement characters.
-    let garbled = all
-        .iter()
-        .flat_map(|r| r.text.chars())
-        .filter(|c| *c == '\u{FFFD}')
-        .count();
-    let full = block.iter().filter(|l| l.len() >= columns.len()).count();
-    aligned * 10 >= all.len() * 9
-        && long * 2 < all.len()
-        && full * 5 >= block.len() * 3
-        && letters <= all.len() * 32
-        && garbled * 10 < letters
+fn chars(line: &[Run]) -> usize {
+    line.iter().map(|r| r.text.chars().count()).sum()
 }
 
-/// Lines with several pieces of text, in unbroken runs. A single-piece line ends
-/// a block, and so does a gap much taller than the rows above it.
+/// Prose or a caption, which ends a table. A short line alone can be a group
+/// label inside one.
+fn is_text(line: &[Run]) -> bool {
+    let caption = line[0].text.starts_with("Table ") || line[0].text.starts_with("Figure ");
+    caption || (line.len() < 2 && chars(line) > 40) || (line.len() <= 3 && chars(line) > 70)
+}
+
+/// Unbroken stretches of lines that are not prose. A gap much taller than the
+/// rows so far ends one too.
 fn blocks(lines: &[Vec<Run>]) -> Vec<(usize, usize)> {
     let mut found = Vec::new();
     let mut start = None;
     let mut gap = f64::MAX;
     for (i, line) in lines.iter().enumerate() {
-        let spread = i > 0 && lines[i - 1][0].y - line[0].y > gap * 1.8;
+        let step = if i > 0 {
+            lines[i - 1][0].y - line[0].y
+        } else {
+            0.0
+        };
+        // A short line between rows is a group label only if the rows match.
+        let lone = line.len() < 2
+            && lines.get(i + 1).map(Vec::len) != lines.get(i.wrapping_sub(1)).map(Vec::len);
         if let Some(s) = start
-            && (line.len() < 2 || spread)
+            && (is_text(line) || lone || step > gap * 3.0)
         {
             found.push((s, i));
             start = None;
         }
-        if line.len() >= 2 && start.is_none() {
-            start = Some(i);
-            gap = f64::MAX;
-        } else if start.is_some_and(|s| s < i) {
-            let step = lines[i - 1][0].y - line[0].y;
-            gap = if gap == f64::MAX { step } else { gap.max(step) };
+        if is_text(line) || lone {
+            continue;
+        }
+        match start {
+            None => {
+                start = Some(i);
+                gap = f64::MAX;
+            }
+            Some(s) if s + 1 == i => gap = step,
+            Some(_) => gap = gap.max(step),
         }
     }
     if let Some(s) = start {
@@ -280,19 +363,113 @@ fn blocks(lines: &[Vec<Run>]) -> Vec<(usize, usize)> {
     found
 }
 
+/// The spans of the columns, from the rows with the usual number of cells. Rows
+/// with fewer cells have headers across columns, which would hide the gaps.
+fn spans(block: &[Vec<Run>]) -> Vec<(f64, f64)> {
+    let mut counts: BTreeMap<usize, usize> = BTreeMap::new();
+    for line in block.iter().filter(|l| l.len() >= 2) {
+        *counts.entry(line.len()).or_default() += 1;
+    }
+    let Some((&usual, _)) = counts.iter().max_by_key(|(n, c)| (**c, **n)) else {
+        return vec![];
+    };
+    let mut all: Vec<(f64, f64)> = block
+        .iter()
+        .filter(|l| l.len() == usual)
+        .flatten()
+        .map(|r| (r.x, r.x + r.width))
+        .collect();
+    all.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut merged: Vec<(f64, f64)> = Vec::new();
+    for (start, end) in all {
+        match merged.last_mut() {
+            Some(last) if start <= last.1 + 1.0 => last.1 = last.1.max(end),
+            _ => merged.push((start, end)),
+        }
+    }
+    merged
+}
+
+fn column_of(run: &Run, spans: &[(f64, f64)]) -> usize {
+    let middle = run.x + run.width / 2.0;
+    let distance = |s: &(f64, f64)| {
+        if middle < s.0 {
+            s.0 - middle
+        } else {
+            (middle - s.1).max(0.0)
+        }
+    };
+    (0..spans.len())
+        .min_by(|a, b| distance(&spans[*a]).total_cmp(&distance(&spans[*b])))
+        .unwrap_or(0)
+}
+
+/// A display equation: pieces of a formula, often with a number such as `(13)`.
+fn is_equation(block: &[Vec<Run>]) -> bool {
+    let numbered = |r: &Run| {
+        let inner = r.text.strip_prefix('(').and_then(|t| t.strip_suffix(')'));
+        inner.is_some_and(|t| !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit()))
+    };
+    let formula = |r: &Run| r.text.contains(['∑', '∫', '∏']);
+    block.iter().flatten().any(formula) || block.iter().any(|l| l.last().is_some_and(numbered))
+}
+
+/// Whether these lines read as a table: most rows fill the columns, and cells are
+/// short. Two columns of prose line up too, but their cells are long.
+fn is_table(block: &[Vec<Run>], spans: &[(f64, f64)]) -> bool {
+    if block.len() < 3 || spans.len() < 2 || is_equation(block) {
+        return false;
+    }
+    let all: Vec<&Run> = block.iter().flatten().collect();
+    let long = all.iter().filter(|r| r.text.chars().count() > 40).count();
+    let letters: usize = all.iter().map(|r| r.text.chars().count()).sum();
+    // A font with no usable encoding decodes to replacement characters.
+    let garbled = all
+        .iter()
+        .flat_map(|r| r.text.chars())
+        .filter(|c| *c == '\u{FFFD}')
+        .count();
+    let full = block.iter().filter(|l| l.len() == spans.len()).count();
+    long * 2 < all.len()
+        && full * 2 >= block.len()
+        && letters <= all.len() * 24
+        && garbled * 10 < letters
+}
+
 fn page_tables(lines: &[Vec<Run>]) -> Vec<Found> {
     let mut out = Vec::new();
     for (start, end) in blocks(lines) {
-        let block = &lines[start..end];
-        let columns = column_starts(block);
-        if is_table(block, &columns) {
-            let rows = grid(block, &columns);
-            out.push(Found {
-                columns,
-                rows,
-                at_end: end == lines.len(),
-            });
+        // A single cell at either end is a title or a note, not a row.
+        let mut block = &lines[start..end];
+        while block.first().is_some_and(|l| l.len() < 2) {
+            block = &block[1..];
         }
+        while block.last().is_some_and(|l| l.len() < 2) {
+            block = &block[..block.len() - 1];
+        }
+        let columns = spans(block);
+        if !is_table(block, &columns) {
+            continue;
+        }
+        let rows = block
+            .iter()
+            .map(|line| {
+                let mut row = vec![String::new(); columns.len()];
+                for run in line {
+                    let cell = &mut row[column_of(run, &columns)];
+                    if !cell.is_empty() {
+                        cell.push(' ');
+                    }
+                    cell.push_str(&run.text);
+                }
+                row
+            })
+            .collect();
+        out.push(Found {
+            columns: columns.iter().map(|c| c.0).collect(),
+            rows,
+            at_end: end == lines.len(),
+        });
     }
     out
 }
