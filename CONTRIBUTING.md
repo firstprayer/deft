@@ -21,6 +21,7 @@ The agreement is not published yet. Until it is, code contributions cannot be ac
 
 ```bash
 cargo xtask setup          # once per clone: enables the git hooks
+cargo xtask eval fetch     # once per clone: downloads the real test files, about 24 MB
 cargo xtask check          # the gate: fmt, clippy, unit, e2e, eval lint, generated files
 ```
 

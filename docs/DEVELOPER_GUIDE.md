@@ -52,4 +52,5 @@ Tools for people working on deft live in `xtask/`, not in the `deft` binary. Add
 
 ```bash
 cargo xtask setup               # once per clone: enables the git hooks
+cargo xtask eval fetch          # once per clone: downloads the real test files, about 24 MB
 ```
