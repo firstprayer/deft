@@ -19,7 +19,15 @@ pub static OP: Op = Op {
         "deft pdf to-text report.pdf -o report.txt",
         "deft pdf to-text three-pages.pdf --pages 2 -o -",
     ],
-    tags: &["extract text", "read", "ocr", "txt"],
+    tags: &[
+        "extract text",
+        "read",
+        "ocr",
+        "txt",
+        "get text",
+        "text out",
+        "read",
+    ],
     result: &["chars"],
     run,
     ..Op::DEFAULT

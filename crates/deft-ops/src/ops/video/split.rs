@@ -24,7 +24,10 @@ pub static OP: Op = Op {
         "deft video split clip.mp4 --from 0:01 --to-time 0:02 -o part.mp4",
         "deft video trim clip.mp4 --from 1 --fast -o tail.mp4",
     ],
-    tags: &["trim", "cut", "clip", "excerpt", "shorten"],
+    tags: &[
+        "trim", "cut", "clip", "excerpt", "shorten", "keep", "middle", "clip", "part", "trim",
+        "shorten",
+    ],
     suffix: Some("clip"),
     run,
     ..Op::DEFAULT

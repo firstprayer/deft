@@ -19,7 +19,15 @@ pub static OP: Op = Op {
     .default("90")],
     engines: FFMPEG,
     examples: &["deft video rotate clip.mp4 --angle 180 -o turned.mp4"],
-    tags: &["turn", "orientation", "portrait", "landscape"],
+    tags: &[
+        "turn",
+        "orientation",
+        "portrait",
+        "landscape",
+        "sideways",
+        "upside down",
+        "phone",
+    ],
     suffix: Some("rotated"),
     run,
     ..Op::DEFAULT

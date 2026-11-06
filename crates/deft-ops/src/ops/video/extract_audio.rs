@@ -25,7 +25,14 @@ pub static OP: Op = Op {
         "deft video extract-audio clip.mp4 -o sound.mp3",
         "deft audio from-video clip.mp4 --to wav -o sound.wav",
     ],
-    tags: &["soundtrack", "mp3", "rip audio", "video to audio"],
+    tags: &[
+        "soundtrack",
+        "mp3",
+        "rip audio",
+        "video to audio",
+        "get audio",
+        "audio out",
+    ],
     run,
     ..Op::DEFAULT
 };

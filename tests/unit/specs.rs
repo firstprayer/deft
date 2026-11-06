@@ -179,3 +179,31 @@ fn schemas_are_valid_and_conversions_resolve() {
         }
     }
 }
+
+/// `find_queries.txt`: what people type, against what they should get.
+#[test]
+fn find_answers_what_people_type() {
+    let reg = registry();
+    let mut missed = vec![];
+    for line in include_str!("find_queries.txt").lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let (query, want) = line.split_once('|').expect("query | command");
+        let (query, want) = (query.trim(), want.trim());
+        let hits = reg.find(query);
+        let found = if want == "-" {
+            !reg.unknown_job(query).is_empty()
+        } else {
+            let (group, command) = want.split_once(' ').expect("group command");
+            let op = reg.resolve(group, command).expect(want).op.id;
+            hits.iter().take(3).any(|h| h.1.id == op)
+        };
+        if !found {
+            let got: Vec<_> = hits.iter().take(3).map(|h| h.0.as_str()).collect();
+            missed.push(format!("{query}: wanted {want}, got {got:?}"));
+        }
+    }
+    assert!(missed.is_empty(), "{}", missed.join("\n"));
+}
