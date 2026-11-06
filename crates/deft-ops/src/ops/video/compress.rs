@@ -1,4 +1,4 @@
-use super::_common::{FFMPEG, VIDEO, duration, ffmpeg, input_path, probe, strs, temp_out};
+use super::_common::{FFMPEG, VIDEO, duration, ffmpeg, input_path, probe, stream, strs, temp_out};
 use deft_core::prelude::*;
 
 pub static OP: Op = Op {
@@ -37,67 +37,31 @@ fn run(job: &Job) -> Result<OpResult> {
     let p = job.params;
     let input = job.input();
     let out = temp_out(job, Format::Mp4);
-    let mut args = strs(&["-i"]);
-    args.push(input_path(job)?);
-    args.extend(strs(&[
-        "-c:v",
-        "libx264",
-        "-preset",
-        "medium",
-        "-pix_fmt",
-        "yuv420p",
-        "-c:a",
-        "aac",
-        "-movflags",
-        "+faststart",
-    ]));
-    if let Some(h) = p.opt_int("max-height") {
-        args.extend(["-vf".to_string(), format!("scale=-2:'min({h},ih)'")]);
-    }
+    let scale = p
+        .opt_int("max-height")
+        .map(|h| vec!["-vf".to_string(), format!("scale=-2:'min({h},ih)'")])
+        .unwrap_or_default();
+    let mut video = strs(&[
+        "-c:v", "libx264", "-preset", "medium", "-pix_fmt", "yuv420p",
+    ]);
+    video.extend(scale);
     match p.opt_bytes("target-size") {
-        Some(target) => {
-            let d = duration(&probe(job, input, OP.id)?).max(0.1);
-            let audio_kbps = 64.0;
-            let total_kbps = target as f64 * 8.0 / 1000.0 / d * 0.95;
-            let video_kbps = total_kbps - audio_kbps;
-            if video_kbps < 30.0 {
-                return Err(err(
-                    ErrorCode::TargetUnreachable,
-                    format!(
-                        "{} is too small for a {} video",
-                        format_bytes(target),
-                        format_duration(d)
-                    ),
-                )
-                .hint("try a larger --target-size or trim it first"));
-            }
-            args.extend([
-                "-b:v".to_string(),
-                format!("{video_kbps:.0}k"),
-                "-maxrate".to_string(),
-                format!("{:.0}k", video_kbps * 1.3),
-                "-bufsize".to_string(),
-                format!("{:.0}k", video_kbps * 2.0),
-                "-b:a".to_string(),
-                "64k".to_string(),
-            ]);
-        }
+        Some(target) => to_size(job, &video, target, &out)?,
         None => {
             let crf = match p.text("level").as_str() {
                 "light" => "23",
                 "strong" => "32",
                 _ => "28",
             };
-            args.extend([
-                "-crf".to_string(),
-                crf.to_string(),
-                "-b:a".to_string(),
-                "96k".to_string(),
-            ]);
+            let mut args = strs(&["-i"]);
+            args.push(input_path(job)?);
+            args.extend(video);
+            args.extend(strs(&["-crf", crf, "-c:a", "aac", "-b:a", "96k"]));
+            args.extend(strs(&["-movflags", "+faststart"]));
+            args.push(out.display().to_string());
+            ffmpeg(job, OP.id, args)?;
         }
     }
-    args.push(out.display().to_string());
-    ffmpeg(job, OP.id, args)?;
     let before = input.bytes()?.len() as u64;
     let after = std::fs::metadata(&out)?.len();
     let ratio = after as f64 / before.max(1) as f64;
@@ -115,4 +79,60 @@ fn run(job: &Job) -> Result<OpResult> {
         res = res.warn("the output is not smaller; the input is already well compressed");
     }
     Ok(res)
+}
+
+/// Audio bitrate when aiming for a file size, in kbps.
+const AUDIO_KBPS: f64 = 64.0;
+/// Two-pass encoding lands close to the target but can pass it, so this many
+/// attempts may be needed.
+const ATTEMPTS: usize = 3;
+
+/// Spends the whole size budget: two passes put the bits where the picture needs
+/// them, and a silent video gives nothing to audio.
+fn to_size(job: &Job, video: &[String], target: u64, out: &std::path::Path) -> Result<()> {
+    let info = probe(job, job.input(), OP.id)?;
+    let d = duration(&info).max(0.1);
+    let has_audio = stream(&info, "audio").is_some();
+    let audio_kbps = if has_audio { AUDIO_KBPS } else { 0.0 };
+    let mut video_kbps = target as f64 * 8.0 / 1000.0 / d * 0.95 - audio_kbps;
+    if video_kbps < 30.0 {
+        return Err(err(
+            ErrorCode::TargetUnreachable,
+            format!(
+                "{} is too small for a {} video",
+                format_bytes(target),
+                format_duration(d)
+            ),
+        )
+        .hint("try a larger --target-size or trim it first"));
+    }
+    let log = job.ctx.temp_path("x264").display().to_string();
+    let src = input_path(job)?;
+    for _ in 0..ATTEMPTS {
+        let pass = |n: &str| {
+            let mut args = strs(&["-i"]);
+            args.push(src.clone());
+            args.extend(video.iter().cloned());
+            args.extend(["-b:v".to_string(), format!("{video_kbps:.0}k")]);
+            args.extend(["-pass".to_string(), n.to_string()]);
+            args.extend(["-passlogfile".to_string(), log.clone()]);
+            args
+        };
+        let mut first = pass("1");
+        first.extend(strs(&["-an", "-f", "null", "-"]));
+        ffmpeg(job, OP.id, first)?;
+        let mut second = pass("2");
+        if has_audio {
+            second.extend(strs(&["-c:a", "aac", "-b:a", "64k"]));
+        }
+        second.extend(strs(&["-movflags", "+faststart"]));
+        second.push(out.display().to_string());
+        ffmpeg(job, OP.id, second)?;
+        let size = std::fs::metadata(out)?.len();
+        if size <= target {
+            return Ok(());
+        }
+        video_kbps *= target as f64 / size as f64 * 0.97;
+    }
+    Ok(())
 }
