@@ -28,17 +28,14 @@ The same agent, with and without deft:
 
 ## Quick start
 
-No release exists yet, so build from source. This needs [Rust](https://rustup.rs); the repository pins the toolchain, and rustup fetches it.
+On macOS or Linux:
 
 ```bash
-git clone https://github.com/firstprayer/deft
-cd deft
-cargo install --path crates/deft-cli --locked
+curl -fsSL https://deftcli.com/install.sh | sh
 deft doctor                         # shows what is available
-deft skill install --agent all      # teaches Claude Code and Codex to use deft
 ```
 
-Video and audio commands need ffmpeg, and YouTube commands need yt-dlp. Homebrew, release binaries, an install script and `cargo install deftcli` are planned, not available. See [docs/INSTALL.md](docs/INSTALL.md).
+The script checks the download, then sets up the skill for Claude Code and Codex. Video and audio commands need ffmpeg, and YouTube commands need yt-dlp. See [docs/INSTALL.md](docs/INSTALL.md) for Homebrew and other routes.
 
 ## Examples
 

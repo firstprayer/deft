@@ -5,8 +5,8 @@
 | File | What it is |
 |---|---|
 | `build-release.sh` | Builds one target and writes `deft-<target>.tar.gz` and its `.sha256` to `dist/` |
-| `install.sh` | Draft for `curl <url> \| sh`: downloads an archive, verifies its checksum, installs the binary, then the skill for each agent folder it finds. `DEFT_NO_SKILL=1` skips the skill |
-| `homebrew/deft.rb` | Draft formula for a `firstprayer/homebrew-tap` repository |
+| `install.sh` | Served at `deftcli.com/install.sh`: downloads an archive, verifies its checksum, installs the binary, then the skill for each agent folder it finds. `DEFT_NO_SKILL=1` skips the skill |
+| `homebrew/deft.rb` | The formula in a `firstprayer/homebrew-tap` repository |
 
 ## Cutting a release
 
