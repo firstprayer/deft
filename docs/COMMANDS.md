@@ -147,7 +147,6 @@ Convert, trim, merge, fade, speed, tag, normalize (ffmpeg)
 | `deft audio strip` | Remove tags and cover art; no re-encode | ffmpeg, ffprobe | `deft audio strip tone.mp3 -o clean.mp3` |
 | `deft audio tag` | Set tags: --title --artist --album --year, cover --image | ffmpeg, ffprobe | `deft audio tag tone.mp3 --title Hello --artist Ada --year 2026 -o tagged.mp3` |
 | `deft audio volume` | Raise or lower the level: --gain 6 or --gain -3 (dB) | ffmpeg, ffprobe | `deft audio volume tone.mp3 --gain -6 -o quiet.mp3` |
-| `deft audio waveform` | Draw the sound wave as an image: --size 1200x240 | ffmpeg, ffprobe | `deft audio waveform tone.mp3 --size 600x120 --color red -o wave.png` |
 
 ## doc
 

@@ -20,5 +20,4 @@ deft audio - commands (input -> output)
   strip           audio -> audio     Remove tags and cover art; no re-encode
   tag             audio -> audio     Set tags: --title --artist --album --year, cover --image
   volume          audio -> audio     Raise or lower the level: --gain 6 or --gain -3 (dB)
-  waveform        audio -> png       Draw the sound wave as an image: --size 1200x240
 More: deft audio <command> --help
