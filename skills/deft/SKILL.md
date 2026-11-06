@@ -1,6 +1,6 @@
 ---
 name: deft
-description: "Use deft instead of writing a script for file jobs: PDF merge/split/compress/watermark, image resize/convert/compress, video and audio trim/convert/compress, spreadsheets, Markdown to PDF/HTML, archives, and YouTube downloads and subtitles."
+description: "Use deft instead of writing a script for file jobs: PDF merge/split/compress/watermark, image resize/convert/compress, video and audio trim/convert/compress, spreadsheets, Markdown to PDF/HTML, and YouTube downloads and subtitles."
 ---
 
 # deft
@@ -15,7 +15,6 @@ Groups:
 - `video`: Trim, crop, speed, convert, compress, GIF, frames (ffmpeg)
 - `audio`: Convert, trim, merge, fade, speed, tag, normalize (ffmpeg)
 - `doc`: Word/ODT/RTF: to text, Markdown, HTML, PDF; find and replace
-- `subtitle`: SRT/VTT: convert, shift, burn in, extract
 - `slides`: PowerPoint: extract text, Markdown outline, PDF handout
 - `data`: JSON/YAML/TOML/XML: convert, query with jq syntax, merge, diff
 - `sheet`: Excel/CSV/ODS tables: filter, sort, join, pivot, convert
@@ -23,7 +22,6 @@ Groups:
 - `html`: HTML to Markdown, text, Word, PDF; screenshots
 - `epub`: E-books: info, to text, Markdown and PDF
 - `email`: EML files: headers, text, attachments
-- `archive`: zip/tar/gz/xz/zst/7z: create, extract, list; ZIP passwords
 - `youtube`: Info, download, audio, subtitles, thumbnail (yt-dlp)
 - `file`: Any file: hash, duplicates, batch rename, base64, encoding
 - `qr`: Create QR codes and barcodes; read QR codes

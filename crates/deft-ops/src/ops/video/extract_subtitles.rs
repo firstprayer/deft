@@ -15,9 +15,8 @@ pub static OP: Op = Op {
         )
         .default("1"),
     ],
-    mounts: &["subtitle from-video"],
     engines: FFMPEG,
-    examples: &["deft subtitle from-video clip-with-subs.mp4 -o subs.srt"],
+    examples: &["deft video extract-subtitles clip-with-subs.mp4 -o subs.srt"],
     tags: &["pull captions", "soft subtitles", "cc"],
     errors: &[ErrorCode::InputUnsupported],
     run,

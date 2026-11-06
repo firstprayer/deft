@@ -60,13 +60,6 @@ pub const ENGINES: &[Engine] = &[
         manual: "brew install sqlite | apt install sqlite3 | winget install sqlite",
     },
     Engine {
-        name: "bsdtar",
-        purpose: "reading RAR archives (libarchive)",
-        version_arg: "--version",
-        installable: false,
-        manual: "brew install libarchive | apt install libarchive-tools",
-    },
-    Engine {
         name: "chrome",
         purpose: "exact web page rendering (Chrome, Chromium or Edge)",
         version_arg: "--version",
@@ -123,10 +116,6 @@ pub fn locate(ctx: &Ctx, name: &str) -> Option<PathBuf> {
     }
     match name {
         "chrome" => browser(&on_path),
-        // macOS and the BSDs ship libarchive's tar as plain tar.
-        "bsdtar" => {
-            on_path("tar").filter(|p| version(p, "--version").is_some_and(|v| v.contains("bsdtar")))
-        }
         _ => None,
     }
 }

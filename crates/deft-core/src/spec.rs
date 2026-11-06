@@ -7,7 +7,7 @@ use crate::job::{Job, OpResult};
 use crate::value::Kind;
 
 /// A logical group of commands. Groups are only an index: they can be organised
-/// by file type (pdf), by source (youtube) or by task (archive).
+/// by file type (pdf) or by source (youtube).
 #[derive(Debug)]
 pub struct Group {
     pub name: &'static str,

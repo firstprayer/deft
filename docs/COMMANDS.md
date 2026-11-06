@@ -104,7 +104,7 @@ Trim, crop, speed, convert, compress, GIF, frames (ffmpeg)
 | `deft video crop` | Cut a region: --box or --aspect 1:1 | ffmpeg, ffprobe | `deft video crop clip.mp4 --aspect 1:1 -o square.mp4` |
 | `deft video download` | Save a video: --resolution 720p, --to mp4\|webm\|mkv | yt-dlp, network | `deft youtube download https://youtu.be/dQw4w9WgXcQ --resolution 720p -o talk.mp4` |
 | `deft video extract-audio` | Save the soundtrack: --to mp3\|m4a\|wav\|flac\|ogg | ffmpeg, ffprobe | `deft video extract-audio clip.mp4 -o sound.mp3` |
-| `deft video extract-subtitles` | Save an embedded subtitle track: --to srt\|vtt | ffmpeg, ffprobe | `deft subtitle from-video clip-with-subs.mp4 -o subs.srt` |
+| `deft video extract-subtitles` | Save an embedded subtitle track: --to srt\|vtt | ffmpeg, ffprobe | `deft video extract-subtitles clip-with-subs.mp4 -o subs.srt` |
 | `deft video fade` | Fade: --fade-in 1 --fade-out 2 | ffmpeg, ffprobe | `deft video fade clip.mp4 --fade-in 0.5 --fade-out 1 -o soft.mp4` |
 | `deft video frames` | Save frames as images: --fps 1 or --at 0:05,0:10 | ffmpeg, ffprobe | `deft video frames clip.mp4 --at 0:01 -o shots/` |
 | `deft video from-images` | Slideshow: --duration, --fps, --audio | ffmpeg, ffprobe | `deft video from-images photo-1.jpg photo-2.jpg --duration 2 -o show.mp4` |
@@ -163,18 +163,6 @@ Word/ODT/RTF: to text, Markdown, HTML, PDF; find and replace
 | `deft doc to-md` | Convert to Markdown, keeping headings, lists and tables |  | `deft doc to-md letter.docx -o letter.md` |
 | `deft doc to-pdf` | Typeset as PDF, content not layout |  | `deft doc to-pdf letter.docx -o letter.pdf` |
 | `deft doc to-text` | Extract plain text |  | `deft doc to-text letter.docx -o letter.txt` |
-
-## subtitle
-
-SRT/VTT: convert, shift, burn in, extract
-
-| Command | What it does | Needs | Example |
-|---|---|---|---|
-| `deft subtitle info` | Number of lines, start and end time |  | `deft subtitle info talk.srt` |
-| `deft subtitle burn` | Add subtitles: burned into the picture, or --soft | ffmpeg, ffprobe | `deft video add-subtitles clip.mp4 --subtitles talk.srt -o subbed.mp4` |
-| `deft subtitle convert` | Change format: --to srt\|vtt\|txt\|md |  | `deft subtitle convert talk.srt -o out.vtt` |
-| `deft subtitle from-video` | Save an embedded subtitle track: --to srt\|vtt | ffmpeg, ffprobe | `deft subtitle from-video clip-with-subs.mp4 -o subs.srt` |
-| `deft subtitle shift` | Move all timing: --by 2.5 (later) or --by -1 (earlier) |  | `deft subtitle shift talk.srt --by 1.5 -o later.srt` |
 
 ## slides
 
@@ -274,17 +262,6 @@ EML files: headers, text, attachments
 | `deft email info` | From, to, subject, date, attachments |  | `deft email info message.eml` |
 | `deft email attachments` | Save the attached files |  | `deft email attachments message.eml -o files/` |
 | `deft email to-text` | The message as text, with its headers |  | `deft email to-text message.eml -o message.txt` |
-
-## archive
-
-zip/tar/gz/xz/zst/7z: create, extract, list; ZIP passwords
-
-| Command | What it does | Needs | Example |
-|---|---|---|---|
-| `deft archive add` | Add files to a copy of a ZIP |  | `deft archive add bundle.zip report.pdf -o bigger.zip` |
-| `deft archive create` | Pack files and folders: --to zip\|tar.gz\|tar.xz\|7z |  | `deft archive create report.pdf appendix.pdf -o packed.zip` |
-| `deft archive extract` | Unpack into a folder |  | `deft archive extract bundle.zip -o unpacked/` |
-| `deft archive list` | List entries without unpacking |  | `deft archive list bundle.zip` |
 
 ## youtube
 

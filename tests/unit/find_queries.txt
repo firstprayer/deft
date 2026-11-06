@@ -61,8 +61,6 @@ convert csv to excel | sheet convert
 join two spreadsheets on a column | sheet join
 make a pivot table | sheet pivot
 turn markdown into a pdf | md to-pdf
-unzip this file | archive extract
-zip this folder | archive create
 find duplicate files | file duplicates
 rename all these files | file rename
 what is the checksum of this file | file hash

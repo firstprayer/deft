@@ -28,7 +28,7 @@ const PICKS: &[&str] = &[
     "sheet/ods-to-csv",
     "image/text-on-photo",
     "video/join",
-    "archive/tar-folder",
+    "audio/compress",
 ];
 
 /// The search shown before the visitor types anything.
@@ -105,7 +105,18 @@ const CLOSED_SINCE_LAST_RUN: &[&str] = &[
 /// Cases removed since the last run. Their results are still part of the totals
 /// that run published, so they stay in until the agents run again; then empty
 /// this list.
-const REMOVED_SINCE_LAST_RUN: &[&str] = &["subtitle/count-lines", "video/burn-chinese-subtitles"];
+const REMOVED_SINCE_LAST_RUN: &[&str] = &[
+    "archive/list",
+    "archive/tar-folder",
+    "archive/unzip",
+    "archive/zip-files",
+    "subtitle/count-lines",
+    "subtitle/extract-from-video",
+    "subtitle/fix-sync",
+    "subtitle/srt-to-vtt",
+    "subtitle/to-transcript",
+    "video/burn-chinese-subtitles",
+];
 
 /// The last row of `evals/lift-history.jsonl`: the run the page publishes.
 fn published_run() -> Result<Value, String> {

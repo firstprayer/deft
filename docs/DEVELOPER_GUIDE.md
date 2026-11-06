@@ -5,7 +5,7 @@ Deft is a single-binary CLI that replaces the scripts an agent would otherwise w
 ## Layout
 
 - `crates/deft-core`: formats, option value syntax, error codes, `Op`/`Group` specs, `Job`/`OpResult`.
-- `crates/deft-tools-*` (archive, data, doc, file, image, pdf, sheet, text): capability libraries. Pure functions, no CLI knowledge, no printing.
+- `crates/deft-tools-*` (data, doc, file, image, pdf, sheet, text): capability libraries. Pure functions, no CLI knowledge, no printing.
 - `crates/deft-engines`: locating, installing and running ffmpeg and yt-dlp. Never through a shell.
 - `crates/deft-ops`: `src/ops/<group>/<command>.rs`, one operation per file, auto-registered by `build.rs`. `runtime.rs` runs them; `registry.rs` resolves paths, aliases, search and conversion chains.
 - `crates/deft-cli`: `deft` binary: argument parsing, three-layer help, rendering.
@@ -17,7 +17,7 @@ There is no central list. Each operation is one file, `crates/deft-ops/src/ops/<
 
 ## Rules
 
-- A group is only a logical index. It can be a file type (pdf), a source (youtube) or a task (archive). Put a command where an agent would look first.
+- A group is only a logical index. It can be a file type (pdf) or a source (youtube). Put a command where an agent would look first.
 - Adding a command or group means adding files only. See [CONTRIBUTING.md](../CONTRIBUTING.md).
 - An operation has one implementation. To reach it from another group, add a mount; do not copy it.
 - The same option name must mean the same thing everywhere (`specs_are_well_formed` enforces this).

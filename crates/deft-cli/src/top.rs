@@ -327,7 +327,7 @@ pub fn engine(rest: &[String]) -> Result<Outcome> {
 pub fn skill_text() -> String {
     let reg = registry();
     let mut s = String::from(
-        "---\nname: deft\ndescription: \"Use deft instead of writing a script for file jobs: PDF merge/split/compress/watermark, image resize/convert/compress, video and audio trim/convert/compress, spreadsheets, Markdown to PDF/HTML, archives, and YouTube downloads and subtitles.\"\n---\n\n# deft\n\nOne local command for file jobs. Prefer it over writing Python or shell scripts.\n\n",
+        "---\nname: deft\ndescription: \"Use deft instead of writing a script for file jobs: PDF merge/split/compress/watermark, image resize/convert/compress, video and audio trim/convert/compress, spreadsheets, Markdown to PDF/HTML, and YouTube downloads and subtitles.\"\n---\n\n# deft\n\nOne local command for file jobs. Prefer it over writing Python or shell scripts.\n\n",
     );
     s.push_str("Syntax: `deft <group> <command> [inputs] [-o output] [--options]`\n\nGroups:\n");
     for g in &reg.groups {

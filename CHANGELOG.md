@@ -8,7 +8,7 @@ First version, not released yet. These notes are a draft for the release. See [d
 
 ### Added
 
-- Command groups: `pdf`, `image`, `video`, `audio`, `doc`, `subtitle`, `slides`, `data`, `sheet`, `md`, `html`, `epub`, `email`, `archive`, `youtube`, `file`, `qr`.
+- Command groups: `pdf`, `image`, `video`, `audio`, `doc`, `slides`, `data`, `sheet`, `md`, `html`, `epub`, `email`, `youtube`, `file`, `qr`.
 - Top-level commands: `convert`, `info`, `find`, `schema`, `engine`, `skill`, `doctor`.
 - One-line results starting with `ok`, `partial` or `error`, and `--json` for structure.
 - Stable error codes, with a `hint:` when there is a concrete fix.
@@ -19,7 +19,7 @@ First version, not released yet. These notes are a draft for the release. See [d
 
 ### Known limits
 
-- `video`, `audio` and `subtitle` burn-in need ffmpeg, which must be installed by hand. `youtube` needs yt-dlp.
+- `video` and `audio` need ffmpeg, which must be installed by hand. `youtube` needs yt-dlp.
 - WebP is written losslessly only.
 - PDF rendering uses pure-Rust hayro; quality on complex PDFs still needs checking.
 - macOS is the only platform regularly built. Linux and Windows are untested.

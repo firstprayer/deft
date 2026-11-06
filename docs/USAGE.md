@@ -8,7 +8,7 @@ For the full command list, see [COMMANDS.md](COMMANDS.md). To install, see [INST
 deft <group> <command> [inputs...] [-o output] [--option value ...]
 ```
 
-A group is an index: by file type (`pdf`), by source (`youtube`) or by task (`archive`). `deft convert`, `deft info` and `deft find` work on any file.
+A group is an index: by file type (`pdf`), or by source (`youtube`). `deft convert`, `deft info` and `deft find` work on any file.
 
 ## Finding a command
 

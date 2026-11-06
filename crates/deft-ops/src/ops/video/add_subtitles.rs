@@ -34,11 +34,10 @@ pub static OP: Op = Op {
         param("position", Kind::Position, "bottom or top").default("bottom"),
         param("font", Kind::Text, "Font family"),
     ],
-    mounts: &["subtitle burn"],
     engines: FFMPEG,
     examples: &[
         "deft video add-subtitles clip.mp4 --subtitles talk.srt -o subbed.mp4",
-        "deft subtitle burn clip.mp4 --subtitles zh.srt -o zh.mp4",
+        "deft video add-subtitles clip.mp4 --subtitles zh.srt -o zh.mp4",
         "deft video add-subtitles clip.mp4 --subtitles talk.vtt --soft -o soft.mp4",
     ],
     tags: &[
