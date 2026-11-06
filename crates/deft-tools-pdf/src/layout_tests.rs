@@ -129,3 +129,77 @@ fn a_numbered_equation_is_not_a_table() {
     ];
     assert!(page_tables(&lines).is_empty());
 }
+
+#[test]
+fn a_long_centred_label_stays_inside_the_table() {
+    let mut text = line(
+        800.0,
+        &[(50.0, "A paragraph above, to set the left margin.")],
+    );
+    text[0].width = 500.0;
+    let lines = vec![
+        text,
+        line(
+            700.0,
+            &[(50.0, "Method"), (200.0, "Score"), (300.0, "Size")],
+        ),
+        line(
+            686.0,
+            &[(120.0, "Baselines and their variants, as reported before")],
+        ),
+        line(672.0, &[(50.0, "Small"), (200.0, "1"), (300.0, "2")]),
+        line(658.0, &[(50.0, "Large"), (200.0, "3"), (300.0, "4")]),
+    ];
+    let found = page_tables(&lines);
+    assert_eq!(found[0].rows[0], ["Method", "Score", "Size"]);
+    assert_eq!(found[0].rows.len(), 4);
+}
+
+#[test]
+fn a_tight_header_in_one_piece_is_spread_over_its_columns() {
+    let lines = vec![
+        line(700.0, &[(50.0, "Range"), (200.0, "0.1 0.2 0.3")]),
+        line(
+            686.0,
+            &[
+                (50.0, "Average"),
+                (200.0, "10"),
+                (225.0, "20"),
+                (250.0, "30"),
+            ],
+        ),
+        line(
+            672.0,
+            &[
+                (50.0, "Model a"),
+                (200.0, "11"),
+                (225.0, "21"),
+                (250.0, "31"),
+            ],
+        ),
+        line(
+            658.0,
+            &[
+                (50.0, "Model b"),
+                (200.0, "12"),
+                (225.0, "22"),
+                (250.0, "32"),
+            ],
+        ),
+    ];
+    let found = page_tables(&lines);
+    assert_eq!(found[0].rows[0], ["Range", "0.1", "0.2", "0.3"]);
+}
+
+#[test]
+fn authors_are_not_a_table() {
+    let lines = vec![
+        line(700.0, &[(50.0, "Ada Lovelace"), (250.0, "Lin Wei")]),
+        line(
+            686.0,
+            &[(50.0, "Oslo University"), (250.0, "Bergen University")],
+        ),
+        line(672.0, &[(50.0, "ada@x.edu"), (250.0, "lin@y.edu")]),
+    ];
+    assert!(page_tables(&lines).is_empty());
+}

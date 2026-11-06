@@ -317,16 +317,32 @@ fn chars(line: &[Run]) -> usize {
     line.iter().map(|r| r.text.chars().count()).sum()
 }
 
-/// Prose or a caption, which ends a table. A short line alone can be a group
-/// label inside one.
-fn is_text(line: &[Run]) -> bool {
-    let caption = line[0].text.starts_with("Table ") || line[0].text.starts_with("Figure ");
-    caption || (line.len() < 2 && chars(line) > 40) || (line.len() <= 3 && chars(line) > 70)
+/// The left and right edges of the text on a page.
+fn margins(lines: &[Vec<Run>]) -> (f64, f64) {
+    let all = || lines.iter().flatten();
+    let left = all().map(|r| r.x).fold(f64::MAX, f64::min);
+    let right = all().map(|r| r.x + r.width).fold(f64::MIN, f64::max);
+    (left, right)
+}
+
+fn is_caption(line: &[Run]) -> bool {
+    line[0].text.starts_with("Table ") || line[0].text.starts_with("Figure ")
+}
+
+/// Prose or a caption, which ends a table. A long line alone is prose when it
+/// starts at the margin or fills the width; a centred one is a group label.
+fn is_text(line: &[Run], (left, right): (f64, f64)) -> bool {
+    let run = &line[0];
+    let wide = run.width > (right - left) * 0.7;
+    let lone_prose = line.len() < 2 && chars(line) > 40 && (run.x - left < 4.0 || wide);
+    let long_line = line.len() <= 3 && chars(line) > 70 && run.x - left < 4.0;
+    is_caption(line) || lone_prose || long_line
 }
 
 /// Unbroken stretches of lines that are not prose. A gap much taller than the
 /// rows so far ends one too.
 fn blocks(lines: &[Vec<Run>]) -> Vec<(usize, usize)> {
+    let edges = margins(lines);
     let mut found = Vec::new();
     let mut start = None;
     let mut gap = f64::MAX;
@@ -340,12 +356,12 @@ fn blocks(lines: &[Vec<Run>]) -> Vec<(usize, usize)> {
         let lone = line.len() < 2
             && lines.get(i + 1).map(Vec::len) != lines.get(i.wrapping_sub(1)).map(Vec::len);
         if let Some(s) = start
-            && (is_text(line) || lone || step > gap * 3.0)
+            && (is_text(line, edges) || lone || step > gap * 2.5)
         {
             found.push((s, i));
             start = None;
         }
-        if is_text(line) || lone {
+        if is_text(line, edges) || lone {
             continue;
         }
         match start {
@@ -430,41 +446,95 @@ fn is_table(block: &[Vec<Run>], spans: &[(f64, f64)]) -> bool {
         .filter(|c| *c == '\u{FFFD}')
         .count();
     let full = block.iter().filter(|l| l.len() == spans.len()).count();
+    // The names and addresses at the top of a paper line up like a table.
+    let authors = all
+        .iter()
+        .filter(|r| r.text.contains('@') || r.text.contains("University"))
+        .count();
     long * 2 < all.len()
+        && authors * 4 < all.len()
         && full * 2 >= block.len()
         && letters <= all.len() * 24
         && garbled * 10 < letters
+}
+
+fn fill_row(line: &[Run], columns: &[(f64, f64)]) -> Vec<String> {
+    let mut row = vec![String::new(); columns.len()];
+    for run in line {
+        let cell = &mut row[column_of(run, columns)];
+        if !cell.is_empty() {
+            cell.push(' ');
+        }
+        cell.push_str(&run.text);
+    }
+    row
+}
+
+/// The line above a table as its header, if it is one. Tight headers arrive as one
+/// piece across several columns, so its words must match those columns one to one.
+fn header_row(line: &[Run], columns: &[(f64, f64)]) -> Option<Vec<String>> {
+    if is_caption(line) {
+        return None;
+    }
+    let mut row = vec![String::new(); columns.len()];
+    let mut filled = 0;
+    for run in line {
+        let under: Vec<usize> = (0..columns.len())
+            .filter(|&i| columns[i].0 < run.x + run.width && run.x < columns[i].1)
+            .collect();
+        let words: Vec<&str> = run.text.split_whitespace().collect();
+        if under.len() < 2 {
+            let at = under
+                .first()
+                .copied()
+                .unwrap_or_else(|| column_of(run, columns));
+            row[at] = run.text.clone();
+            filled += 1;
+        } else if words.len() == under.len() {
+            for (at, word) in under.iter().zip(words) {
+                row[*at] = word.to_string();
+            }
+            filled += under.len();
+        } else {
+            return None;
+        }
+    }
+    (filled >= 2 && filled * 2 >= columns.len()).then_some(row)
 }
 
 fn page_tables(lines: &[Vec<Run>]) -> Vec<Found> {
     let mut out = Vec::new();
     for (start, end) in blocks(lines) {
         // A single cell at either end is a title or a note, not a row.
-        let mut block = &lines[start..end];
-        while block.first().is_some_and(|l| l.len() < 2) {
-            block = &block[1..];
+        let (mut first, mut last) = (start, end);
+        while first < last && lines[first].len() < 2 {
+            first += 1;
         }
-        while block.last().is_some_and(|l| l.len() < 2) {
-            block = &block[..block.len() - 1];
+        while first < last && lines[last - 1].len() < 2 {
+            last -= 1;
         }
-        let columns = spans(block);
+        let columns = spans(&lines[first..last]);
+        // A heading straight after the table has too few cells to be a row.
+        while columns.len() >= 4 && first < last && lines[last - 1].len() * 2 <= columns.len() {
+            last -= 1;
+        }
+        let block = &lines[first..last];
         if !is_table(block, &columns) {
             continue;
         }
-        let rows = block
-            .iter()
-            .map(|line| {
-                let mut row = vec![String::new(); columns.len()];
-                for run in line {
-                    let cell = &mut row[column_of(run, &columns)];
-                    if !cell.is_empty() {
-                        cell.push(' ');
-                    }
-                    cell.push_str(&run.text);
-                }
-                row
-            })
-            .collect();
+        let mut rows: Vec<Vec<String>> = Vec::new();
+        if first > 0
+            && lines[first - 1][0].y - lines[first][0].y < lines[first][0].size * 3.0
+            && let Some(header) = header_row(&lines[first - 1], &columns)
+        {
+            rows.push(header);
+        }
+        for (n, line) in block.iter().enumerate() {
+            let spread = (n == 0 && line.len() < columns.len())
+                .then(|| header_row(line, &columns))
+                .flatten();
+            rows.push(spread.unwrap_or_else(|| fill_row(line, &columns)));
+        }
         out.push(Found {
             columns: columns.iter().map(|c| c.0).collect(),
             rows,
