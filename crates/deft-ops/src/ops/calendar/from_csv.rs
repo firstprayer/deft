@@ -6,7 +6,7 @@ pub static OP: Op = Op {
     details: &["Needs summary and start columns, with dates like 2026-11-06 09:00."],
     input: Input::each(&[Format::Csv], "csv"),
     output: Output::one(&[Format::Ics], "ics"),
-    examples: &["deft calendar from-csv schedule.csv -o events.ics"],
+    examples: &["deft calendar from-csv schedule.csv -o plan.ics"],
     tags: &[
         "csv to ics",
         "excel to calendar",

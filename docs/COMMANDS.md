@@ -270,7 +270,7 @@ VCF address books: to and from CSV
 | Command | What it does | Needs | Example |
 |---|---|---|---|
 | `deft contact info` | Count contacts, phones and email addresses |  | `deft contact info contacts.vcf` |
-| `deft contact from-csv` | Make a VCF address book from a table |  | `deft contact from-csv addresses.csv -o contacts.vcf` |
+| `deft contact from-csv` | Make a VCF address book from a table |  | `deft contact from-csv addresses.csv -o book.vcf` |
 | `deft contact to-csv` | Turn a VCF address book into a table |  | `deft contact to-csv contacts.vcf -o contacts.csv` |
 
 ## calendar
@@ -280,7 +280,7 @@ ICS calendars: to and from CSV
 | Command | What it does | Needs | Example |
 |---|---|---|---|
 | `deft calendar info` | Count events and show the first and last |  | `deft calendar info events.ics` |
-| `deft calendar from-csv` | Make an ICS calendar from a table |  | `deft calendar from-csv schedule.csv -o events.ics` |
+| `deft calendar from-csv` | Make an ICS calendar from a table |  | `deft calendar from-csv schedule.csv -o plan.ics` |
 | `deft calendar to-csv` | Turn an ICS calendar into a table, by start time |  | `deft calendar to-csv events.ics -o events.csv` |
 
 ## gps

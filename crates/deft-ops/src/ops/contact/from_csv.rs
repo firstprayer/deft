@@ -6,7 +6,7 @@ pub static OP: Op = Op {
     details: &["Needs a name column. Separate several phones or emails with ;."],
     input: Input::each(&[Format::Csv], "csv"),
     output: Output::one(&[Format::Vcf], "vcf"),
-    examples: &["deft contact from-csv addresses.csv -o contacts.vcf"],
+    examples: &["deft contact from-csv addresses.csv -o book.vcf"],
     tags: &["csv to vcf", "import contacts", "vcard"],
     result: &["contacts"],
     run,
