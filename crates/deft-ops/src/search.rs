@@ -191,13 +191,18 @@ impl Index {
     }
 }
 
-/// A word without its inflection: "resizing" gives "resiz" and "resize".
+/// A word without its inflection: "resizing" gives "resiz" and "resize", and
+/// "padding" gives "pad" as well.
 fn stems(word: &str) -> Vec<String> {
     let mut out = vec![];
     for ending in ["ing", "ed", "es", "s"] {
         if let Some(stem) = word.strip_suffix(ending).filter(|s| s.len() >= 3) {
             out.push(stem.to_string());
             out.push(format!("{stem}e"));
+            let mut letters = stem.chars().rev();
+            if letters.next() == letters.next() {
+                out.push(stem[..stem.len() - 1].to_string());
+            }
         }
     }
     out

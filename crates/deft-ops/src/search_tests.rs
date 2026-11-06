@@ -115,3 +115,16 @@ fn a_known_job_is_not_reported() {
         assert!(registry().unknown_job(query).is_empty(), "{query}");
     }
 }
+
+#[test]
+fn a_doubled_consonant_is_undone() {
+    let hits = registry().find("padding");
+    assert!(
+        hits.iter().all(|h| h.0.ends_with(" pad")),
+        "{:?}",
+        hits.iter().map(|h| &h.0).collect::<Vec<_>>()
+    );
+    assert!(registry().unknown_job("padding").is_empty());
+    assert_eq!(first("cropping video"), "video crop");
+    assert_eq!(first("trimming audio"), "audio split");
+}
