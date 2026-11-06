@@ -400,7 +400,9 @@ pub fn skill(rest: &[String]) -> Result<Outcome> {
             };
             let mut s = String::new();
             for a in agents {
-                let path = base.join(format!(".{a}/skills/deft/SKILL.md"));
+                // Codex reads skills from the shared `.agents` folder.
+                let folder = if *a == "codex" { "agents" } else { a };
+                let path = base.join(format!(".{folder}/skills/deft/SKILL.md"));
                 std::fs::create_dir_all(path.parent().expect("has parent"))
                     .map_err(|e| err(ErrorCode::OutputUnwritable, e.to_string()))?;
                 std::fs::write(&path, skill_text())

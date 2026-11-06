@@ -149,7 +149,7 @@ Several inputs run in parallel, one job per CPU core; set the count with `-j`. F
 ## Agent setup
 
 ```bash
-deft skill install --agent all              # writes ~/.claude/skills/deft and ~/.codex/skills/deft
+deft skill install --agent all              # writes ~/.claude/skills/deft and ~/.agents/skills/deft
 deft skill install --agent claude --scope project   # into this project instead
 deft skill print                            # print the skill text
 ```

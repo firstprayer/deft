@@ -58,5 +58,5 @@ To update, pull the repository and run the install command again, then run `deft
 
 ```bash
 cargo uninstall deftcli
-rm -rf ~/.claude/skills/deft ~/.codex/skills/deft
+rm -rf ~/.claude/skills/deft ~/.agents/skills/deft
 ```
