@@ -1,5 +1,5 @@
 #!/bin/sh
-# Draft installer for deft. No release exists yet, so this fails until one does.
+# Installs deft from a GitHub release.
 #
 #   DEFT_VERSION      a tag such as v0.1.0; default latest
 #   DEFT_INSTALL_DIR  where the binary goes; default ~/.local/bin

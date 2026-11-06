@@ -2,9 +2,9 @@
 
 Deft follows semantic versioning. Before 1.0, a minor version may change commands or options.
 
-## Unreleased: 0.1.0
+## 0.1.0
 
-First version, not released yet. These notes are a draft for the release. See [docs/COMMANDS.md](docs/COMMANDS.md) for the full command list.
+First version. See [docs/COMMANDS.md](docs/COMMANDS.md) for the full command list.
 
 ### Added
 
@@ -22,7 +22,8 @@ First version, not released yet. These notes are a draft for the release. See [d
 - `video` and `audio` need ffmpeg, which must be installed by hand. `youtube` needs yt-dlp.
 - WebP is written losslessly only.
 - PDF rendering uses pure-Rust hayro; quality on complex PDFs still needs checking.
-- macOS is the only platform regularly built. Linux and Windows are untested.
+- Releases cover macOS and Linux. Windows builds and passes unit tests, but has no installer yet.
+- Full end-to-end tests run on macOS only.
 
 ### Measured
 

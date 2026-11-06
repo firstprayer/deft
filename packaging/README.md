@@ -1,6 +1,4 @@
-# Release packaging (draft)
-
-Nothing here has been published, and no release exists. `build-release.sh` and `install.sh` have been run on macOS arm64 from local files, including a refused tampered archive. No other platform, and nothing against a real GitHub release, has been tested.
+# Release packaging
 
 `.github/workflows/release.yml` builds the archives with the scripts here.
 
