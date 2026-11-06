@@ -34,6 +34,10 @@ fn run(job: &Job) -> Result<OpResult> {
         c.extend([
             "-force_key_frames".to_string(),
             format!("expr:gte(t,n_forced*{length})"),
+            // A forced keyframe can land a hair before the cut after rounding, and
+            // the part would then run on to the next one. Half a frame at 10 fps.
+            "-segment_time_delta".to_string(),
+            "0.05".to_string(),
         ]);
         c
     };
