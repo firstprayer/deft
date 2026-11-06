@@ -34,3 +34,19 @@ fn ogg_uses_libvorbis_when_present_and_the_built_in_encoder_otherwise() {
         ["-c:a", "vorbis", "-strict", "experimental", "-ac", "2"]
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn an_engine_that_never_answers_has_no_version() {
+    let started = Instant::now();
+    let limit = Duration::from_millis(100);
+    assert_eq!(version_within(Path::new("/bin/sleep"), "30", limit), None);
+    assert!(started.elapsed() < Duration::from_secs(5));
+}
+
+#[cfg(unix)]
+#[test]
+fn an_engine_that_answers_reports_its_first_line() {
+    let found = version_within(Path::new("/bin/echo"), "1.2.3", VERSION_TIMEOUT);
+    assert_eq!(found.as_deref(), Some("1.2.3"));
+}

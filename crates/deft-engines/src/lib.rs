@@ -4,6 +4,7 @@
 
 use deft_core::error::{ErrorCode, Result, err};
 use deft_core::job::Ctx;
+use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -19,6 +20,8 @@ pub struct Engine {
     /// How to install it by hand.
     pub manual: &'static str,
 }
+
+const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub const ENGINES: &[Engine] = &[
     Engine {
@@ -172,12 +175,36 @@ pub fn require(ctx: &Ctx, name: &str, needed_by: &str) -> Result<PathBuf> {
 }
 
 pub fn version(path: &Path, version_arg: &str) -> Option<String> {
-    let out = Command::new(path)
+    // On Windows a browser opens a window for --version and never exits.
+    let name = path.file_stem()?.to_string_lossy().to_lowercase();
+    if cfg!(windows) && (name.contains("chrome") || name == "msedge") {
+        return None;
+    }
+    version_within(path, version_arg, VERSION_TIMEOUT)
+}
+
+/// A program that does not answer in time has no version, so a stuck engine
+/// cannot stop `deft doctor`.
+fn version_within(path: &Path, version_arg: &str, limit: Duration) -> Option<String> {
+    let mut child = Command::new(path)
         .arg(version_arg)
         .stdin(Stdio::null())
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
         .ok()?;
-    let text = String::from_utf8_lossy(&out.stdout);
+    let deadline = Instant::now() + limit;
+    while child.try_wait().ok()?.is_none() {
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let mut out = Vec::new();
+    child.stdout.take()?.read_to_end(&mut out).ok()?;
+    let text = String::from_utf8_lossy(&out);
     text.lines()
         .next()
         .map(|l| l.trim().to_string())
