@@ -1,5 +1,13 @@
 use super::*;
 
+fn sized(y: f64, size: f64, cells: &[(f64, &str)]) -> Vec<Run> {
+    let mut l = line(y, cells);
+    for r in &mut l {
+        r.size = size;
+    }
+    l
+}
+
 fn line(y: f64, cells: &[(f64, &str)]) -> Vec<Run> {
     cells
         .iter()
@@ -223,4 +231,91 @@ fn a_sentence_above_a_table_stays_out_of_it() {
 fn an_abbreviated_header_is_not_a_sentence() {
     let line = line(700.0, &[(80.0, "Model Params. Acc.")]);
     assert!(!ends_sentence(&line));
+}
+
+fn item(y: f64, name: &str, price: &str) -> Vec<Run> {
+    line(
+        y,
+        &[(50.0, name), (200.0, "1"), (260.0, price), (330.0, price)],
+    )
+}
+
+#[test]
+fn group_labels_and_notes_stay_inside_the_table() {
+    // As an Odoo invoice: groups, a note under an item and a subtotal.
+    let lines = vec![
+        line(
+            700.0,
+            &[
+                (50.0, "Item"),
+                (200.0, "Qty"),
+                (260.0, "Price"),
+                (330.0, "Total"),
+            ],
+        ),
+        line(686.0, &[(50.0, "Non Food")]),
+        item(672.0, "Beeswax", "42.00"),
+        line(658.0, &[(60.0, "Acme beeswax")]),
+        item(644.0, "Chair", "70.00"),
+        line(630.0, &[(330.0, "Subtotal 112.00")]),
+        line(616.0, &[(50.0, "Food")]),
+        item(602.0, "Olive oil", "0.90"),
+        item(588.0, "Truffles", "150.00"),
+    ];
+    let found = page_tables(&lines);
+    assert_eq!(found.len(), 1);
+    let names: Vec<&str> = found[0].rows.iter().map(|r| r[0].as_str()).collect();
+    assert!(
+        names.contains(&"Beeswax") && names.contains(&"Truffles"),
+        "{names:?}"
+    );
+}
+
+#[test]
+fn a_header_over_several_lines_is_one_row() {
+    let lines = vec![
+        line(700.0, &[(200.0, "Retail"), (300.0, "Percent")]),
+        line(686.0, &[(200.0, "Sales"), (300.0, "Change")]),
+        line(672.0, &[(50.0, "Q2"), (200.0, "1,826"), (300.0, "0.5")]),
+        line(658.0, &[(50.0, "Q1"), (200.0, "1,818"), (300.0, "-0.1")]),
+        line(644.0, &[(50.0, "Q4"), (200.0, "1,821"), (300.0, "0.5")]),
+    ];
+    let found = page_tables(&lines);
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].rows[0], ["", "Retail Sales", "Percent Change"]);
+    assert_eq!(found[0].rows[1][0], "Q2");
+}
+
+#[test]
+fn lines_a_wide_gap_above_and_a_smaller_footer_below_stay_out() {
+    let lines = vec![
+        line(760.0, &[(50.0, "Invoice no."), (200.0, "30064443")]),
+        line(746.0, &[(50.0, "Date"), (200.0, "7 May")]),
+        line(
+            700.0,
+            &[
+                (50.0, "Item"),
+                (200.0, "Qty"),
+                (260.0, "Price"),
+                (330.0, "Total"),
+            ],
+        ),
+        item(686.0, "Exchange", "3.89"),
+        item(672.0, "Exchange", "5.39"),
+        item(658.0, "Exchange", "5.39"),
+        sized(
+            640.0,
+            7.0,
+            &[(50.0, "Company AG"), (200.0, "Board"), (330.0, "Bank")],
+        ),
+        sized(
+            632.0,
+            7.0,
+            &[(50.0, "Street 40"), (200.0, "Chair"), (330.0, "IBAN")],
+        ),
+    ];
+    let found = page_tables(&lines);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].rows[0][0], "Item");
+    assert_eq!(found[0].rows.last().unwrap()[0], "Exchange");
 }

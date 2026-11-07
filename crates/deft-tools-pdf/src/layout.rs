@@ -87,6 +87,27 @@ fn is_text(line: &[Run], (left, right): (f64, f64)) -> bool {
     is_caption(line) || lone_prose || long_line
 }
 
+/// A single cell inside a table that does not end it: a group label such as
+/// `Adjusted`, a note under an item such as a serial number, or a footnote mark.
+/// A real row of three or more cells follows within three lines, with only
+/// such single cells between, and one came just before. A short total before a
+/// short row ends the table, and so does a caption or a sentence.
+fn bridges(lines: &[Vec<Run>], i: usize) -> bool {
+    let line = &lines[i];
+    if line.len() != 1 || chars(line) > 80 || is_caption(line) || ends_sentence(line) {
+        return false;
+    }
+    let row = |l: &&Vec<Run>| l.len() >= 2;
+    let after = lines[i + 1..].iter().take(3).find(row);
+    let before = lines[..i].iter().rev().take(3).find(|l| l.len() >= 3);
+    after.is_some_and(|l| l.len() >= 3) && before.is_some_and(|l| l.len() >= 3)
+}
+
+/// A footnote mark on a line of its own, such as the `2` after a header.
+fn is_mark(line: &[Run]) -> bool {
+    line.len() == 1 && line[0].text.len() <= 2 && line[0].text.bytes().all(|b| b.is_ascii_digit())
+}
+
 /// Unbroken stretches of lines that are not prose. A gap much taller than the
 /// rows so far ends one too.
 fn blocks(lines: &[Vec<Run>]) -> Vec<(usize, usize)> {
@@ -102,14 +123,16 @@ fn blocks(lines: &[Vec<Run>]) -> Vec<(usize, usize)> {
         };
         // A short line between rows is a group label only if the rows match.
         let lone = line.len() < 2
-            && lines.get(i + 1).map(Vec::len) != lines.get(i.wrapping_sub(1)).map(Vec::len);
+            && lines.get(i + 1).map(Vec::len) != lines.get(i.wrapping_sub(1)).map(Vec::len)
+            && !(start.is_some() && bridges(lines, i));
+        let text = is_text(line, edges) && !(start.is_some() && bridges(lines, i));
         if let Some(s) = start
-            && (is_text(line, edges) || lone || step > gap * 2.5)
+            && (text || lone || step > gap * 2.5)
         {
             found.push((s, i));
             start = None;
         }
-        if is_text(line, edges) || lone {
+        if text || lone {
             continue;
         }
         match start {
@@ -194,6 +217,8 @@ fn is_table(block: &[Vec<Run>], spans: &[(f64, f64)]) -> bool {
         .filter(|c| *c == '\u{FFFD}')
         .count();
     let full = block.iter().filter(|l| l.len() == spans.len()).count();
+    // Labels and notes kept inside the table do not count against it.
+    let rows = block.iter().filter(|l| l.len() >= 2).count();
     // The names and addresses at the top of a paper line up like a table.
     let authors = all
         .iter()
@@ -201,7 +226,7 @@ fn is_table(block: &[Vec<Run>], spans: &[(f64, f64)]) -> bool {
         .count();
     long * 2 < all.len()
         && authors * 4 < all.len()
-        && full * 2 >= block.len()
+        && full * 2 >= rows
         && letters <= all.len() * 24
         && garbled * 10 < letters
 }
@@ -274,7 +299,36 @@ fn page_tables(lines: &[Vec<Run>]) -> Vec<Found> {
         while first < last && lines[last - 1].len() < 2 {
             last -= 1;
         }
+        // Lines a wide gap above the header, such as an invoice number and its
+        // date, are not part of the table.
+        let mut steps: Vec<f64> = (first + 1..last)
+            .map(|j| lines[j - 1][0].y - lines[j][0].y)
+            .collect();
+        steps.sort_by(f64::total_cmp);
+        if let Some(&usual) = steps.get(steps.len() / 2) {
+            for j in first + 1..(first + 6).min(last) {
+                if lines[j - 1][0].y - lines[j][0].y > usual * 2.5 {
+                    first = j;
+                }
+            }
+        }
         let columns = spans(&lines[first..last]);
+        // A footer in a smaller type straight under the table, such as a
+        // company's address and bank details, is not part of it.
+        let mut sizes: Vec<f64> = lines[first..last]
+            .iter()
+            .filter(|l| l.len() == columns.len())
+            .map(|l| l[0].size)
+            .collect();
+        sizes.sort_by(f64::total_cmp);
+        if let Some(&size) = sizes.get(sizes.len() / 2) {
+            while last > first + 1
+                && lines[last - 1].len() >= 2
+                && (lines[last - 1][0].size - size).abs() > size * 0.1
+            {
+                last -= 1;
+            }
+        }
         // A heading straight after the table has too few cells to be a row.
         while columns.len() >= 4 && first < last && lines[last - 1].len() * 2 <= columns.len() {
             last -= 1;
@@ -284,13 +338,40 @@ fn page_tables(lines: &[Vec<Run>]) -> Vec<Found> {
             continue;
         }
         let mut rows: Vec<Vec<String>> = Vec::new();
-        if first > 0
+        // A header over several lines, each with fewer cells than the rows, is
+        // one header row.
+        let tall = block
+            .iter()
+            .take_while(|l| l.len() >= 2 && l.len() < columns.len())
+            .count();
+        let (block, merged) = if tall >= 2 {
+            let mut header = vec![String::new(); columns.len()];
+            for line in &block[..tall] {
+                for (cell, part) in header.iter_mut().zip(fill_row(line, &columns)) {
+                    if !part.is_empty() {
+                        if !cell.is_empty() {
+                            cell.push(' ');
+                        }
+                        cell.push_str(&part);
+                    }
+                }
+            }
+            (&block[tall..], Some(header))
+        } else {
+            (block, None)
+        };
+        if let Some(header) = merged {
+            rows.push(header);
+        } else if first > 0
             && lines[first - 1][0].y - lines[first][0].y < lines[first][0].size * 3.0
             && let Some(header) = header_row(&lines[first - 1], &columns)
         {
             rows.push(header);
         }
         for (n, line) in block.iter().enumerate() {
+            if is_mark(line) {
+                continue;
+            }
             let spread = (n == 0 && line.len() < columns.len())
                 .then(|| header_row(line, &columns))
                 .flatten();
