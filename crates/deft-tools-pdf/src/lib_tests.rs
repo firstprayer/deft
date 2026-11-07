@@ -318,3 +318,59 @@ fn the_region_of_form_fields_is_measured_as_shown() {
     // Turned clockwise, the top of the page is on the right.
     assert_eq!(r, [799.0, 99.0, 22.0, 202.0]);
 }
+
+#[test]
+fn images_with_a_soft_mask_are_recompressed_and_keep_it() {
+    let (mut doc, image) = icc_image_pdf();
+    let alpha: Vec<u8> = (0..400 * 400).map(|i| (i % 400) as u8).collect();
+    let mask = doc.add_object(Stream::new(
+        dictionary! {
+            "Type" => "XObject", "Subtype" => "Image", "Width" => 400, "Height" => 400,
+            "ColorSpace" => "DeviceGray", "BitsPerComponent" => 8, "Filter" => "FlateDecode",
+        },
+        flate(&alpha),
+    ));
+    let d = &mut doc
+        .get_object_mut(image)
+        .unwrap()
+        .as_stream_mut()
+        .unwrap()
+        .dict;
+    d.set("SMask", mask);
+    d.set("Filter", "FlateDecode");
+    let raw = doc
+        .get_object(image)
+        .unwrap()
+        .as_stream()
+        .unwrap()
+        .content
+        .clone();
+    doc.get_object_mut(image)
+        .unwrap()
+        .as_stream_mut()
+        .unwrap()
+        .set_content(flate(&raw));
+    let policy = ImagePolicy {
+        dpi: 20.0,
+        quality: 50,
+        grayscale: false,
+    };
+    assert_eq!(recompress_images(&mut doc, policy), 1);
+    let picture = doc.get_object(image).unwrap().as_stream().unwrap();
+    assert_eq!(
+        picture.dict.get(b"Filter").unwrap().as_name().unwrap(),
+        b"DCTDecode"
+    );
+    assert_eq!(
+        picture.dict.get(b"SMask").unwrap().as_reference().unwrap(),
+        mask
+    );
+    let width = picture.dict.get(b"Width").unwrap().as_i64().unwrap();
+    let alpha = doc.get_object(mask).unwrap().as_stream().unwrap();
+    assert_eq!(alpha.dict.get(b"Width").unwrap().as_i64().unwrap(), width);
+    assert_eq!(
+        alpha.dict.get(b"Filter").unwrap().as_name().unwrap(),
+        b"FlateDecode"
+    );
+    assert!(width < 400);
+}

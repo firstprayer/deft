@@ -1191,10 +1191,74 @@ pub fn recompress_images(doc: &mut Document, policy: ImagePolicy) -> usize {
             .collect()
     });
     let n = replaced.len();
+    let mut shrunk = Vec::new();
     for (id, stream) in replaced {
+        let mask = stream
+            .dict
+            .get(b"SMask")
+            .and_then(Object::as_reference)
+            .ok();
+        let get = |k: &[u8]| stream.dict.get(k).and_then(Object::as_i64).unwrap_or(0) as u32;
+        if let Some(mask) = mask {
+            shrunk.push((mask, get(b"Width"), get(b"Height")));
+        }
         doc.objects.insert(id, Object::Stream(stream));
     }
+    shrink_masks(doc, &shrunk);
     n
+}
+
+/// Downsample the soft masks of recompressed images to their new size. The
+/// mask stays a lossless image of its own.
+fn shrink_masks(doc: &mut Document, images: &[(ObjectId, u32, u32)]) {
+    let mut uses: HashMap<ObjectId, usize> = HashMap::new();
+    for o in doc.objects.values() {
+        if let Ok(s) = o.as_stream()
+            && let Ok(id) = s.dict.get(b"SMask").and_then(Object::as_reference)
+        {
+            *uses.entry(id).or_default() += 1;
+        }
+    }
+    for &(id, w, h) in images {
+        // A mask shared by several images keeps its size.
+        if uses.get(&id) != Some(&1) || w == 0 || h == 0 {
+            continue;
+        }
+        let Some(stream) = doc.objects.get(&id).and_then(|o| o.as_stream().ok()) else {
+            continue;
+        };
+        if let Some(smaller) = shrink_mask(stream, w, h) {
+            doc.objects.insert(id, Object::Stream(smaller));
+        }
+    }
+}
+
+fn shrink_mask(s: &Stream, w: u32, h: u32) -> Option<Stream> {
+    let d = &s.dict;
+    let get_i = |k: &[u8]| d.get(k).ok().and_then(|o| o.as_i64().ok());
+    let (mw, mh) = (get_i(b"Width")? as u32, get_i(b"Height")? as u32);
+    if get_i(b"BitsPerComponent") != Some(8) || d.has(b"Decode") || (mw <= w && mh <= h) {
+        return None;
+    }
+    let filters = s.filters().unwrap_or_default();
+    if !(filters.is_empty() || (filters.len() == 1 && filters[0] == b"FlateDecode")) {
+        return None;
+    }
+    let raw = if filters.is_empty() {
+        s.content.clone()
+    } else {
+        s.decompressed_content().ok()?
+    };
+    let gray = image::GrayImage::from_raw(mw, mh, raw)?;
+    let small =
+        deft_tools_image::resize_exact(&image::DynamicImage::ImageLuma8(gray), w, h).ok()?;
+    let mut dict = d.clone();
+    dict.set("Width", w as i64);
+    dict.set("Height", h as i64);
+    dict.set("Filter", "FlateDecode");
+    dict.remove(b"DecodeParms");
+    dict.remove(b"Length");
+    Some(Stream::new(dict, flate(small.to_luma8().as_raw())).with_compression(false))
 }
 
 /// A CMYK or YCCK JPEG as RGB, decoded the way the page renderer (hayro,
@@ -1241,12 +1305,15 @@ fn cmyk_jpeg(data: &[u8], w: u32, h: u32) -> Option<image::DynamicImage> {
 fn recompress_one(s: &Stream, comps: usize, policy: ImagePolicy, cap: u32) -> Option<Stream> {
     let d = &s.dict;
     let get_i = |k: &[u8]| d.get(k).ok().and_then(|o| o.as_i64().ok());
+    // A soft mask is a separate image and is downsampled after; a colour-key
+    // /Mask needs exact colours, which JPEG does not keep. A soft mask
+    // overrides /Mask, so then /Mask does not count.
+    let soft = d.has(b"SMask");
     if d.get(b"ImageMask")
         .and_then(Object::as_bool)
         .unwrap_or(false)
         || d.has(b"Decode")
-        || d.has(b"Mask")
-        || d.has(b"SMask")
+        || (d.has(b"Mask") && !soft)
     {
         return None;
     }
@@ -1315,6 +1382,9 @@ fn recompress_one(s: &Stream, comps: usize, policy: ImagePolicy, cap: u32) -> Op
         return None;
     }
     let mut dict = d.clone();
+    if soft {
+        dict.remove(b"Mask");
+    }
     dict.set("Filter", "DCTDecode");
     dict.remove(b"DecodeParms");
     dict.set("Width", img.width() as i64);
