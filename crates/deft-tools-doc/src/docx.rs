@@ -1,7 +1,7 @@
 //! Word documents: a reader for the common structures and a small writer.
 
 use crate::zipped::{Package, join};
-use crate::{Block, Document, Image, Span, bad};
+use crate::{Block, Document, Image, Merge, Span, bad};
 use deft_core::error::Result;
 use roxmltree::{Document as Xml, Node};
 use std::collections::HashMap;
@@ -309,16 +309,65 @@ impl Reader<'_> {
         }
     }
 
+    /// A table on its grid: w:gridSpan merges across, w:vMerge down.
     fn table(&mut self, t: Node) -> Block {
-        let mut rows = Vec::new();
-        for tr in self.parts_of(t, "tr") {
-            let mut row = Vec::new();
+        fn val<'a>(n: Option<Node<'a, '_>>) -> Option<&'a str> {
+            n.and_then(|x| x.attribute((W, "val")))
+        }
+        let count = |n: Option<Node>| val(n).and_then(|v| v.parse::<usize>().ok());
+        let mut rows: Vec<Vec<Vec<Span>>> = Vec::new();
+        let mut merges: Vec<Merge> = Vec::new();
+        // Grid column -> the merge a vertical run started there belongs to.
+        let mut down: HashMap<usize, usize> = HashMap::new();
+        for (r, tr) in self.parts_of(t, "tr").into_iter().enumerate() {
+            let trpr = w(tr, "trPr");
+            let mut row: Vec<Vec<Span>> = Vec::new();
+            for _ in 0..count(trpr.and_then(|p| w(p, "gridBefore")))
+                .unwrap_or(0)
+                .min(64)
+            {
+                row.push(vec![]);
+            }
             for tc in self.parts_of(tr, "tc") {
+                let tcpr = w(tc, "tcPr");
+                let span = count(tcpr.and_then(|p| w(p, "gridSpan")))
+                    .unwrap_or(1)
+                    .clamp(1, 64);
+                let col = row.len();
+                let vmerge = tcpr.and_then(|p| w(p, "vMerge"));
+                let continues = vmerge.is_some() && val(vmerge) != Some("restart");
+                if continues && let Some(&m) = down.get(&col) {
+                    merges[m].rows += 1;
+                    row.extend(std::iter::repeat_n(vec![], span));
+                    continue;
+                }
+                for c in col..col + span {
+                    down.remove(&c);
+                }
+                if vmerge.is_some() || span > 1 {
+                    if vmerge.is_some() {
+                        down.insert(col, merges.len());
+                    }
+                    merges.push(Merge {
+                        row: r,
+                        col,
+                        rows: 1,
+                        cols: span,
+                    });
+                }
                 row.push(self.flat(tc));
+                row.extend(std::iter::repeat_n(vec![], span - 1));
+            }
+            for _ in 0..count(trpr.and_then(|p| w(p, "gridAfter")))
+                .unwrap_or(0)
+                .min(64)
+            {
+                row.push(vec![]);
             }
             rows.push(row);
         }
-        Block::Table(rows)
+        merges.retain(|m| m.rows * m.cols > 1);
+        Block::Table(rows, merges)
     }
 
     fn paragraph(&mut self, p: Node, blocks: &mut Vec<Block>) {
@@ -800,7 +849,7 @@ impl Writer<'_> {
                     ));
                 }
             }
-            Block::Table(rows) => {
+            Block::Table(rows, _) => {
                 out.push_str("<w:tbl><w:tblPr><w:tblStyle w:val=\"TableGrid\"/><w:tblW w:w=\"5000\" w:type=\"pct\"/><w:tblBorders><w:top w:val=\"single\" w:sz=\"4\" w:color=\"auto\"/><w:left w:val=\"single\" w:sz=\"4\" w:color=\"auto\"/><w:bottom w:val=\"single\" w:sz=\"4\" w:color=\"auto\"/><w:right w:val=\"single\" w:sz=\"4\" w:color=\"auto\"/><w:insideH w:val=\"single\" w:sz=\"4\" w:color=\"auto\"/><w:insideV w:val=\"single\" w:sz=\"4\" w:color=\"auto\"/></w:tblBorders></w:tblPr>");
                 for (r, row) in rows.iter().enumerate() {
                     out.push_str("<w:tr>");

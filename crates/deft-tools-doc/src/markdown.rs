@@ -1,6 +1,6 @@
 //! Blocks to Markdown text, and Markdown text to blocks.
 
-use crate::{Block, Document, Span};
+use crate::{Block, Document, Merge, Span};
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
 fn escape(text: &str) -> String {
@@ -89,7 +89,7 @@ fn table(rows: &[Vec<Vec<Span>>], out: &mut String) {
 }
 
 /// `in_item` keeps a nested list against its item, which keeps the list tight.
-fn write(blocks: &[Block], prefix: &str, in_item: bool, out: &mut String) {
+fn write(blocks: &[Block], prefix: &str, in_item: bool, html: bool, out: &mut String) {
     for (i, b) in blocks.iter().enumerate() {
         if i > 0 && !(in_item && matches!(b, Block::List { .. })) {
             out.push_str(prefix.trim_end());
@@ -120,7 +120,7 @@ fn write(blocks: &[Block], prefix: &str, in_item: bool, out: &mut String) {
                     };
                     let pad = " ".repeat(marker.len());
                     let mut body = String::new();
-                    write(item, "", true, &mut body);
+                    write(item, "", true, html, &mut body);
                     for (l, line) in body.lines().enumerate() {
                         out.push_str(prefix);
                         out.push_str(if l == 0 { &marker } else { &pad });
@@ -129,7 +129,7 @@ fn write(blocks: &[Block], prefix: &str, in_item: bool, out: &mut String) {
                     }
                 }
             }
-            Block::Quote(inner) => write(inner, &format!("{prefix}> "), false, out),
+            Block::Quote(inner) => write(inner, &format!("{prefix}> "), false, html, out),
             Block::Code(code) => {
                 out.push_str(&format!("{prefix}```\n"));
                 for line in code.lines() {
@@ -139,7 +139,14 @@ fn write(blocks: &[Block], prefix: &str, in_item: bool, out: &mut String) {
                 }
                 out.push_str(&format!("{prefix}```\n"));
             }
-            Block::Table(rows) => table(rows, out),
+            Block::Table(rows, merges) if html && !merges.is_empty() => {
+                for line in html_table(rows, merges).lines() {
+                    out.push_str(prefix);
+                    out.push_str(line);
+                    out.push('\n');
+                }
+            }
+            Block::Table(rows, _) => table(rows, out),
             Block::Rule => out.push_str("---\n"),
             Block::PageBreak => out.push_str("<!-- page break -->\n"),
         }
@@ -149,7 +156,85 @@ fn write(blocks: &[Block], prefix: &str, in_item: bool, out: &mut String) {
 /// Render a document as Markdown.
 pub fn render(doc: &Document) -> String {
     let mut out = String::new();
-    write(&doc.blocks, "", false, &mut out);
+    write(&doc.blocks, "", false, false, &mut out);
+    out
+}
+
+/// Markdown for a page or a PDF: a table with merged cells is written as
+/// HTML, which can say so. Plain Markdown pads such a table instead.
+pub fn render_for_layout(doc: &Document) -> String {
+    let mut out = String::new();
+    write(&doc.blocks, "", false, true, &mut out);
+    out
+}
+
+fn html_escape(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+fn html_inline(spans: &[Span]) -> String {
+    let mut out = String::new();
+    for s in spans {
+        if let Some(name) = &s.image {
+            out.push_str(&format!(
+                "<img src=\"{}\" alt=\"{}\">",
+                html_escape(&link_name(name)),
+                html_escape(&s.text)
+            ));
+            continue;
+        }
+        let mut body = html_escape(&s.text).replace('\n', "<br>");
+        for (on, tag) in [
+            (s.code, "code"),
+            (s.strike, "del"),
+            (s.italic, "em"),
+            (s.bold, "strong"),
+        ] {
+            if on {
+                body = format!("<{tag}>{body}</{tag}>");
+            }
+        }
+        if let Some(link) = &s.link {
+            body = format!("<a href=\"{}\">{body}</a>", html_escape(link));
+        }
+        out.push_str(&body);
+    }
+    out
+}
+
+/// A table as HTML on one line per row, with no blank line, so that
+/// Markdown keeps it as one HTML block.
+fn html_table(rows: &[Vec<Vec<Span>>], merges: &[Merge]) -> String {
+    let mut out = String::from("<table>\n");
+    for (r, row) in rows.iter().enumerate() {
+        out.push_str("<tr>");
+        for (c, cell) in row.iter().enumerate() {
+            let covered = merges.iter().any(|m| {
+                (m.row..m.row + m.rows).contains(&r)
+                    && (m.col..m.col + m.cols).contains(&c)
+                    && (m.row, m.col) != (r, c)
+            });
+            if covered {
+                continue;
+            }
+            let tag = if r == 0 { "th" } else { "td" };
+            let mut attrs = String::new();
+            if let Some(m) = merges.iter().find(|m| (m.row, m.col) == (r, c)) {
+                if m.cols > 1 {
+                    attrs.push_str(&format!(" colspan=\"{}\"", m.cols));
+                }
+                if m.rows > 1 {
+                    attrs.push_str(&format!(" rowspan=\"{}\"", m.rows));
+                }
+            }
+            out.push_str(&format!("<{tag}{attrs}>{}</{tag}>", html_inline(cell)));
+        }
+        out.push_str("</tr>\n");
+    }
+    out.push_str("</table>\n");
     out
 }
 
@@ -359,7 +444,7 @@ pub fn parse(md: &str) -> Vec<Block> {
             Event::Start(Tag::Table(_)) => table = Some(vec![]),
             Event::End(TagEnd::Table) => {
                 if let Some(rows) = table.take() {
-                    push(&mut stack, Block::Table(rows));
+                    push(&mut stack, Block::Table(rows, vec![]));
                 }
             }
             Event::Start(Tag::TableHead | Tag::TableRow) => {

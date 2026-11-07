@@ -314,7 +314,7 @@ impl Reader {
         self.end_row();
         if !self.table.is_empty() {
             let rows = std::mem::take(&mut self.table);
-            self.blocks.push(Block::Table(rows));
+            self.blocks.push(Block::Table(rows, vec![]));
         }
     }
 

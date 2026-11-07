@@ -280,7 +280,7 @@ impl Reader<'_> {
                         }
                         rows.push(row);
                     }
-                    out.push(Block::Table(rows));
+                    out.push(Block::Table(rows, vec![]));
                 }
                 // Sections, generated indexes and page-anchored shapes.
                 _ => self.blocks(n, out),

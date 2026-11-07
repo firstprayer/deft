@@ -27,7 +27,7 @@ pub static OP: Op = Op {
 fn run(job: &Job) -> Result<OpResult> {
     let doc = load(job.input())?;
     let dir = images_folder(job, &doc.images)?;
-    let md = deft_tools_doc::markdown::render(&doc);
+    let md = deft_tools_doc::markdown::render_for_layout(&doc);
     let mut res = markdown_pdf(job, &md, Some(&dir))?;
     res.warnings.splice(0..0, doc.warnings);
     Ok(res)

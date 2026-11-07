@@ -35,7 +35,7 @@ fn media_type(name: &str) -> Option<&'static str> {
 
 fn run(job: &Job) -> Result<OpResult> {
     let doc = load(job.input())?;
-    let md = deft_tools_doc::markdown::render(&doc);
+    let md = deft_tools_doc::markdown::render_for_layout(&doc);
     let mut html =
         deft_tools_text::to_html(&md, !job.params.flag("fragment"), doc.title.as_deref());
     let mut skipped = 0;

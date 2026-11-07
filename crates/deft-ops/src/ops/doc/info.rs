@@ -33,7 +33,7 @@ fn run(job: &Job) -> Result<OpResult> {
             ("words", words),
             ("paragraphs", count(|b| matches!(b, Block::Paragraph(_)))),
             ("headings", count(|b| matches!(b, Block::Heading(..)))),
-            ("tables", count(|b| matches!(b, Block::Table(_)))),
+            ("tables", count(|b| matches!(b, Block::Table(..)))),
             ("images", doc.images.len()),
         ],
         format!("{words} words"),

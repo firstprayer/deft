@@ -58,10 +58,21 @@ pub enum Block {
     },
     Quote(Vec<Block>),
     Code(String),
-    /// Rows of cells; the first row is the header.
-    Table(Vec<Vec<Vec<Span>>>),
+    /// Rows of cells; the first row is the header. Every row has a cell for
+    /// each grid column; merged cells are listed beside the rows.
+    Table(Vec<Vec<Vec<Span>>>, Vec<Merge>),
     Rule,
     PageBreak,
+}
+
+/// A merged cell: the cell at `row`, `col` covers `rows` by `cols` cells of
+/// the grid. The cells it covers are empty.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Merge {
+    pub row: usize,
+    pub col: usize,
+    pub rows: usize,
+    pub cols: usize,
 }
 
 /// An embedded picture.
@@ -104,7 +115,7 @@ fn blocks_text(blocks: &[Block], out: &mut String) {
                 out.push_str(c);
                 out.push('\n');
             }
-            Block::Table(rows) => {
+            Block::Table(rows, _) => {
                 for row in rows {
                     let cells: Vec<String> = row
                         .iter()

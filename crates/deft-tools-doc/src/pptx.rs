@@ -339,7 +339,7 @@ pub fn to_document(slides: &[Slide], images: Vec<Image>, notes: bool) -> Documen
             });
         }
         for table in &s.tables {
-            blocks.push(Block::Table(table.clone()));
+            blocks.push(Block::Table(table.clone(), vec![]));
         }
         for img in &s.images {
             blocks.push(Block::Paragraph(vec![Span {
@@ -672,7 +672,7 @@ fn add_bullets(blocks: &[Block], level: usize, slide: &mut NewSlide) {
             Block::Code(code) => slide
                 .bullets
                 .extend(code.lines().map(|l| (level, l.to_string()))),
-            Block::Table(rows) => {
+            Block::Table(rows, _) => {
                 for row in rows {
                     let cells: Vec<String> = row.iter().map(|c| plain(c)).collect();
                     slide.bullets.push((level, cells.join(" | ")));

@@ -82,7 +82,7 @@ fn word_tables_keep_nested_and_controlled_text() {
         para("wrapped")
     );
     let doc = docx::read(&word(&format!("{table}{wrapped}"), &[])).unwrap();
-    let Block::Table(rows) = &doc.blocks[0] else {
+    let Block::Table(rows, _) = &doc.blocks[0] else {
         panic!("{:?}", doc.blocks)
     };
     let cell = |i: usize| -> String { rows[0][i].iter().map(|s| s.text.as_str()).collect() };
@@ -730,4 +730,50 @@ fn book_pictures_keep_their_titles_and_spaces() {
         ..Default::default()
     };
     assert_eq!(markdown::render(&doc), "![](Object%201)\n");
+}
+
+#[test]
+fn word_merged_cells_become_spans() {
+    let tc =
+        |props: &str, text: &str| format!("<w:tc><w:tcPr>{props}</w:tcPr>{}</w:tc>", para(text));
+    let body = format!(
+        "<w:tbl><w:tr>{}</w:tr><w:tr>{}{}{}</w:tr><w:tr>{}{}{}</w:tr></w:tbl>",
+        tc("<w:gridSpan w:val=\"3\"/>", "December 2007"),
+        tc("<w:vMerge w:val=\"restart\"/>", "Tall"),
+        tc("", "b"),
+        tc("", "c"),
+        tc("<w:vMerge/>", ""),
+        tc("", "d"),
+        tc("", "e"),
+    );
+    let doc = docx::read(&word(&body, &[])).unwrap();
+    let Block::Table(rows, merges) = &doc.blocks[0] else {
+        panic!("{:?}", doc.blocks)
+    };
+    assert!(rows.iter().all(|r| r.len() == 3), "{rows:?}");
+    assert_eq!(
+        merges,
+        &[
+            Merge {
+                row: 0,
+                col: 0,
+                rows: 1,
+                cols: 3
+            },
+            Merge {
+                row: 1,
+                col: 0,
+                rows: 2,
+                cols: 1
+            }
+        ]
+    );
+    let html = markdown::render_for_layout(&doc);
+    assert!(
+        html.contains("<tr><th colspan=\"3\">December 2007</th></tr>"),
+        "{html}"
+    );
+    assert!(html.contains("<tr><td rowspan=\"2\">Tall</td><td>b</td><td>c</td></tr>\n<tr><td>d</td><td>e</td></tr>"), "{html}");
+    // Plain Markdown pads instead.
+    assert!(markdown::render(&doc).contains("| December 2007 |  |  |"));
 }

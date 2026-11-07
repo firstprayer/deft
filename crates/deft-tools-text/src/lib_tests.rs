@@ -68,3 +68,26 @@ fn headings_get_the_anchors_toc_links_to() {
         ["table-of-contents", "table-of-contents-1"]
     );
 }
+
+#[test]
+fn pdf_survives_empty_links_and_unknown_pictures() {
+    let dir = std::env::temp_dir().join(format!("deft-text-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("pic.emf"), b"\x01\x00\x00\x00 EMF").unwrap();
+    let md = "[nowhere]() and ![a chart](pic.emf)\n\n<table><tr><th colspan=\"3\">Title over all</th></tr><tr><td rowspan=\"2\">a</td><td>b</td><td>:face_with_spiral_eyes:</td></tr><tr><td>c</td><td>d</td></tr></table>\n";
+    let out = to_pdf(md, Some(&dir), &PdfStyle::default()).unwrap();
+    assert!(out.bytes.starts_with(b"%PDF"));
+    assert!(
+        out.warnings
+            .iter()
+            .any(|w| w.contains("EMF pictures cannot be drawn")),
+        "{:?}",
+        out.warnings
+    );
+    assert!(
+        !out.warnings.iter().any(|w| w.contains("raw HTML")),
+        "{:?}",
+        out.warnings
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

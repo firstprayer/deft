@@ -222,7 +222,7 @@ pub fn load_images(
                     }
                 }
                 Block::Quote(inner) => walk(inner, base, out),
-                Block::Table(rows) => {
+                Block::Table(rows, _) => {
                     for row in rows {
                         for cell in row {
                             spans(cell, base, out);
