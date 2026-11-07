@@ -24,7 +24,7 @@ pub static OP: Op = Op {
     ],
     tags: &["form", "acroform", "fill in", "tax form", "application"],
     result: &["filled"],
-    errors: &[ErrorCode::BadValue],
+    errors: &[ErrorCode::BadValue, ErrorCode::InputUnsupported],
     suffix: Some("filled"),
     run,
     ..Op::DEFAULT

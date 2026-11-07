@@ -138,3 +138,17 @@ fn a_list_selects_options_of_a_list_box() {
         .collect();
     assert_eq!(picked, [0, 2]);
 }
+
+#[test]
+fn a_dynamic_xfa_form_is_not_filled() {
+    let mut doc = form();
+    assert!(!is_dynamic_xfa(&doc));
+    let xfa = doc.add_object(Stream::new(Dictionary::new(), b"<xdp/>".to_vec()));
+    acro_form_mut(&mut doc).unwrap().set("XFA", xfa);
+    // A static XFA form, such as an IRS form, has its fields in the PDF too.
+    assert!(!is_dynamic_xfa(&doc));
+    doc.catalog_mut().unwrap().set("NeedsRendering", true);
+    assert!(is_dynamic_xfa(&doc));
+    let e = fill(&mut doc, &values(&[("First Name", json!("Ada"))])).unwrap_err();
+    assert_eq!(e.code, ErrorCode::InputUnsupported);
+}

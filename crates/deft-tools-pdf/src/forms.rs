@@ -210,6 +210,22 @@ pub(crate) fn acro_form(doc: &Document) -> Option<&Dictionary> {
     deref(doc, catalog.get(b"AcroForm").ok()?).as_dict().ok()
 }
 
+/// Whether the form is a dynamic XFA form: its pages and fields live in XFA
+/// data that only some viewers render, and the PDF page is a placeholder.
+pub fn is_dynamic_xfa(doc: &Document) -> bool {
+    let needs_rendering = doc
+        .catalog()
+        .ok()
+        .and_then(|c| c.get(b"NeedsRendering").ok())
+        .and_then(|o| deref(doc, o).as_bool().ok())
+        .unwrap_or(false);
+    needs_rendering && acro_form(doc).is_some_and(|f| f.has(b"XFA"))
+}
+
+/// The warning for a dynamic XFA form.
+pub const XFA_WARNING: &str = "this is a dynamic XFA form: its real fields and values are in \
+     XFA data, which deft cannot read or fill; the PDF page is a placeholder";
+
 /// Every field of the document's form, in document order.
 pub fn fields(doc: &Document) -> Vec<Field> {
     let Some(form) = acro_form(doc) else {
@@ -760,6 +776,9 @@ fn set_on(doc: &mut Document, id: ObjectId, key: &[u8], value: Object) -> Result
 /// Fill fields from name -> value pairs. Returns warnings. Unknown names are an
 /// error, so a typo cannot pass as success.
 pub fn fill(doc: &mut Document, values: &BTreeMap<String, Value>) -> Result<Vec<String>> {
+    if is_dynamic_xfa(doc) {
+        return Err(err(ErrorCode::InputUnsupported, XFA_WARNING));
+    }
     let all = fields(doc);
     if all.is_empty() {
         return Err(err(
