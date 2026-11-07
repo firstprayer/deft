@@ -255,6 +255,15 @@ fn furniture_name(name: &str) -> bool {
 }
 
 fn is_furniture(n: &Handle, holds_title: bool) -> bool {
+    // An article's own footer holds its byline, date or section, not the
+    // site's links: keep a short one that is mostly text.
+    if dom::is(n, &["footer"])
+        && dom::ancestors(n).iter().any(|a| dom::is(a, &["article"]))
+        && dom::text(n).trim().chars().count() < 200
+        && link_density(n) < 0.5
+    {
+        return false;
+    }
     const TAGS: &[&str] = &[
         "nav", "aside", "footer", "script", "style", "noscript", "template", "iframe", "form",
         "button", "select", "dialog", "menu",
