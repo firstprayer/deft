@@ -74,3 +74,15 @@ fn lengths_bytes_colors_positions() {
     assert_eq!(Position::parse("Top Center").unwrap().name(), "top");
     assert!(Position::parse("north").is_err());
 }
+
+#[test]
+fn text_keeps_its_spaces_and_the_rest_are_trimmed() {
+    assert_eq!(
+        Kind::Text.parse("find", " ").unwrap(),
+        Value::Text(" ".into())
+    );
+    assert_eq!(
+        Kind::Int { min: 0, max: 9 }.parse("n", " 3 ").unwrap(),
+        Value::Int(3)
+    );
+}
