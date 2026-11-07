@@ -63,3 +63,31 @@ pub(crate) fn text(node: &Handle) -> String {
     walk(node, &mut out);
     out
 }
+
+pub(crate) fn parent(node: &Handle) -> Option<Handle> {
+    let weak = node.parent.take();
+    let up = weak.as_ref().and_then(|w| w.upgrade());
+    node.parent.set(weak);
+    up
+}
+
+/// The parents of a node, nearest first.
+pub(crate) fn ancestors(node: &Handle) -> Vec<Handle> {
+    let mut out = Vec::new();
+    let mut at = parent(node);
+    while let Some(p) = at {
+        at = parent(&p);
+        out.push(p);
+    }
+    out
+}
+
+/// Take a node out of the tree.
+pub(crate) fn detach(node: &Handle) {
+    if let Some(p) = parent(node) {
+        p.children
+            .borrow_mut()
+            .retain(|c| !std::rc::Rc::ptr_eq(c, node));
+    }
+    node.parent.set(None);
+}

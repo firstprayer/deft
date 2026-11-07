@@ -3,7 +3,8 @@
 use crate::{bad, dom};
 use deft_core::error::Result;
 use htmd::element_handler::HandlerResult;
-use markup5ever_rcdom::{Handle, NodeData};
+use html5ever::tendril::TendrilSink;
+use markup5ever_rcdom::{Handle, NodeData, RcDom};
 
 const SKIP: &[&str] = &[
     "script", "style", "noscript", "template", "svg", "iframe", "head",
@@ -120,66 +121,410 @@ fn link(handlers: &dyn htmd::element_handler::Handlers, e: htmd::Element) -> Opt
     Some(format!("\n\n{}\n\n", parts.join("\n\n")).into())
 }
 
-/// The inside of the first `<tag ...>...</tag>`, matching nested ones.
-fn element<'a>(html: &'a str, lower: &str, tag: &str) -> Option<&'a str> {
-    let open = format!("<{tag}");
-    let close = format!("</{tag}");
-    let start = lower.match_indices(&open).find_map(|(i, _)| {
-        let next = lower.as_bytes().get(i + open.len())?;
-        matches!(next, b' ' | b'>' | b'\n' | b'\t' | b'\r').then_some(i)
-    })?;
-    let body = start + lower[start..].find('>')? + 1;
-    let (mut depth, mut at) = (1, body);
-    while depth > 0 {
-        let c = lower[at..].find(&close)? + at;
-        depth += lower[at..c].matches(&open).count();
-        depth -= 1;
-        at = c + close.len();
-        if depth == 0 {
-            return Some(&html[body..c]);
-        }
-    }
-    None
-}
-
-/// The article of a page: `<main>`, else `<article>`, else everything but the
-/// site's navigation. Keeps boilerplate out of what an agent reads.
+/// The article of a page, without the site around it: navigation, menus,
+/// language lists, share buttons, related and most-read lists, footers.
+/// Takes `<main>` or the `<article>` holding most of the text, else the
+/// block the paragraphs gather in, with its title and byline.
 pub fn main_content(html: &str) -> String {
-    // `to_ascii_lowercase` keeps byte offsets, so they apply to the original.
-    let lower = html.to_ascii_lowercase();
-    for tag in ["main", "article"] {
-        if let Some(inner) = element(html, &lower, tag)
-            && inner.len() > 200
-        {
-            // Inside an article, <header> holds its headline and byline.
-            return without(inner, &["nav", "aside", "form"]);
-        }
+    let dom = html5ever::parse_document(RcDom::default(), Default::default()).one(html);
+    let doc = dom.document.clone();
+    let total = prose(&doc);
+    let before = dom::text(&doc).trim().chars().count();
+    let titles: Vec<Handle> = dom::descendants(&doc)
+        .into_iter()
+        .filter(|n| dom::is(n, &["h1"]))
+        .collect();
+    prune(&doc, total, &titles);
+    drop_furniture_sections(&doc, total);
+    let root = choose_root(&doc);
+    // A page that is all links, such as a portal's home page, has no
+    // article to find: keep it whole rather than keep a scrap of it.
+    if total < 500 && dom::text(&root).trim().chars().count() * 5 < before {
+        return html.to_string();
     }
-    without(
-        element(html, &lower, "body").unwrap_or(html),
-        &["nav", "aside", "footer", "header", "form"],
-    )
+    let mut out = Vec::new();
+    let opts = html5ever::serialize::SerializeOpts {
+        traversal_scope: html5ever::serialize::TraversalScope::IncludeNode,
+        ..Default::default()
+    };
+    let handle: markup5ever_rcdom::SerializableHandle = root.into();
+    if html5ever::serialize(&mut out, &handle, opts).is_err() {
+        return html.to_string();
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
-/// Remove these elements, with everything inside them.
-fn without(html: &str, tags: &[&str]) -> String {
-    let mut out = html.to_string();
-    for tag in tags {
-        loop {
-            let lower = out.to_ascii_lowercase();
-            let Some(inner) = element(&out, &lower, tag) else {
-                break;
-            };
-            let at = inner.as_ptr() as usize - out.as_ptr() as usize;
-            let start = lower[..at].rfind(&format!("<{tag}")).unwrap_or(at);
-            let close = format!("</{tag}");
-            let end = at + inner.len();
-            let stop = lower[end..].find('>').map_or(lower.len(), |i| end + i + 1);
-            debug_assert!(lower[end..].starts_with(&close));
-            out.replace_range(start..stop, "");
+/// Characters of running text under a node: paragraphs and code, less
+/// their links.
+fn prose(node: &Handle) -> usize {
+    let size = |n: &Handle| dom::text(n).trim().chars().count();
+    dom::descendants(node)
+        .iter()
+        .filter(|d| dom::is(d, &["p", "pre"]))
+        .filter(|d| !dom::ancestors(d).iter().any(|a| dom::is(a, &["p", "pre"])))
+        .map(|d| {
+            let links: usize = dom::descendants(d)
+                .iter()
+                .filter(|a| dom::is(a, &["a"]))
+                .map(size)
+                .sum();
+            size(d).saturating_sub(links)
+        })
+        .sum()
+}
+
+/// Characters of text under a node, and how many are in links.
+fn link_density(node: &Handle) -> f64 {
+    let all = dom::text(node).trim().chars().count().max(1);
+    let linked: usize = dom::descendants(node)
+        .iter()
+        .filter(|d| dom::is(d, &["a"]))
+        .map(|a| dom::text(a).trim().chars().count())
+        .sum();
+    linked as f64 / all as f64
+}
+
+/// Words in class names and ids that mark site furniture.
+const FURNITURE: &[&str] = &[
+    "nav",
+    "navbar",
+    "navbox",
+    "navigation",
+    "menu",
+    "menubar",
+    "submenu",
+    "breadcrumb",
+    "breadcrumbs",
+    "sidebar",
+    "toolbar",
+    "share",
+    "sharing",
+    "social",
+    "related",
+    "recommended",
+    "recommendations",
+    "promo",
+    "advert",
+    "advertisement",
+    "ad",
+    "ads",
+    "sponsor",
+    "sponsored",
+    "cookie",
+    "cookies",
+    "consent",
+    "newsletter",
+    "subscribe",
+    "popup",
+    "modal",
+    "dropdown",
+    "portlet",
+    "catlinks",
+    "printfooter",
+    "editsection",
+    "noprint",
+    "masthead",
+    "skip",
+    "jump",
+    "outbrain",
+    "taboola",
+    "footer",
+    "topbar",
+    "signup",
+    "paywall",
+    "toc",
+    "trending",
+];
+
+fn furniture_name(name: &str) -> bool {
+    name.split_whitespace().any(|token| {
+        let t = token.to_ascii_lowercase();
+        // Wikipedia marks its "Main article:" notes so.
+        if t == "navigation-not-searchable" {
+            return false;
+        }
+        let parts: Vec<&str> = t.split(['-', '_', ':']).filter(|p| !p.is_empty()).collect();
+        let hidden_in_print =
+            t.contains("print") && (t.contains("none") || t.contains("hidden") || t.contains("no"));
+        hidden_in_print
+            || parts.iter().any(|p| FURNITURE.contains(p))
+            || ["nav", "sidebar", "menu", "navigation", "toolbar", "footer"]
+                .iter()
+                .any(|w| t.ends_with(w) || t.starts_with(w))
+    })
+}
+
+fn is_furniture(n: &Handle, holds_title: bool) -> bool {
+    const TAGS: &[&str] = &[
+        "nav", "aside", "footer", "script", "style", "noscript", "template", "iframe", "form",
+        "button", "select", "dialog", "menu",
+    ];
+    if dom::is(n, TAGS) {
+        return true;
+    }
+    // "Skip to content" links are for screen readers on the live page.
+    if dom::is(n, &["a"]) && dom::text(n).trim().to_lowercase().starts_with("skip to") {
+        return true;
+    }
+    if dom::is(n, &["html", "body", "main", "article"]) || holds_title {
+        return false;
+    }
+    let attr = |k: &str| dom::attr(n, k).unwrap_or_default().to_ascii_lowercase();
+    let role = attr("role");
+    if matches!(
+        role.as_str(),
+        "navigation"
+            | "banner"
+            | "contentinfo"
+            | "complementary"
+            | "search"
+            | "menu"
+            | "menubar"
+            | "toolbar"
+            | "dialog"
+    ) {
+        return true;
+    }
+    let style = attr("style").replace(' ', "");
+    if attr("aria-hidden") == "true"
+        || dom::attr(n, "hidden").is_some()
+        || style.contains("display:none")
+        || style.contains("visibility:hidden")
+    {
+        return true;
+    }
+    if dom::is(n, &["header"])
+        && !dom::descendants(n)
+            .iter()
+            .any(|d| dom::is(d, &["h1", "h2", "h3"]))
+    {
+        return true;
+    }
+    furniture_name(&attr("class")) || furniture_name(&attr("id"))
+}
+
+/// Take furniture out of the page. Nothing holding much of the page's
+/// running text goes, whatever its name says, nor a page title.
+fn prune(node: &Handle, total: usize, titles: &[Handle]) {
+    for c in dom::children(node) {
+        if dom::tag(&c).is_none() {
+            continue;
+        }
+        let holds_title = titles.iter().any(|h| {
+            std::rc::Rc::ptr_eq(h, &c)
+                || dom::ancestors(h).iter().any(|a| std::rc::Rc::ptr_eq(a, &c))
+        });
+        if is_furniture(&c, holds_title) && prose(&c) * 4 <= total.max(1) {
+            dom::detach(&c);
+        } else {
+            prune(&c, total, titles);
         }
     }
-    out
+}
+
+/// Headings of lists that are about other pages.
+fn furniture_heading(text: &str) -> bool {
+    let t = text.trim().to_lowercase();
+    const STARTS: &[&str] = &[
+        "most viewed",
+        "most read",
+        "most popular",
+        "related",
+        "more from",
+        "more on",
+        "more stories",
+        "read more",
+        "recommended",
+        "popular",
+        "trending",
+        "you may also",
+        "you might also",
+        "explore more",
+        "in other languages",
+        "languages",
+        "share this",
+        "hot network questions",
+        "linked",
+        "help improve",
+        "on this page",
+        "in this article",
+        "contents",
+        "sponsor this project",
+        "contributors",
+        "releases",
+        "used by",
+        "related content",
+        "相关",
+        "热门",
+        "推荐",
+        "أخبار مقترحة",
+        "الأكثر",
+        "المزيد من",
+        "اقرأ أيضا",
+    ];
+    STARTS.iter().any(|s| t.starts_with(s))
+}
+
+/// Remove the block around a heading such as "Most viewed", as far up as
+/// the block holds that heading alone.
+fn drop_furniture_sections(doc: &Handle, total: usize) {
+    for h in dom::descendants(doc) {
+        if !dom::is(&h, &["h2", "h3", "h4"]) || !furniture_heading(&dom::text(&h)) {
+            continue;
+        }
+        let Some(mut block) = dom::parent(&h) else {
+            continue;
+        };
+        let headings = |n: &Handle| {
+            dom::descendants(n)
+                .iter()
+                .filter(|d| dom::is(d, &["h1", "h2", "h3", "h4", "h5", "h6"]))
+                .count()
+        };
+        if dom::is(&block, &["main", "article", "body", "section"]) && headings(&block) > 1 {
+            // The heading sits among the article's own: take it and what
+            // follows it up to the next heading.
+            let kids = dom::children(&block);
+            let at = kids.iter().position(|k| std::rc::Rc::ptr_eq(k, &h));
+            if let Some(at) = at {
+                let mut gone = vec![kids[at].clone()];
+                for k in &kids[at + 1..] {
+                    if dom::is(k, &["h1", "h2", "h3", "h4"]) {
+                        break;
+                    }
+                    gone.push(k.clone());
+                }
+                let size: usize = gone.iter().map(prose).sum();
+                if link_density_all(&gone) > 0.5 && size * 4 <= total.max(1) {
+                    gone.iter().for_each(dom::detach);
+                }
+            }
+            continue;
+        }
+        while let Some(up) = dom::parent(&block) {
+            if dom::is(&up, &["main", "article", "body", "html"]) || headings(&up) > 1 {
+                break;
+            }
+            block = up;
+        }
+        if prose(&block) * 4 <= total.max(1) {
+            dom::detach(&block);
+        }
+    }
+}
+
+fn link_density_all(nodes: &[Handle]) -> f64 {
+    let all: usize = nodes
+        .iter()
+        .map(|n| dom::text(n).trim().chars().count())
+        .sum();
+    let linked: usize = nodes
+        .iter()
+        .flat_map(|n| {
+            let mut v = dom::descendants(n);
+            v.push(n.clone());
+            v
+        })
+        .filter(|d| dom::is(d, &["a"]))
+        .map(|a| dom::text(&a).trim().chars().count())
+        .sum();
+    linked as f64 / all.max(1) as f64
+}
+
+/// The element holding the article.
+fn choose_root(doc: &Handle) -> Handle {
+    let all = dom::descendants(doc);
+    let body = all
+        .iter()
+        .find(|n| dom::is(n, &["body"]))
+        .cloned()
+        .unwrap_or_else(|| doc.clone());
+    let main = all
+        .iter()
+        .find(|n| dom::is(n, &["main"]) || dom::attr(n, "role").as_deref() == Some("main"))
+        .cloned();
+    // A page with little running text, such as a home page, is all content.
+    let mut root = match main {
+        Some(m) => m,
+        None if prose(&body) < 500 => return body,
+        None => best_block(&body).unwrap_or_else(|| body.clone()),
+    };
+    let top = root.clone();
+    // An article holding most of the text is the article.
+    let size = prose(&root);
+    if let Some(article) = dom::descendants(&root)
+        .into_iter()
+        .filter(|n| dom::is(n, &["article"]))
+        .max_by_key(prose)
+        && prose(&article) * 2 >= size
+        && size > 0
+    {
+        root = article;
+    }
+    // Take in the title and byline beside the text, but not the main
+    // element's other content, nor what lies outside it.
+    let text = |n: &Handle| dom::text(n).trim().chars().count();
+    while !std::rc::Rc::ptr_eq(&root, &top) || !dom::is(&top, &["main"]) {
+        let Some(up) = dom::parent(&root) else { break };
+        if dom::is(&up, &["html", "body"]) || dom::tag(&up).is_none() {
+            break;
+        }
+        let extra = text(&up).saturating_sub(text(&root));
+        let title_outside = dom::descendants(&up).iter().any(|h| {
+            dom::is(h, &["h1", "h2"])
+                && !dom::ancestors(h)
+                    .iter()
+                    .any(|a| std::rc::Rc::ptr_eq(a, &root))
+                && !std::rc::Rc::ptr_eq(h, &root)
+        });
+        if extra * 10 > text(&root) && !(title_outside && extra * 10 <= text(&root) * 3) {
+            break;
+        }
+        let at_main = dom::is(&up, &["main"]);
+        root = up;
+        if at_main {
+            break;
+        }
+    }
+    root
+}
+
+/// The block the paragraphs gather in, scored as Readability does: each
+/// paragraph counts for its parent, and half for its grandparent.
+fn best_block(body: &Handle) -> Option<Handle> {
+    let mut scores: Vec<(Handle, f64)> = Vec::new();
+    let mut add =
+        |n: Handle, s: f64| match scores.iter_mut().find(|(k, _)| std::rc::Rc::ptr_eq(k, &n)) {
+            Some(entry) => entry.1 += s,
+            None => scores.push((n, s)),
+        };
+    for p in dom::descendants(body)
+        .into_iter()
+        .filter(|d| dom::is(d, &["p", "pre"]))
+    {
+        let text = dom::text(&p);
+        let len = text.trim().chars().count();
+        if len < 25 {
+            continue;
+        }
+        let score = 1.0
+            + text.matches([',', '，', '、', '،']).count() as f64
+            + (len as f64 / 100.0).min(3.0);
+        if let Some(parent) = dom::parent(&p) {
+            if let Some(grand) = dom::parent(&parent) {
+                add(grand, score / 2.0);
+            }
+            add(parent, score);
+        }
+    }
+    scores
+        .into_iter()
+        .map(|(n, s)| {
+            let d = link_density(&n);
+            (n, s * (1.0 - d))
+        })
+        .max_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(n, _)| n)
 }
 
 /// One blank line at most between blocks, no spaces at the ends of lines.

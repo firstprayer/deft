@@ -353,7 +353,42 @@ fn main_content_drops_site_chrome() {
     assert!(inner.contains("<h1>T</h1>") && !inner.contains("Home"));
     assert!(!inner.contains("ad") && !inner.contains("footer"));
     let plain = "<body><header>h</header><p>text</p></body>";
-    assert_eq!(html::main_content(plain), "<p>text</p>");
+    let kept = html::main_content(plain);
+    assert!(
+        kept.contains("<p>text</p>") && !kept.contains("<header>"),
+        "{kept}"
+    );
+}
+
+#[test]
+fn main_content_leaves_out_furniture_inside_main() {
+    let text = "Markdown is a lightweight markup language, made in 2004. ".repeat(12);
+    // A Wikipedia page: the language menu and the categories sit in <main>.
+    let wiki = format!(
+        "<body><a class=\"mw-jump-link\" href=\"#c\">Jump to content</a><main><div class=\"vector-page-titlebar\"><h1>Markdown</h1><div id=\"p-lang-btn\" class=\"vector-dropdown mw-portlet mw-portlet-lang\"><ul><li><a href=\"https://als.wikipedia.org\">Alemannisch</a></li></ul></div></div><div id=\"bodyContent\"><div class=\"hatnote navigation-not-searchable\">Main article: X</div><p>{text}</p><div class=\"navbox\"><a href=\"/a\">A</a></div></div><div id=\"catlinks\" class=\"catlinks\"><a href=\"/wiki/Category:X\">Category X</a></div></main></body>"
+    );
+    let md = html::to_markdown(&html::main_content(&wiki)).unwrap();
+    assert!(md.starts_with("# Markdown\n"), "{md}");
+    assert!(
+        md.contains("Main article: X") && md.contains("lightweight markup"),
+        "{md}"
+    );
+    for gone in ["Alemannisch", "Category", "Jump to", "[A]"] {
+        assert!(!md.contains(gone), "{gone}: {md}");
+    }
+    // A blog post without <main> or <article>: the title is in a <header>
+    // beside the text, and the site has its own navigation and lists.
+    let blog = format!(
+        "<body><nav><a href=\"/\">Rust Blog</a></nav><section><div><header><h2>Announcing Rust 1.83.0</h2></header><div class=\"publish-date-author\">Nov. 28, 2024</div><div class=\"post\"><p>{text}</p><p>{text}</p></div></div></section><div><h2>Most viewed</h2><ol><li><a href=\"/a\">Another story</a></li></ol></div><footer>Get help!</footer></body>"
+    );
+    let md = html::to_markdown(&html::main_content(&blog)).unwrap();
+    assert!(
+        md.starts_with("## Announcing Rust 1.83.0\n\nNov. 28, 2024"),
+        "{md}"
+    );
+    for gone in ["Rust Blog", "Most viewed", "Another story", "Get help"] {
+        assert!(!md.contains(gone), "{gone}: {md}");
+    }
 }
 
 #[test]
