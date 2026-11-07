@@ -27,6 +27,7 @@ pub fn qr(text: &str, correction: &str) -> Result<Modules> {
             ErrorCode::BadValue,
             format!("text does not fit in a QR code: {e}"),
         )
+        .hint("--correction l holds the most text")
     })?;
     let width = code.width();
     Ok(Modules {

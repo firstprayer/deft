@@ -5,6 +5,7 @@ use deft_tools_image::image::DynamicImage;
 pub static OP: Op = Op {
     id: "image.rotate",
     summary: "Turn clockwise by any angle (EXIF is applied first)",
+    details: &["--angle 0 only makes the pixels upright, for tools that ignore EXIF."],
     input: Input::each(IN, "image"),
     output: Output::one(INOUT, "image"),
     params: &[
