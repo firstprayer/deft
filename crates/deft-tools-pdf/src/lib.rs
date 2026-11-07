@@ -45,12 +45,95 @@ pub fn load(bytes: &[u8], password: Option<&str>) -> Result<Document> {
         doc.trailer.remove(b"Encrypt");
         doc.encryption_state = None;
     }
-    if doc.get_pages().is_empty() {
+    recover_packed_objects(&mut doc);
+    let pages = doc.get_pages();
+    if pages.is_empty() {
         return Err(err(ErrorCode::InputCorrupt, "the PDF has no pages"));
+    }
+    // lopdf keeps a page it cannot read as a stand-in, which would be written
+    // out as a null page. Refuse rather than drop a page.
+    if let Some((n, _)) = pages
+        .iter()
+        .find(|(_, id)| doc.get_dictionary(**id).is_err())
+    {
+        return Err(err(
+            ErrorCode::InputCorrupt,
+            format!("page {n} cannot be read; the file is damaged"),
+        ));
     }
     // lopdf's text extraction misses resources inherited from parent nodes.
     flatten_inheritance(&mut doc);
     Ok(doc)
+}
+
+/// Read the objects of an object stream that lopdf skipped. Its parser stops
+/// at a comment before an object, which qpdf and others write, so the page
+/// stored there would be lost.
+fn recover_packed_objects(doc: &mut Document) {
+    let mut wanted = Vec::new();
+    for o in doc.objects.values() {
+        references(o, &mut wanted);
+    }
+    if wanted.iter().all(|id| doc.objects.contains_key(id)) {
+        return;
+    }
+    let mut found = Vec::new();
+    for (&(container, _), obj) in &doc.objects {
+        let Ok(stream) = obj.as_stream() else {
+            continue;
+        };
+        if !stream.dict.has_type(b"ObjStm") {
+            continue;
+        }
+        let Ok(plain) = stream.get_plain_content() else {
+            continue;
+        };
+        let mut cleaned = stream.clone();
+        cleaned.dict.remove(b"Filter");
+        cleaned.dict.remove(b"DecodeParms");
+        cleaned.set_content(blank_comments(&plain));
+        let Ok(objects) = lopdf::ObjectStream::new(&cleaned) else {
+            continue;
+        };
+        for (id, o) in objects.objects {
+            // Only objects this container still holds, by the cross-reference
+            // table; an older copy must not shadow a newer one.
+            let current = match doc.reference_table.get(id.0) {
+                None => true,
+                Some(lopdf::xref::XrefEntry::Compressed { container: c, .. }) => *c == container,
+                Some(_) => false,
+            };
+            if current && !doc.objects.contains_key(&id) {
+                found.push((id, o));
+            }
+        }
+    }
+    for (id, o) in found {
+        doc.max_id = doc.max_id.max(id.0);
+        doc.objects.insert(id, o);
+    }
+}
+
+/// Replace comments with spaces, keeping every offset in place.
+fn blank_comments(data: &[u8]) -> Vec<u8> {
+    let mut out = data.to_vec();
+    let (mut depth, mut i) = (0usize, 0);
+    while i < out.len() {
+        match out[i] {
+            b'\\' if depth > 0 => i += 1,
+            b'(' => depth += 1,
+            b')' if depth > 0 => depth -= 1,
+            b'%' if depth == 0 => {
+                while i < out.len() && !matches!(out[i], b'\r' | b'\n') {
+                    out[i] = b' ';
+                    i += 1;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    out
 }
 
 fn encrypted_error(had_password: bool) -> deft_core::error::DeftError {
@@ -243,18 +326,21 @@ fn set_page_tree(doc: &mut Document, pages: &[ObjectId]) -> Result<()> {
     Ok(())
 }
 
+/// Every object an object refers to directly.
+pub(crate) fn references(o: &Object, out: &mut Vec<ObjectId>) {
+    match o {
+        Object::Reference(id) => out.push(*id),
+        Object::Array(a) => a.iter().for_each(|x| references(x, out)),
+        Object::Dictionary(d) => d.iter().for_each(|(_, x)| references(x, out)),
+        Object::Stream(s) => s.dict.iter().for_each(|(_, x)| references(x, out)),
+        _ => {}
+    }
+}
+
 /// Drop objects unreachable from the trailer. lopdf's `prune_objects` scans a
 /// list once per object, which takes seconds on long documents.
 pub(crate) fn prune(doc: &mut Document) {
-    fn refs(o: &Object, out: &mut Vec<ObjectId>) {
-        match o {
-            Object::Reference(id) => out.push(*id),
-            Object::Array(a) => a.iter().for_each(|x| refs(x, out)),
-            Object::Dictionary(d) => d.iter().for_each(|(_, x)| refs(x, out)),
-            Object::Stream(s) => s.dict.iter().for_each(|(_, x)| refs(x, out)),
-            _ => {}
-        }
-    }
+    let refs = references;
     let mut stack = Vec::new();
     doc.trailer.iter().for_each(|(_, o)| refs(o, &mut stack));
     let mut seen = HashSet::new();

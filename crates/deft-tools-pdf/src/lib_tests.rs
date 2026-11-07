@@ -196,3 +196,68 @@ fn grayscale_replaces_an_icc_colour_space() {
         b"DeviceGray"
     );
 }
+
+/// A file whose objects sit in an object stream, with a comment before the
+/// page, as qpdf writes them.
+fn packed_pdf(page: &str) -> Vec<u8> {
+    let members = [
+        "<< /Type /Catalog /Pages 3 0 R >>\n".to_string(),
+        "<< /Type /Pages /Kids [4 0 R] /Count 1 >>\n".to_string(),
+        format!("% Page 1\n{page}\n"),
+    ];
+    let mut index = String::new();
+    let mut body = String::new();
+    for (n, m) in members.iter().enumerate() {
+        index.push_str(&format!("{} {} ", n + 2, body.len()));
+        body.push_str(m);
+    }
+    index.push('\n');
+    let content = format!("{index}{body}");
+    let mut out = b"%PDF-1.5\n".to_vec();
+    let packed = out.len();
+    out.extend(format!(
+        "1 0 obj\n<< /Type /ObjStm /N 3 /First {} /Length {} >>\nstream\n{content}\nendstream\nendobj\n",
+        index.len(),
+        content.len()
+    ).bytes());
+    let contents = out.len();
+    out.extend(b"5 0 obj\n<< /Length 37 >>\nstream\nBT /F1 24 Tf 72 720 Td (Potato) Tj ET\nendstream\nendobj\n");
+    let xref = out.len();
+    let mut rows = vec![0u8, 0, 0, 0];
+    let normal = |at: usize| [1, (at >> 8) as u8, at as u8, 0];
+    rows.extend(normal(packed));
+    for i in 0..3 {
+        rows.extend([2, 0, 1, i]);
+    }
+    rows.extend(normal(contents));
+    rows.extend(normal(xref));
+    out.extend(
+        format!(
+            "6 0 obj\n<< /Type /XRef /Size 7 /W [1 2 1] /Root 2 0 R /Length {} >>\nstream\n",
+            rows.len()
+        )
+        .bytes(),
+    );
+    out.extend(rows);
+    out.extend(format!("\nendstream\nendobj\nstartxref\n{xref}\n%%EOF\n").bytes());
+    out
+}
+
+#[test]
+fn a_page_after_a_comment_in_an_object_stream_is_kept() {
+    let bytes =
+        packed_pdf("<< /Type /Page /Parent 3 0 R /MediaBox [0 0 200 200] /Contents 5 0 R >>");
+    let mut doc = load(&bytes, None).unwrap();
+    let ids = page_ids(&doc);
+    assert_eq!(ids.len(), 1);
+    assert!(doc.get_dictionary(ids[0]).unwrap().has(b"Contents"));
+    let doc = load(&save(&mut doc).unwrap(), None).unwrap();
+    assert_eq!(display_size(&doc, page_ids(&doc)[0]), (200.0, 200.0));
+}
+
+#[test]
+fn a_page_that_cannot_be_read_is_refused() {
+    let e = load(&packed_pdf("(not a page)"), None).unwrap_err();
+    assert_eq!(e.code, ErrorCode::InputCorrupt);
+    assert!(e.message.contains("page 1"), "{}", e.message);
+}
