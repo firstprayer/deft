@@ -1,6 +1,6 @@
 use super::_common::{
-    FFMPEG, VIDEO, duration, ffmpeg, file_result, input_path, probe, stream, strs, temp_out,
-    video_codec_args,
+    FFMPEG, VIDEO, duration, ffmpeg, file_result, input_path, probe, strs, temp_out,
+    video_codec_args, video_size,
 };
 use deft_core::prelude::*;
 use deft_tools_image::image::{DynamicImage, RgbaImage};
@@ -88,12 +88,8 @@ fn soft(job: &Job, format: Format, cues: &[deft_tools_text::Cue]) -> Result<OpRe
 fn burn(job: &Job, format: Format, cues: &[deft_tools_text::Cue]) -> Result<OpResult> {
     let p = job.params;
     let info = probe(job, job.input(), OP.id)?;
-    let v = stream(&info, "video")
-        .ok_or_else(|| err(ErrorCode::InputUnsupported, "no video stream"))?;
-    let (w, h) = (
-        v["width"].as_u64().unwrap_or(1280) as u32,
-        v["height"].as_u64().unwrap_or(720) as u32,
-    );
+    let (w, h) =
+        video_size(&info).ok_or_else(|| err(ErrorCode::InputUnsupported, "no video stream"))?;
     let size = p
         .opt_float("font-size")
         .unwrap_or(h as f64 * 0.05)
@@ -198,7 +194,8 @@ fn run(job: &Job) -> Result<OpResult> {
             format!("--subtitles {}: {e}", path.display()),
         )
     })?;
-    let cues = deft_tools_text::parse_subtitles(&String::from_utf8_lossy(&raw));
+    let (text, _, _) = deft_tools_file::detect_encoding(&raw).decode(&raw);
+    let cues = deft_tools_text::parse_subtitles(&text);
     if cues.is_empty() {
         return Err(err(
             ErrorCode::InputCorrupt,

@@ -1,4 +1,4 @@
-use super::_common::{AUDIO, FFMPEG, filter_audio};
+use super::_common::{AUDIO, FFMPEG, duration, filter_audio, probe};
 use deft_core::prelude::*;
 
 pub static OP: Op = Op {
@@ -29,6 +29,7 @@ pub static OP: Op = Op {
         "silenceremove",
         "podcast",
     ],
+    result: &["removed_seconds"],
     suffix: Some("nosilence"),
     run,
     ..Op::DEFAULT
@@ -46,5 +47,17 @@ fn run(job: &Job) -> Result<OpResult> {
             "silenceremove=start_periods=1:start_threshold={db}dB:stop_periods=-1:stop_duration={d}:stop_threshold={db}dB"
         )
     };
-    filter_audio(job, OP.id, &filter)
+    let before = duration(&probe(job, job.input(), OP.id)?);
+    let mut result = filter_audio(job, OP.id, &filter)?;
+    let Some(Data::File(path)) = result.outputs.first().map(|o| &o.data) else {
+        return Ok(result);
+    };
+    let after = duration(&probe(job, &InputFile::file(path.clone(), None), OP.id)?);
+    let removed = (before - after).max(0.0);
+    result = result.fact("removed_seconds", (removed * 100.0).round() / 100.0);
+    Ok(if removed < before * 0.01 {
+        result.warn("nothing cut; noise may be above --threshold")
+    } else {
+        result.note(format!("{removed:.1}s removed"))
+    })
 }

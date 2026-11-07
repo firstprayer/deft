@@ -3,7 +3,7 @@ use deft_core::prelude::*;
 
 pub static OP: Op = Op {
     id: "audio.denoise",
-    summary: "Reduce steady background noise such as hiss or hum",
+    summary: "Reduce steady background noise such as hiss",
     input: Input::each(AUDIO, "audio"),
     output: Output::one(AUDIO, "audio"),
     params: &[param(
@@ -14,7 +14,7 @@ pub static OP: Op = Op {
     .default("balanced")],
     engines: FFMPEG,
     examples: &["deft audio denoise tone.mp3 --level light -o clean.mp3"],
-    tags: &["noise reduction", "hiss", "hum", "clean up", "afftdn"],
+    tags: &["noise reduction", "hiss", "clean up", "afftdn"],
     suffix: Some("denoised"),
     run,
     ..Op::DEFAULT
