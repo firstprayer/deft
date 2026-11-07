@@ -224,6 +224,146 @@ fn collection_map(doc: &Document, font: &Dictionary) -> Option<String> {
     Some(cmap(2, &entries))
 }
 
+// ------------------------------------------------------------------ fallback
+
+use hayro::hayro_interpret::InterpreterSettings;
+use hayro::hayro_interpret::font::{FallbackFontQuery, FontData, FontQuery};
+use hayro::hayro_interpret::hayro_cmap::CidFamily;
+use std::sync::{Arc, OnceLock};
+
+/// Fonts that hold Chinese, Japanese or Korean, where the systems keep them.
+/// A PDF may name such a font without embedding it, as Japanese and Chinese
+/// writers often do; deft carries no font that large, so it borrows one.
+fn cjk_candidates(family: &CidFamily) -> &'static [&'static str] {
+    match family {
+        CidFamily::AdobeJapan1 => &[
+            "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
+            "/System/Library/Fonts/Hiragino Sans GB.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc",
+            "C:\\Windows\\Fonts\\msgothic.ttc",
+            "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+        ],
+        CidFamily::AdobeKorea1 => &[
+            "/System/Library/Fonts/AppleSDGothicNeo.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc",
+            "C:\\Windows\\Fonts\\malgun.ttf",
+            "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+        ],
+        _ => &[
+            "/System/Library/Fonts/Hiragino Sans GB.ttc",
+            "/System/Library/Fonts/STHeiti Light.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+            "C:\\Windows\\Fonts\\msyh.ttc",
+            "C:\\Windows\\Fonts\\simsun.ttc",
+            "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+        ],
+    }
+}
+
+/// The first CJK font found for a character collection, read once.
+fn cjk_font(family: &CidFamily) -> Option<FontData> {
+    static FONTS: OnceLock<[Option<FontData>; 3]> = OnceLock::new();
+    let load = |f: CidFamily| -> Option<FontData> {
+        cjk_candidates(&f).iter().find_map(|path| {
+            let bytes = std::fs::read(path).ok()?;
+            Some(Arc::new(bytes) as FontData)
+        })
+    };
+    let fonts = FONTS.get_or_init(|| {
+        [
+            load(CidFamily::AdobeJapan1),
+            load(CidFamily::AdobeKorea1),
+            load(CidFamily::AdobeGB1),
+        ]
+    });
+    match family {
+        CidFamily::AdobeJapan1 => fonts[0].clone(),
+        CidFamily::AdobeKorea1 => fonts[1].clone(),
+        CidFamily::AdobeGB1 | CidFamily::AdobeCNS1 => fonts[2].clone(),
+        _ => None,
+    }
+}
+
+fn cjk_family(query: &FallbackFontQuery) -> Option<&CidFamily> {
+    let family = &query.character_collection.as_ref()?.family;
+    matches!(
+        family,
+        CidFamily::AdobeJapan1
+            | CidFamily::AdobeGB1
+            | CidFamily::AdobeCNS1
+            | CidFamily::AdobeKorea1
+    )
+    .then_some(family)
+}
+
+/// Settings for reading and drawing pages: the built-in standard fonts, and
+/// a system CJK font for Chinese, Japanese and Korean fonts that are not
+/// embedded.
+pub(crate) fn interpreter_settings() -> InterpreterSettings {
+    InterpreterSettings {
+        font_resolver: Arc::new(|query| match query {
+            FontQuery::Standard(s) => Some(s.get_font_data()),
+            FontQuery::Fallback(f) => match cjk_family(f).and_then(cjk_font) {
+                Some(data) => Some((data, 0)),
+                None => Some(f.pick_standard_font().get_font_data()),
+            },
+        }),
+        ..InterpreterSettings::default()
+    }
+}
+
+/// Whether the document uses a Chinese, Japanese or Korean font that is not
+/// embedded and no system font can stand in for.
+pub fn missing_cjk_font(doc: &Document) -> bool {
+    doc.objects.values().any(|o| {
+        let Ok(font) = o.as_dict() else {
+            return false;
+        };
+        if !font.has_type(b"Font")
+            || font.get(b"Subtype").and_then(Object::as_name).ok() != Some(b"Type0")
+        {
+            return false;
+        }
+        let Some(descendant) = font
+            .get(b"DescendantFonts")
+            .ok()
+            .map(|o| deref(doc, o))
+            .and_then(|o| o.as_array().ok())
+            .and_then(|a| a.first())
+            .map(|o| deref(doc, o))
+            .and_then(|o| o.as_dict().ok())
+        else {
+            return false;
+        };
+        if is_embedded(doc, descendant) {
+            return false;
+        }
+        let ordering = descendant
+            .get(b"CIDSystemInfo")
+            .ok()
+            .map(|o| deref(doc, o))
+            .and_then(|o| o.as_dict().ok())
+            .and_then(|i| i.get(b"Ordering").ok())
+            .and_then(|o| deref(doc, o).as_str().ok())
+            .unwrap_or(b"");
+        let family = CidFamily::from_registry_ordering(b"Adobe", ordering);
+        matches!(
+            family,
+            CidFamily::AdobeJapan1
+                | CidFamily::AdobeGB1
+                | CidFamily::AdobeCNS1
+                | CidFamily::AdobeKorea1
+        ) && cjk_font(&family).is_none()
+    })
+}
+
 #[cfg(test)]
 #[path = "fonts_tests.rs"]
 mod tests;

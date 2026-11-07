@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 mod catalog;
 pub mod compare;
 pub mod extract;
-mod fonts;
+pub mod fonts;
 pub mod forms;
 pub mod layout;
 pub mod meta;
@@ -1572,7 +1572,7 @@ impl Renderer {
         let pixmap = hayro::render(
             page,
             &cache,
-            &Default::default(),
+            &fonts::interpreter_settings(),
             &hayro::RenderSettings::default(),
             &settings,
         );

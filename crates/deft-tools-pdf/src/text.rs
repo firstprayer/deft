@@ -10,7 +10,7 @@ use hayro::hayro_interpret::hayro_cmap::BfString;
 use hayro::hayro_interpret::util::TransformExt;
 use hayro::hayro_interpret::{
     BlendMode, ClipPath, Context, Device, DrawMode, DrawProps, Image, ImageDrawProps,
-    InterpreterCache, InterpreterSettings, SoftMask, interpret_page,
+    InterpreterCache, SoftMask, interpret_page,
 };
 use hayro::kurbo::{BezPath, Point, Rect, Vec2};
 use lopdf::Document;
@@ -531,7 +531,7 @@ impl Renderer {
                 Rect::new(0.0, 0.0, width as f64, height as f64),
                 &cache,
                 page.xref(),
-                InterpreterSettings::default(),
+                crate::fonts::interpreter_settings(),
             );
             let mut found = Collector::default();
             interpret_page(page, &mut context, &mut found);

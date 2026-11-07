@@ -72,7 +72,15 @@ fn run(job: &Job) -> Result<OpResult> {
         );
     }
     let files = outputs.len();
-    Ok(OpResult::many(outputs)
+    let res = OpResult::many(outputs)
         .fact("files", files)
-        .note(plural(files, "image")))
+        .note(plural(files, "image"));
+    Ok(if deft_tools_pdf::fonts::missing_cjk_font(&doc) {
+        res.warn(
+            "Chinese, Japanese or Korean text in fonts the PDF does not embed is not drawn: \
+             no such font was found on this system",
+        )
+    } else {
+        res
+    })
 }

@@ -94,3 +94,44 @@ fn a_japanese_cid_font_without_a_map_gets_its_collection() {
     // CID 843 is あ in Adobe-Japan1.
     assert_eq!(text(&cmap, 843).as_deref(), Some("あ"));
 }
+
+#[test]
+fn a_cjk_font_that_is_not_embedded_is_drawn_with_a_system_font_if_there_is_one() {
+    let mut doc = Document::with_version("1.7");
+    let info = dictionary! {
+        "Registry" => Object::string_literal("Adobe"),
+        "Ordering" => Object::string_literal("Japan1"),
+        "Supplement" => 2,
+    };
+    let cid = doc.add_object(dictionary! {
+        "Type" => "Font", "Subtype" => "CIDFontType0", "BaseFont" => "Ryumin-Light",
+        "CIDSystemInfo" => info,
+    });
+    doc.add_object(dictionary! {
+        "Type" => "Font", "Subtype" => "Type0", "Encoding" => "90ms-RKSJ-H",
+        "DescendantFonts" => vec![Object::Reference(cid)],
+    });
+    let found = cjk_font(&CidFamily::AdobeJapan1).is_some();
+    assert_eq!(missing_cjk_font(&doc), !found);
+    let settings = interpreter_settings();
+    let mut query = FallbackFontQuery {
+        post_script_name: Some("Ryumin-Light".into()),
+        font_name: None,
+        font_family: None,
+        font_stretch: hayro::hayro_interpret::font::FontStretch::Normal,
+        font_weight: 400,
+        is_fixed_pitch: false,
+        is_serif: true,
+        is_italic: false,
+        is_bold: false,
+        is_small_cap: false,
+        character_collection: None,
+    };
+    // A Latin font that is not embedded still gets a standard font.
+    assert!((settings.font_resolver)(&FontQuery::Fallback(query.clone())).is_some());
+    query.character_collection = Some(hayro::hayro_interpret::hayro_cmap::CharacterCollection {
+        family: CidFamily::AdobeJapan1,
+        supplement: 2,
+    });
+    assert!((settings.font_resolver)(&FontQuery::Fallback(query)).is_some());
+}
