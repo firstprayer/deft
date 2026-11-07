@@ -738,7 +738,32 @@ fn unescape(s: &str) -> String {
 fn replace_part(xml: &str, find: &str, with: &str) -> Result<(String, usize)> {
     let t =
         regex::Regex::new(r"(<w:t(?:\s[^>]*)?>)([^<]*)(</w:t>)").map_err(|e| bad("regex", e))?;
-    let edge = regex::Regex::new(r"<w:p(?:\s[^>]*)?/?>|</w:p>").map_err(|e| bad("regex", e))?;
+    // Text is matched between these edges: paragraphs, and the two copies
+    // of a shape, so that no stretch is half in either copy.
+    let edge = regex::Regex::new(
+        r"<w:p(?:\s[^>]*)?/?>|</w:p>|<mc:(?:AlternateContent|Choice|Fallback)\b[^>]*>|</mc:(?:AlternateContent|Choice|Fallback)>",
+    )
+    .map_err(|e| bad("regex", e))?;
+    // Word writes shapes twice, the second time in mc:Fallback for old
+    // readers. Both copies change, but only the first is counted.
+    let fallback =
+        regex::Regex::new(r"<mc:Fallback\b|</mc:Fallback>").map_err(|e| bad("regex", e))?;
+    let mut copies: Vec<(usize, usize)> = Vec::new();
+    let (mut depth, mut opened) = (0usize, 0usize);
+    for m in fallback.find_iter(xml) {
+        if m.as_str().starts_with("</") {
+            depth = depth.saturating_sub(1);
+            if depth == 0 {
+                copies.push((opened, m.end()));
+            }
+        } else {
+            if depth == 0 {
+                opened = m.start();
+            }
+            depth += 1;
+        }
+    }
+    let counted = |at: usize| !copies.iter().any(|(a, b)| (*a..*b).contains(&at));
     let mut total = 0;
     let mut out = String::with_capacity(xml.len());
     let mut last = 0;
@@ -746,12 +771,17 @@ fn replace_part(xml: &str, find: &str, with: &str) -> Result<(String, usize)> {
         let (text, n) = replace_stretch(&xml[last..m.start()], &t, find, with);
         out.push_str(&text);
         out.push_str(m.as_str());
-        total += n;
+        if counted(last) {
+            total += n;
+        }
         last = m.end();
     }
     let (text, n) = replace_stretch(&xml[last..], &t, find, with);
     out.push_str(&text);
-    Ok((out, total + n))
+    if counted(last) {
+        total += n;
+    }
+    Ok((out, total))
 }
 
 /// Find `<w:t ...>text</w:t>` spans in one stretch of a paragraph; a match

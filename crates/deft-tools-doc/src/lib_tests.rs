@@ -165,9 +165,9 @@ fn word_replace_reaches_notes_and_text_after_a_box() {
         &body,
         &[("word/footnotes.xml", &foot), ("word/endnotes.xml", &end)],
     );
-    // The box is written twice, so five places hold six matches.
+    // The box is written twice; its copy changes but is not counted.
     let (bytes, n) = docx::replace(&file, "Acme", "Zed").unwrap();
-    assert_eq!(n, 6);
+    assert_eq!(n, 5);
     let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
     for name in [
         "word/document.xml",
@@ -865,4 +865,21 @@ fn word_drop_caps_check_boxes_and_extra_bodies() {
     let body = format!("{dropcap}{boxes}</w:body><w:body>{}", para("Second body."));
     let text = docx::read(&word(&body, &[])).unwrap().text();
     assert_eq!(text, "Drop caps lead.\n\nOff: ☐ On: ☒\n\nSecond body.\n");
+}
+
+#[test]
+fn word_replace_counts_a_shape_once() {
+    let body = format!(
+        "{}<w:p>{}</w:p>",
+        para("plain text"),
+        text_box("text in a box")
+    );
+    let (bytes, n) = docx::replace(&word(&body, &[]), "text", "words").unwrap();
+    assert_eq!(n, 2);
+    let xml = zipped::Package::open(&bytes)
+        .unwrap()
+        .text("word/document.xml")
+        .unwrap();
+    // Both copies of the box change.
+    assert_eq!(xml.matches("words in a box").count(), 2, "{xml}");
 }

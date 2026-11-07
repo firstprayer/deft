@@ -391,7 +391,7 @@ fn plan_target(
                 match expected {
                     // Known name up front, so OUTPUT_EXISTS can be checked before running.
                     Some(f) if first.is_some_and(|i| i.url.is_none()) => {
-                        let name = default_name(op, &stem, f, first.and_then(|i| i.format));
+                        let name = default_name(op, &stem, f, first);
                         Target::File(dir.join(name))
                     }
                     _ => Target::Dir(dir),
@@ -433,11 +433,23 @@ fn plan_target(
     })
 }
 
-fn default_name(op: &Op, stem: &str, out: Format, input: Option<Format>) -> String {
+fn default_name(op: &Op, stem: &str, out: Format, input: Option<&InputFile>) -> String {
+    let format = input.and_then(|i| i.format);
     // A conversion keeps the stem; a same-format edit adds a suffix so the
     // input is never overwritten.
-    if op.suffix.is_some() || input == Some(out) {
-        format!("{stem}.{}.{}", op.suffix.unwrap_or(op.command()), out.ext())
+    if op.suffix.is_some() || format == Some(out) {
+        // A variant deft has no name for, such as a macro-enabled .docm or a
+        // .dotx template, keeps its extension: the file is still one.
+        let own = input
+            .and_then(|i| i.path.as_deref())
+            .and_then(|p| p.extension())
+            .and_then(|e| e.to_str())
+            .filter(|e| format == Some(out) && Format::from_name(e).is_none());
+        format!(
+            "{stem}.{}.{}",
+            op.suffix.unwrap_or(op.command()),
+            own.unwrap_or(out.ext())
+        )
     } else {
         format!("{stem}.{}", out.ext())
     }
@@ -728,12 +740,7 @@ fn deliver(
                         // An explicit -o dir/ keeps the original file name.
                         format!("{stem}.{ext}")
                     } else {
-                        default_name(
-                            op,
-                            &stem,
-                            p.format.unwrap_or(Format::Txt),
-                            inputs.first().and_then(|i| i.format),
-                        )
+                        default_name(op, &stem, p.format.unwrap_or(Format::Txt), inputs.first())
                     }
                 });
                 let dest = d.join(sanitize(&name));
@@ -1078,6 +1085,19 @@ pub fn convert(req: Request, to: Option<String>, ctx: &Ctx) -> Result<Report> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn edits_keep_an_extension_deft_has_no_name_for() {
+        let reg = registry();
+        let op = reg.ops.iter().find(|o| o.id == "doc.replace").unwrap();
+        let file = |name: &str| InputFile::file(PathBuf::from(name), Some(Format::Docx));
+        let name = |f: &InputFile| default_name(op, &f.stem(), Format::Docx, Some(f));
+        assert_eq!(name(&file("a.docm")), "a.replaced.docm");
+        assert_eq!(name(&file("t.dotx")), "t.replaced.dotx");
+        assert_eq!(name(&file("a.docx")), "a.replaced.docx");
+        // Content that is not what its extension says gets the right one.
+        assert_eq!(name(&file("a.zip")), "a.replaced.docx");
+    }
 
     #[test]
     fn old_and_locked_office_files_say_so() {
