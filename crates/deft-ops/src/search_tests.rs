@@ -11,7 +11,6 @@ fn first(query: &str) -> String {
 #[test]
 fn a_rare_word_outranks_a_common_one() {
     assert_eq!(first("compress pdf"), "pdf compress");
-    assert_eq!(first("compress video"), "video compress");
 }
 
 #[test]
@@ -25,7 +24,6 @@ fn inflected_words_match() {
 fn misspelled_words_are_corrected() {
     for (query, expected) in [
         ("compres pdf", "pdf compress"),
-        ("compres video", "video compress"),
         ("watermrk pdf", "pdf watermark"),
         ("shrnk pdf", "pdf compress"),
     ] {
@@ -57,7 +55,6 @@ fn deleting_a_letter_from_any_command_still_finds_it() {
 #[test]
 fn format_pairs_name_the_converter() {
     assert_eq!(first("png to jpg"), "image convert");
-    assert_eq!(first("mp4 to gif"), "video to-gif");
     assert_eq!(first("md to pdf"), "md to-pdf");
 }
 

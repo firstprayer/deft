@@ -3,19 +3,7 @@ source: crates/deft-cli/../../tests/unit/help.rs
 expression: "help::group(g.name)"
 ---
 deft video - commands (input -> output)
-  info           video -> report      Duration, size, frame rate, codecs
-  add-audio      video -> video       Replace or mix the soundtrack: --audio song.mp3
-  add-subtitles  video -> video       Add subtitles: burned into the picture, or --soft
-  chunk          video -> video...    Cut into equal parts: --length 10:00
-  compress       video -> mp4         Smaller file: --level, --target-size, --max-height
-  convert        video|gif -> video   Change container and codec: --to mp4|webm|mov|mkv
-  frames         video -> png|jpg...  Save frames as images: --fps 1 or --at 0:05,0:10
-  from-images    image... -> video    Slideshow: --duration, --fps, --audio
-  merge          video... -> mp4      Join videos; --transition fades
-  pad            video -> video       Fit into a frame with bars: --size 1080x1920
-  speed          video -> video       Speed up or slow down: --factor 2 or --factor 0.5
-  stabilize      video -> video       Steady shaky footage, or --denoise grain
-  strip          video -> video       Remove metadata; no re-encode
-  to-gif         video -> gif         Animated GIF: --fps, --size, --from, --to-time
-  watermark      video -> video       Add text or a logo: --text, --image, --position
+  pad        video -> video  Fit into a frame with bars: --size 1080x1920
+  stabilize  video -> video  Steady shaky footage, or --denoise grain
+  watermark  video -> video  Add text or a logo: --text, --image, --position
 More: deft video <command> --help

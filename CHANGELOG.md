@@ -8,7 +8,6 @@ Deft follows semantic versioning. Before 1.0, a minor version may change command
 
 - `gps` group: GPX and KML conversion, distance, time and climb.
 - `pdf extract-sheets`: each table in a PDF as its own CSV, or as a sheet in one XLSX.
-- `video frames --interval` and `--from`.
 - `deft find` says when no command does a job.
 - `html to-docx --main` and `html to-pdf --main`.
 - `calendar to-csv` adds `status` and `except` columns, and `calendar from-csv` reads them.
@@ -16,7 +15,6 @@ Deft follows semantic versioning. Before 1.0, a minor version may change command
 ### Changed
 
 - `video stabilize` uses two passes where ffmpeg has vidstab, which removes far more shake.
-- `video compress --target-size` uses two passes and the whole size budget.
 - YAML output quotes strings such as `yes`, `on` and dates, which older parsers misread.
 - Word readers keep footnotes, endnotes, text boxes, nested tables, content controls and list levels, and `doc replace` reaches notes.
 - `doc to-html` embeds pictures. Pictures in PDFs keep their natural size.
@@ -29,6 +27,7 @@ Deft follows semantic versioning. Before 1.0, a minor version may change command
 - `html screenshot` and `html to-pdf --browser`. Deft no longer uses Chrome.
 - The `youtube` group, `deft engine install` and `update`, `--offline` and `--install-engines`. Deft no longer touches the network.
 - Commands an agent does in one ordinary line: `file hash`, `base64`, `split`, `join`, `rename` and `organize`; `video crop`, `resize`, `rotate`, `mute`, `fade`, `repeat`, `reverse`, `stack`, `thumbnail`, `extract-audio` and `extract-subtitles`; `image diff`, `invert` and `sharpen`; `pdf grayscale` and `repair`; `video split` (`ffmpeg -ss … -to …`); `data query`; `sheet transpose`; `email info`.
+- `video add-audio`, `add-subtitles`, `chunk`, `compress`, `convert`, `frames`, `from-images`, `info`, `merge`, `speed`, `strip` and `to-gif`: on real files an agent did each as well with one ffmpeg line. `video` keeps `stabilize`, `pad` and `watermark`.
 - `sheet query`, `filter`, `sort`, `select`, `group`, `dedupe` and `join`: an agent does these in one line with sqlite3, DuckDB or pandas. Deft no longer includes SQLite.
 - The `email` and `file` groups.
 - Commands whose output was not good enough: `pdf to-docx`, `to-md`, `to-sheet` and `to-pdfa`; `slides to-pdf`; `md to-pptx`.
@@ -40,7 +39,7 @@ Deft follows semantic versioning. Before 1.0, a minor version may change command
 - `pdf merge` keeps every form and bookmark. `extract-sheets` uses real glyph widths.
 - HEIC photos from phones come out whole and upright. `image strip` removes everything after a JPEG's end. `image info` finds GPS in every format. Display P3 colour survives.
 - `image compress` never grows a file and fails when it misses a target. `image trim --speck` ignores dust.
-- `video from-images`, `merge`, `watermark`, `add-subtitles` and `info` handle mixed sizes, silent clips and phone rotation.
+- `video watermark` and `pad` handle phone rotation.
 - Word readers keep footnotes, text boxes and nested tables. EPUB keeps every chapter and refuses DRM. HTML keeps the headline and declared charset.
 - Text options keep their spaces. `-o` works on report commands.
 - Report commands write their result as JSON with `-o name.json` instead of ignoring `-o`.
@@ -48,8 +47,6 @@ Deft follows semantic versioning. Before 1.0, a minor version may change command
 - `sheet merge` lines columns up by header. `sheet extract --range` counts from A1 when a sheet starts later. Comma decimals in semicolon files are numbers, and ids such as 12E3 stay text.
 - UTF-16 text is no longer taken for MP3. `deft info` identifies locked PDFs and directories.
 - `deft convert` writes every page into a directory. `data format` keeps YAML documents apart and warns about comments.
-- `video from-images` keeps every picture. Pictures of different sizes in one format could be dropped, so a slideshow came out too short.
-- `video chunk` cuts equal parts. A part could run on to the next cut, giving 6, 3 and 1 seconds instead of 3, 3, 3 and 1.
 
 ## 0.1.0
 

@@ -76,31 +76,18 @@ Resize, crop, convert, compress, adjust, montage, OCR
 | `deft image strip` | Remove EXIF, GPS and text metadata |  | `deft image strip photo-1.jpg -o clean.jpg` |
 | `deft image to-gif` | Animate images into a GIF: --fps 2 |  | `deft image to-gif photo-1.jpg photo-2.jpg --fps 1 --size 200x -o moving.gif` |
 | `deft image to-pdf` | One page per image |  | `deft image to-pdf photo-1.jpg photo-2.jpg -o album.pdf` |
-| `deft image to-video` | Slideshow: --duration, --fps, --audio | ffmpeg, ffprobe | `deft video from-images photo-1.jpg photo-2.jpg --duration 2 -o show.mp4` |
 | `deft image transparent` | Make a colour see-through: --color white --fuzz 10 |  | `deft image transparent logo.png --color white -o cutout.png` |
 | `deft image trim` | Cut away plain borders; --speck 4 ignores stray dots |  | `deft image trim bordered.png -o tight.png` |
 | `deft image watermark` | Add text or a logo: --text, --image, --position |  | `deft image watermark photo-1.jpg --text Sample -o marked.jpg` |
 
 ## video
 
-Merge, convert, compress, subtitles, GIF, frames (ffmpeg)
+Stabilize, fit into a frame, add text or a logo (ffmpeg)
 
 | Command | What it does | Needs | Example |
 |---|---|---|---|
-| `deft video info` | Duration, size, frame rate, codecs | ffmpeg, ffprobe | `deft video info clip.mp4` |
-| `deft video add-audio` | Replace or mix the soundtrack: --audio song.mp3 | ffmpeg, ffprobe | `deft video add-audio clip.mp4 --audio tone.mp3 -o scored.mp4` |
-| `deft video add-subtitles` | Add subtitles: burned into the picture, or --soft | ffmpeg, ffprobe | `deft video add-subtitles clip.mp4 --subtitles talk.srt -o subbed.mp4` |
-| `deft video chunk` | Cut into equal parts: --length 10:00 | ffmpeg, ffprobe | `deft video chunk clip.mp4 --length 1 -o parts/` |
-| `deft video compress` | Smaller file: --level, --target-size, --max-height | ffmpeg, ffprobe | `deft video compress clip.mp4 --level strong -o small.mp4` |
-| `deft video convert` | Change container and codec: --to mp4\|webm\|mov\|mkv | ffmpeg, ffprobe | `deft video convert clip.mp4 --to webm -o clip.webm` |
-| `deft video frames` | Save frames as images: --fps 1 or --at 0:05,0:10 | ffmpeg, ffprobe | `deft video frames clip.mp4 --at 0:01 -o shots/` |
-| `deft video from-images` | Slideshow: --duration, --fps, --audio | ffmpeg, ffprobe | `deft video from-images photo-1.jpg photo-2.jpg --duration 2 -o show.mp4` |
-| `deft video merge` | Join videos; --transition fades | ffmpeg, ffprobe | `deft video merge clip.mp4 clip2.mp4 -o joined.mp4` |
 | `deft video pad` | Fit into a frame with bars: --size 1080x1920 | ffmpeg, ffprobe | `deft video pad clip.mp4 --size 480x640 --background white -o tall.mp4` |
-| `deft video speed` | Speed up or slow down: --factor 2 or --factor 0.5 | ffmpeg, ffprobe | `deft video speed clip.mp4 --factor 2 -o fast.mp4` |
 | `deft video stabilize` | Steady shaky footage, or --denoise grain | ffmpeg, ffprobe | `deft video stabilize clip.mp4 --denoise -o steady.mp4` |
-| `deft video strip` | Remove metadata; no re-encode | ffmpeg, ffprobe | `deft video strip clip.mp4 -o clean.mp4` |
-| `deft video to-gif` | Animated GIF: --fps, --size, --from, --to-time | ffmpeg, ffprobe | `deft video to-gif clip.mp4 -o clip.gif` |
 | `deft video watermark` | Add text or a logo: --text, --image, --position | ffmpeg, ffprobe | `deft video watermark clip.mp4 --text Sample -o marked.mp4` |
 
 ## doc

@@ -121,7 +121,7 @@ hint: add --password <password>
 
 $ deft pdf compres photos.pdf
 error UNKNOWN_COMMAND deft pdf has no command "compres"
-hint: did you mean: deft pdf compress | deft video compress | deft image compress
+hint: did you mean: deft pdf compress | deft image compress
 ```
 <!-- /ERROR -->
 

@@ -22,7 +22,6 @@ deft image - commands (input -> output)
   strip        image -> image       Remove EXIF, GPS and text metadata
   to-gif       image... -> gif      Animate images into a GIF: --fps 2
   to-pdf       image... -> pdf      One page per image
-  to-video     image... -> video    Slideshow: --duration, --fps, --audio
   transparent  image -> image       Make a colour see-through: --color white --fuzz 10
   trim         image -> image       Cut away plain borders; --speck 4 ignores stray dots
   watermark    image -> image       Add text or a logo: --text, --image, --position

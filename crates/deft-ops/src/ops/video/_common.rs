@@ -47,13 +47,6 @@ pub fn probe(job: &Job, input: &InputFile, id: &str) -> Result<Json> {
         .map_err(|e| err(ErrorCode::EngineFailed, format!("ffprobe output: {e}")))
 }
 
-pub fn duration(info: &Json) -> f64 {
-    info["format"]["duration"]
-        .as_str()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0.0)
-}
-
 pub fn stream<'a>(info: &'a Json, kind: &str) -> Option<&'a Json> {
     info["streams"]
         .as_array()?
@@ -105,55 +98,6 @@ pub fn strs(v: &[&str]) -> Vec<String> {
     v.iter().map(|s| s.to_string()).collect()
 }
 
-/// `-ss` before the input: seeks instantly and stays frame-accurate when
-/// re-encoding.
-pub fn seek_args(p: &Params) -> Vec<String> {
-    match p.opt_seconds("from") {
-        Some(f) if f > 0.0 => vec!["-ss".to_string(), format!("{f}")],
-        _ => vec![],
-    }
-}
-
-/// `-t` before the input, so reading stops there. Filters such as palettegen
-/// otherwise wait for the end of the whole file.
-pub fn end_args(p: &Params) -> Result<Vec<String>> {
-    let Some(end) = p.opt_seconds("to-time") else {
-        return Ok(vec![]);
-    };
-    let start = p.opt_seconds("from").unwrap_or(0.0);
-    if end <= start {
-        return Err(bad_value("to-time", "must be after --from"));
-    }
-    Ok(vec!["-t".to_string(), format!("{}", end - start)])
-}
-
-/// Refuse a `--from` at or past the end, which ffmpeg turns into an empty or
-/// wrong file without an error.
-pub fn check_from(p: &Params, length: f64) -> Result<()> {
-    match p.opt_seconds("from") {
-        Some(from) if length > 0.0 && from >= length => Err(bad_value(
-            "from",
-            format!("{from}s is past the end ({})", format_duration(length)),
-        )),
-        _ => Ok(()),
-    }
-}
-
-/// ffmpeg scale expression for a size spec, keeping dimensions even.
-pub fn scale_filter(s: &SizeSpec) -> String {
-    if let Some(p) = s.percent {
-        return format!("scale=trunc(iw*{0}/200)*2:trunc(ih*{0}/200)*2", p);
-    }
-    match (s.width, s.height) {
-        (Some(w), Some(h)) => {
-            format!("scale={w}:{h}:force_original_aspect_ratio=decrease:force_divisible_by=2")
-        }
-        (Some(w), None) => format!("scale={w}:-2"),
-        (None, Some(h)) => format!("scale=-2:{h}"),
-        (None, None) => "null".into(),
-    }
-}
-
 /// Display size of the first video stream, taking rotation metadata into
 /// account, because ffmpeg's filters see the rotated picture.
 pub fn video_size(info: &Json) -> Option<(u32, u32)> {
@@ -172,22 +116,6 @@ pub fn rotation(info: &Json) -> f64 {
         .and_then(|v| v["side_data_list"].as_array())
         .and_then(|l| l.iter().find_map(|d| d["rotation"].as_f64()))
         .unwrap_or(0.0)
-}
-
-/// The `atempo` chain for a speed factor. One stage only spans 0.5 to 2.
-pub fn atempo(factor: f64) -> String {
-    let mut left = factor;
-    let mut stages = Vec::new();
-    while left > 2.0 {
-        stages.push("atempo=2".to_string());
-        left /= 2.0;
-    }
-    while left < 0.5 {
-        stages.push("atempo=0.5".to_string());
-        left /= 0.5;
-    }
-    stages.push(format!("atempo={left}"));
-    stages.join(",")
 }
 
 /// ffmpeg colour syntax for an RGBA colour.

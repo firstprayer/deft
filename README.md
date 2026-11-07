@@ -43,8 +43,8 @@ The script checks the download, then sets up the skill for Claude Code and Codex
 deft pdf compress report.pdf --target-size 2MB
 deft pdf watermark contract.pdf --text CONFIDENTIAL
 deft image resize photos/*.jpg --size 1200x -o web/
-deft video to-gif clip.mp4 --from 0:10 --to-time 0:14 -o clip.gif
-deft video add-subtitles talk.mp4 --subtitles talk.srt -o subtitled.mp4
+deft video stabilize shaky.mp4 -o steady.mp4
+deft video pad clip.mp4 --size 1080x1920 -o vertical.mp4
 deft md to-pdf notes.md
 deft convert notes.md -o notes.pdf
 deft sheet pivot sales.xlsx --rows city --columns year --values amount -o totals.csv
