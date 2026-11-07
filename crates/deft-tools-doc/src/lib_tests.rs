@@ -221,14 +221,6 @@ fn markdown_notes_become_markers_not_literal_syntax() {
 }
 
 #[test]
-fn rtf_joins_surrogate_pairs() {
-    let doc = rtf::read(br"{\rtf1\ansi Smile \u55357?\u56832? and \u-10179?\u-8704? end}");
-    assert_eq!(doc.text().trim(), "Smile \u{1F600} and \u{1F600} end");
-    let lone = rtf::read(br"{\rtf1\ansi a\u8364?b}");
-    assert_eq!(lone.text().trim(), "a€b");
-}
-
-#[test]
 fn struck_text_stays_struck() {
     let blocks = markdown::parse("Keep ~~gone~~ this\n");
     let doc = Document {
@@ -296,20 +288,6 @@ fn docx_replace_spans_runs() {
         docx::read(&bytes).unwrap().text().trim(),
         "Hello Earth & more"
     );
-}
-
-#[test]
-fn rtf_reads_text_styles_and_escapes() {
-    let src = br"{\rtf1\ansi{\fonttbl{\f0 Arial;}}\f0 Plain \b bold\b0  caf\'e9 \u8364?\par Next}";
-    let doc = rtf::read(src);
-    assert_eq!(doc.blocks.len(), 2);
-    let text = doc.text();
-    assert!(text.contains("Plain bold café €"), "{text}");
-    assert!(!text.contains("Arial"));
-    let Block::Paragraph(spans) = &doc.blocks[0] else {
-        panic!()
-    };
-    assert!(spans.iter().any(|s| s.bold && s.text.contains("bold")));
 }
 
 #[test]

@@ -1,5 +1,5 @@
-//! Office and web documents through one block model: read Word, ODT, RTF,
-//! PowerPoint, HTML and EPUB; write Markdown, plain text, Word and EPUB.
+//! Office and web documents through one block model: read Word, PowerPoint,
+//! HTML and EPUB; write Markdown, plain text, Word and EPUB.
 
 use deft_core::error::{ErrorCode, err};
 
@@ -7,9 +7,7 @@ pub mod docx;
 pub mod epub;
 pub mod html;
 pub mod markdown;
-pub mod odf;
 pub mod pptx;
-pub mod rtf;
 mod zipped;
 
 /// Inline text with its style.

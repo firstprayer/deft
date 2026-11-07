@@ -251,6 +251,12 @@ fn expand_inputs(op: &Op, req: &Request) -> Result<Vec<InputFile>> {
 
 fn conversion_hint(found: Format, op: &Op) -> String {
     if let Accept::Formats(allowed) = op.input.accept
+        && allowed.contains(&Format::Docx)
+        && matches!(found, Format::Rtf | Format::Odt)
+    {
+        return "deft reads Word .docx; save the file as .docx first".to_string();
+    }
+    if let Accept::Formats(allowed) = op.input.accept
         && let Some(target) = allowed.first()
         && registry().plan_conversion(found, *target).is_some()
     {
@@ -844,7 +850,9 @@ pub fn convert(req: Request, to: Option<String>, ctx: &Ctx) -> Result<Report> {
                     ErrorCode::NoConversionPath,
                     format!("no converter from {} to {}", from.label(), target.label()),
                 )
-                .hint(if reach.is_empty() {
+                .hint(if matches!(from, Format::Rtf | Format::Odt) {
+                    "deft reads Word .docx; save the file as .docx first".to_string()
+                } else if reach.is_empty() {
                     "this format cannot be converted yet".to_string()
                 } else {
                     format!("{} converts to: {}", from.label(), reach.join(", "))
@@ -1027,4 +1035,23 @@ pub fn convert(req: Request, to: Option<String>, ctx: &Ctx) -> Result<Report> {
         stdout: stdout_bytes,
         chain: chain_ids,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rtf_and_odt_are_sent_to_word() {
+        let reg = registry();
+        let op = reg.ops.iter().find(|o| o.id == "doc.to-text").unwrap();
+        assert!(!op.input.accepts(Format::Rtf) && !op.input.accepts(Format::Odt));
+        for found in [Format::Rtf, Format::Odt] {
+            assert_eq!(
+                conversion_hint(found, op),
+                "deft reads Word .docx; save the file as .docx first"
+            );
+        }
+        assert!(reg.plan_conversion(Format::Rtf, Format::Pdf).is_none());
+    }
 }
