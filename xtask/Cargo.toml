@@ -10,7 +10,7 @@ deft-tools-image.workspace = true
 deft-tools-pdf.workspace = true
 deft-core.workspace = true
 deftcli = { path = "../crates/deft-cli" }
-deft-ops = { workspace = true, features = ["youtube"] }
+deft-ops.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true

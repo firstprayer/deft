@@ -5,7 +5,6 @@ I wanna make my landscape video into a portrait video | video pad
 turn a horizontal video into a vertical one for tiktok | video pad
 add black bars to my video | video pad
 fit my video into instagram reels | video pad
-make my video square | video crop
 cut the first 10 seconds off a video | video split
 keep only the middle of this clip | video split
 join these clips together | video merge
@@ -14,26 +13,19 @@ make this video smaller | video compress
 convert mov to mp4 | video convert
 turn this video into a gif | video to-gif
 take a screenshot from a video | video frames
-get the audio out of this video | video extract-audio
-remove the sound from a video | video mute
 replace the music in my video | video add-audio
 add subtitles to a video | video add-subtitles
 put my logo on the video | video watermark
 speed up this video | video speed
 slow motion | video speed
-rotate this video 90 degrees | video rotate
-my phone video is sideways | video rotate
 fix shaky footage | video stabilize
 make a slideshow from photos | video from-images
 reduce background noise in a recording | audio denoise
 make this recording louder | audio normalize
 make all my podcast episodes the same volume | audio normalize
-make this quieter | audio volume
 cut out the silent parts | audio remove-silence
 convert wav to mp3 | audio convert
-fade out the end of this song | audio fade
 set the artist and album on an mp3 | audio tag
-combine two songs | audio merge
 shrink this pdf | pdf compress
 my pdf is too big to email | pdf compress
 combine these pdfs into one | pdf merge
@@ -45,7 +37,6 @@ add page numbers | pdf number
 stamp draft on every page | pdf watermark
 make a scanned pdf searchable | pdf ocr
 fill in this form | pdf fill
-turn a pdf into word | doc from-pdf
 get the text out of a pdf | pdf to-text
 resize this photo to 1080 wide | image resize
 make the background transparent | image transparent
@@ -56,16 +47,10 @@ crop this picture | image crop
 add a border around a picture | image pad
 put these photos in a grid | image montage
 read the text in this screenshot | image ocr
-open this excel file and filter rows | sheet filter
 convert csv to excel | sheet convert
-join two spreadsheets on a column | sheet join
 make a pivot table | sheet pivot
 turn markdown into a pdf | md to-pdf
 find duplicate files | file duplicates
-rename all these files | file rename
-what is the checksum of this file | file hash
-download this youtube video | youtube download
-get the transcript of a youtube video | youtube subtitles
 make a qr code | qr create
 convert yaml to json | data convert
 translate this pdf to french | -

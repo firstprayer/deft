@@ -300,7 +300,6 @@ pub const WORD_FORMS: &[(&str, &str)] = &[
     ("mp4", "video"),
     ("movie", "video"),
     ("clip", "video"),
-    ("yt", "youtube"),
     ("caption", "subtitles"),
     ("captions", "subtitles"),
     ("transcript", "subtitles"),

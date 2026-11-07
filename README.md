@@ -4,7 +4,7 @@
 
 [deftcli.com](https://deftcli.com)
 
-When an AI agent has a file job, it writes a script, debugs it, checks the output and throws the script away. Deft is one binary that turns those jobs into single commands: PDF, images, video, audio, subtitles, spreadsheets, Markdown, archives and YouTube. The agent spends fewer tokens and less time, and fails less often.
+When an AI agent has a file job, it writes a script, debugs it, checks the output and throws the script away. Deft is one binary that turns those jobs into single commands: PDF, images, video, audio, spreadsheets, Word files, Markdown and more. The agent spends fewer tokens and less time, and fails less often.
 
 ```console
 $ deft pdf compress photos.pdf
@@ -35,7 +35,7 @@ curl -fsSL https://deftcli.com/install.sh | sh
 deft doctor                         # shows what is available
 ```
 
-The script checks the download, then sets up the skill for Claude Code and Codex. Video and audio commands need ffmpeg, and YouTube commands need yt-dlp. See [docs/INSTALL.md](docs/INSTALL.md) for Homebrew and other routes.
+The script checks the download, then sets up the skill for Claude Code and Codex. Video and audio commands need ffmpeg. See [docs/INSTALL.md](docs/INSTALL.md) for Homebrew and other routes.
 
 ## Examples
 
@@ -46,10 +46,9 @@ deft image resize photos/*.jpg --size 1200x -o web/
 deft video to-gif clip.mp4 --from 0:10 --to-time 0:14 -o clip.gif
 deft video add-subtitles talk.mp4 --subtitles talk.srt -o subtitled.mp4
 deft md to-pdf notes.md
-deft youtube subtitles https://youtu.be/xxxx -o talk.md
 deft convert notes.md -o notes.pdf
-deft sheet filter sales.csv --where "city = Oslo and amount > 100" -o oslo.csv
-deft data query config.yaml --expr '.server.port = 9090' -o changed.yaml
+deft sheet query sales.xlsx --sql "select city, sum(amount) from sales group by city" -o totals.csv
+deft data convert config.yaml --to json -o config.json
 deft pdf fill form.pdf --data values.json --flatten -o filled.pdf
 ```
 
@@ -58,11 +57,11 @@ deft pdf fill form.pdf --data values.json --flatten -o filled.pdf
 - **Find a command.** `deft` lists groups, `deft pdf` lists commands, `deft pdf compress --help` shows options, and `deft find "shrink pdf"` searches. Each layer has a token budget that tests enforce.
 - **Read one line.** A result starts with `ok`, `partial` or `error`. Add `--json` for structure.
 - **Fix it in one turn.** Errors carry a stable code and a `hint:` with the fix.
-- **Stay safe.** Inputs are never overwritten and writes are atomic. Everything runs locally. Only commands marked `[net]` touch the network. Deft collects no usage data.
+- **Stay safe.** Inputs are never overwritten and writes are atomic. Everything runs locally: deft never touches the network and collects no usage data.
 
 ## Engines
 
-`video` and `audio` use ffmpeg, and so does reading HEIC and AVIF; `youtube` uses yt-dlp. A few commands call other installed programs: tesseract for OCR, Ghostscript for `pdf repair`, `to-pdfa` and `grayscale`, sqlite3 for `sheet query`, bsdtar for RAR, and Chrome for `html screenshot` and `html to-pdf --browser`. `deft doctor` shows what is available, and `deft engine install yt-dlp` fetches yt-dlp with checksum verification.
+`video` and `audio` use ffmpeg, and so does reading HEIC and AVIF. A few commands call other installed programs: tesseract for OCR, sqlite3 for `sheet query`, bsdtar for RAR, and Chrome for `html screenshot` and `html to-pdf --browser`. `deft doctor` shows what is available.
 
 ## Documentation
 
@@ -76,8 +75,6 @@ deft pdf fill form.pdf --data values.json --flatten -o filled.pdf
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to help, and the contributor agreement |
 | [CHANGELOG.md](CHANGELOG.md) | Release notes |
 | [SECURITY.md](SECURITY.md) | Reporting a vulnerability |
-
-The `youtube` commands wrap yt-dlp. Respect each site's terms and copyright; deft includes nothing that bypasses sign-in or access controls.
 
 ## License
 

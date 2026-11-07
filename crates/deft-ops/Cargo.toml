@@ -7,8 +7,6 @@ license.workspace = true
 publish = false
 
 [features]
-default = ["youtube"]
-youtube = []
 
 [dependencies]
 deft-core.workspace = true

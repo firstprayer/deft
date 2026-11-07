@@ -9,19 +9,16 @@ deft image - commands (input -> output)
   compress     image -> image       Smaller file: --quality, --target-size 200KB
   convert      image -> image       Change format: --to png|jpg|webp|avif|gif|tiff|bmp|ico
   crop         image -> image       Cut a region: --box x,y,w,h or --aspect 16:9
-  diff         image... -> png      Compare two images; marks changed pixels in red
   favicon      image -> ico+png...  Website icon set: favicon.ico and PNG sizes
   flip         image -> image       Mirror: --direction horizontal|vertical
   frames       gif -> png...        Save each frame of an animated GIF as PNG
   grayscale    image -> image       Remove colour
-  invert       image -> image       Negative: flip every colour
   meta         image -> image       Read EXIF, or set --title --author --copyright --date
   montage      image... -> image    Tile images into a grid: --cols 3 --size 300x300
   ocr          image -> txt         Read the text in an image (tesseract)
   pad          image -> image       Add a border or canvas: --border 20, --size 1080x1080
   resize       image -> image       Scale: --size 800x, 1920x1080, 50%
   rotate       image -> image       Turn clockwise by any angle (EXIF is applied first)
-  sharpen      image -> image       Unsharp mask: --radius 2
   strip        image -> image       Remove EXIF, GPS and text metadata
   to-gif       image... -> gif      Animate images into a GIF: --fps 2
   to-pdf       image... -> pdf      One page per image

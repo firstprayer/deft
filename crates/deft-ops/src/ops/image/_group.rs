@@ -2,7 +2,7 @@ use deft_core::prelude::*;
 
 pub static GROUP: Group = Group {
     name: "image",
-    summary: "Resize, crop, convert, compress, filters, montage, OCR",
+    summary: "Resize, crop, convert, compress, adjust, montage, OCR",
     aliases: &["img", "photo", "picture"],
     synonyms: &[
         ("exif", "meta"),
@@ -14,7 +14,6 @@ pub static GROUP: Group = Group {
         ("gray", "grayscale"),
         ("greyscale", "grayscale"),
         ("black-and-white", "grayscale"),
-        ("negate", "invert"),
         ("brightness", "adjust"),
         ("contrast", "adjust"),
         ("saturation", "adjust"),
@@ -23,7 +22,6 @@ pub static GROUP: Group = Group {
         ("border", "pad"),
         ("canvas", "pad"),
         ("extent", "pad"),
-        ("compare", "diff"),
         ("icon", "favicon"),
         ("animate", "to-gif"),
         ("gif", "to-gif"),

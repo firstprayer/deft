@@ -7,6 +7,5 @@ deft data - commands (input -> output)
   diff      data... -> report  Compare two documents by structure, across formats
   format    data -> data       Pretty-print or minify: --compact, --sort-keys
   merge     data... -> data    Deep-merge documents; later files win
-  query     data -> data       Query or edit with jq syntax: --expr '.items[].name'
   validate  data -> report     Check syntax, or a JSON Schema with --schema
 More: deft data <command> --help

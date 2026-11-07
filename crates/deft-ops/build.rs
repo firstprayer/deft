@@ -27,7 +27,6 @@ fn main() {
     for dir in &groups {
         println!("cargo:rerun-if-changed={}", dir.display());
         let group = dir.file_name().unwrap().to_str().unwrap().to_string();
-        let feature_gate = feature_for(&group);
         let mut files: Vec<_> = std::fs::read_dir(dir)
             .unwrap()
             .filter_map(|e| e.ok())
@@ -35,10 +34,7 @@ fn main() {
             .filter(|p| p.extension().is_some_and(|x| x == "rs"))
             .collect();
         files.sort();
-        let cfg = feature_gate
-            .map(|f| format!("#[cfg(feature = \"{f}\")] "))
-            .unwrap_or_default();
-        writeln!(modules, "{cfg}pub mod {group} {{").unwrap();
+        writeln!(modules, "pub mod {group} {{").unwrap();
         for file in &files {
             println!("cargo:rerun-if-changed={}", file.display());
             let name = file.file_stem().unwrap().to_str().unwrap();
@@ -49,14 +45,10 @@ fn main() {
             )
             .unwrap();
             if name == "_group" {
-                writeln!(group_list, "    {cfg}&{group}::_group::GROUP,").unwrap();
+                writeln!(group_list, "    &{group}::_group::GROUP,").unwrap();
             } else if !name.starts_with('_') {
-                writeln!(op_list, "    {cfg}&{group}::{name}::OP,").unwrap();
-                writeln!(
-                    sources,
-                    "    {cfg}({group:?}, {name:?}, &{group}::{name}::OP),"
-                )
-                .unwrap();
+                writeln!(op_list, "    &{group}::{name}::OP,").unwrap();
+                writeln!(sources, "    ({group:?}, {name:?}, &{group}::{name}::OP),").unwrap();
             }
         }
         writeln!(modules, "}}").unwrap();
@@ -70,12 +62,4 @@ fn main() {
     );
     let out = Path::new(&std::env::var("OUT_DIR").unwrap()).join("registry_gen.rs");
     std::fs::write(out, code).unwrap();
-}
-
-/// Groups that can be compiled out with a cargo feature.
-fn feature_for(group: &str) -> Option<&'static str> {
-    match group {
-        "youtube" => Some("youtube"),
-        _ => None,
-    }
 }

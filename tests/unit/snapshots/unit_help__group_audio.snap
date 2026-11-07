@@ -3,21 +3,11 @@ source: crates/deft-cli/../../tests/unit/help.rs
 expression: "help::group(g.name)"
 ---
 deft audio - commands (input -> output)
-  info            audio -> report    Duration, codec, sample rate, channels
-  chunk           audio -> audio...  Cut into equal parts: --length 10:00
-  compress        audio -> mp3       Re-encode as MP3 at --bitrate (kbps)
-  convert         audio -> audio     Change format: --to mp3|m4a|wav|flac|ogg|opus
-  denoise         audio -> audio     Reduce steady background noise such as hiss or hum
-  fade            audio -> audio     Fade in or out: --fade-in 2 --fade-out 3
-  from-video      video -> audio     Save the soundtrack: --to mp3|m4a|wav|flac|ogg
-  merge           audio... -> mp3    Join audio files in order
-  mix             audio... -> audio  Play files on top of each other, such as voice over music
-  normalize       audio -> audio     Even out loudness (EBU R128)
-  remove-silence  audio -> audio     Cut silent parts: --threshold -40 --min-silence 0.5
-  reverse         audio -> audio     Play backwards
-  speed           audio -> audio     Change tempo, keeping pitch: --factor 1.5
-  split           audio -> audio     Cut out a part: --from 0:10 --to-time 0:25
-  strip           audio -> audio     Remove tags and cover art; no re-encode
-  tag             audio -> audio     Set tags: --title --artist --album --year, cover --image
-  volume          audio -> audio     Raise or lower the level: --gain 6 or --gain -3 (dB)
+  info            audio -> report  Duration, codec, sample rate, channels
+  convert         audio -> audio   Change format: --to mp3|m4a|wav|flac|ogg|opus
+  denoise         audio -> audio   Reduce steady background noise such as hiss or hum
+  normalize       audio -> audio   Even out loudness (EBU R128)
+  remove-silence  audio -> audio   Cut silent parts: --threshold -40 --min-silence 0.5
+  split           audio -> audio   Cut out a part: --from 0:10 --to-time 0:25
+  tag             audio -> audio   Set tags: --title --artist --album --year, cover --image
 More: deft audio <command> --help

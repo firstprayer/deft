@@ -33,8 +33,6 @@ pub struct Ctx {
     /// Scratch directory, removed when the invocation ends.
     pub tmp: PathBuf,
     pub limits: Limits,
-    pub offline: bool,
-    pub install_engines: bool,
     pub keep_metadata: bool,
     pub timeout: Option<Duration>,
     /// Directory where managed engines are installed.
@@ -58,8 +56,6 @@ impl Ctx {
         Ctx {
             tmp,
             limits: Limits::default(),
-            offline: std::env::var_os("DEFT_OFFLINE").is_some_and(|v| v != "0"),
-            install_engines: std::env::var_os("DEFT_AUTO_INSTALL").is_some_and(|v| v != "0"),
             keep_metadata: false,
             timeout: None,
             engine_dir: deft_home().join("engines"),

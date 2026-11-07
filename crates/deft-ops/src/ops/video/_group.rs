@@ -2,14 +2,13 @@ use deft_core::prelude::*;
 
 pub static GROUP: Group = Group {
     name: "video",
-    summary: "Trim, crop, speed, convert, compress, GIF, frames (ffmpeg)",
+    summary: "Trim, merge, convert, compress, subtitles, GIF, frames (ffmpeg)",
     aliases: &["mp4", "movie"],
     synonyms: &[
+        ("thumbnail", "frames"),
+        ("poster", "frames"),
         ("gif", "to-gif"),
-        ("audio", "extract-audio"),
         ("screenshot", "frames"),
-        ("poster", "thumbnail"),
-        ("loop", "repeat"),
         ("slideshow", "from-images"),
         ("timelapse", "speed"),
         ("slow", "speed"),
@@ -18,9 +17,6 @@ pub static GROUP: Group = Group {
         ("music", "add-audio"),
         ("soundtrack", "add-audio"),
         ("segment", "chunk"),
-        ("hstack", "stack"),
-        ("vstack", "stack"),
-        ("backwards", "reverse"),
         ("burn", "add-subtitles"),
         ("subtitle", "add-subtitles"),
         ("subtitles", "add-subtitles"),

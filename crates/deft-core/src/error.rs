@@ -20,7 +20,6 @@ codes! {
     UnknownCommand => "UNKNOWN_COMMAND", 2, "No such group or command; see the suggestions";
     BadOption => "BAD_OPTION", 2, "Unknown or misplaced option";
     BadValue => "BAD_VALUE", 2, "An option value does not match its syntax";
-    Offline => "OFFLINE", 2, "The command needs the network but --offline is set";
     InputNotFound => "INPUT_NOT_FOUND", 3, "An input path does not exist";
     InputUnsupported => "INPUT_UNSUPPORTED", 3, "The input format is not supported by this command";
     InputMismatch => "INPUT_MISMATCH", 3, "The input is a different format than the command expects";
@@ -33,7 +32,6 @@ codes! {
     NoConversionPath => "NO_CONVERSION_PATH", 3, "No chain of converters reaches the requested format";
     TargetUnreachable => "TARGET_UNREACHABLE", 1, "The requested target (such as a file size) cannot be reached";
     LimitExceeded => "LIMIT_EXCEEDED", 3, "The input exceeds a safety limit (pixels, pages, size)";
-    Network => "NETWORK", 1, "A network request failed";
     Timeout => "TIMEOUT", 1, "The operation exceeded --timeout";
     Internal => "INTERNAL", 1, "A bug in deft; please report it";
 }

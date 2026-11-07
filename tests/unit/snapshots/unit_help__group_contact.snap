@@ -3,7 +3,6 @@ source: crates/deft-cli/../../tests/unit/help.rs
 expression: "help::group(g.name)"
 ---
 deft contact - commands (input -> output)
-  info      vcf -> report  Count contacts, phones and email addresses
-  from-csv  csv -> vcf     Make a VCF address book from a table
-  to-csv    vcf -> csv     Turn a VCF address book into a table
+  from-csv  csv -> vcf  Make a VCF address book from a table
+  to-csv    vcf -> csv  Turn a VCF address book into a table
 More: deft contact <command> --help

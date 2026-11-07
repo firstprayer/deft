@@ -12,9 +12,6 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn engine_note(op: &Op) -> String {
     let mut flags = Vec::new();
-    if op.network {
-        flags.push("net".to_string());
-    }
     if op.stability == Stability::Beta {
         flags.push("beta".to_string());
     }
@@ -66,8 +63,8 @@ pub const TOP_COMMANDS: &[TopCommand] = &[
     },
     TopCommand {
         name: "engine",
-        usage: "list|path|install|update|run",
-        summary: "Manage external programs such as ffmpeg and yt-dlp",
+        usage: "list|path|run",
+        summary: "Find the external programs deft runs, such as ffmpeg",
         example: "deft engine list",
         any_file: false,
     },

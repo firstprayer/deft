@@ -6,10 +6,10 @@ Deft is a single-binary CLI that replaces the scripts an agent would otherwise w
 
 - `crates/deft-core`: formats, option value syntax, error codes, `Op`/`Group` specs, `Job`/`OpResult`.
 - `crates/deft-tools-*` (data, doc, file, image, pdf, sheet, text): capability libraries. Pure functions, no CLI knowledge, no printing.
-- `crates/deft-engines`: locating, installing and running ffmpeg and yt-dlp. Never through a shell.
+- `crates/deft-engines`: locating and running ffmpeg and other programs. Never through a shell.
 - `crates/deft-ops`: `src/ops/<group>/<command>.rs`, one operation per file, auto-registered by `build.rs`. `runtime.rs` runs them; `registry.rs` resolves paths, aliases, search and conversion chains.
 - `crates/deft-cli`: `deft` binary: argument parsing, three-layer help, rendering.
-- `crates/deft-testkit`: fixtures, fake yt-dlp, visual cases. `xtask`: developer tools.
+- `crates/deft-testkit`: fixtures, visual cases. `xtask`: developer tools.
 
 ## Where things are registered
 
@@ -17,12 +17,12 @@ There is no central list. Each operation is one file, `crates/deft-ops/src/ops/<
 
 ## Rules
 
-- A group is only a logical index. It can be a file type (pdf) or a source (youtube). Put a command where an agent would look first.
+- A group is only a logical index. Put a command where an agent would look first.
 - Adding a command or group means adding files only. See [CONTRIBUTING.md](../CONTRIBUTING.md).
 - An operation has one implementation. To reach it from another group, add a mount; do not copy it.
 - The same option name must mean the same thing everywhere (`specs_are_well_formed` enforces this).
 - Help text is the product. Keep summaries short, stay inside the token budgets, review snapshot diffs with `cargo insta review`.
-- Never overwrite inputs. Only `network: true` operations and `deft engine install` may touch the network. A command must never wait on the network otherwise.
+- Never overwrite inputs. Deft never touches the network.
 - Pin new dependencies to releases at least two weeks old.
 
 ## Checks

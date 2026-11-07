@@ -1,5 +1,5 @@
 ---
-source: crates/deft-cli/tests/help_snapshots.rs
+source: crates/deft-cli/../../tests/unit/help.rs
 expression: "help::common()"
 ---
 Options available on every command:
@@ -12,8 +12,6 @@ Options available on every command:
   -r, --recursive              Descend into directories given as input
   --in-place                   Replace the input file (atomically)
   --stdin-format <value>       Format of stdin when it cannot be detected
-  --install-engines            Download missing engines (or DEFT_AUTO_INSTALL=1)
-  --offline                    Refuse all network access (or DEFT_OFFLINE=1)
   --timeout <value>            Time limit for engine calls, e.g. 5m
   --keep-metadata              Keep original metadata where supported
   -h, --help                   Show help

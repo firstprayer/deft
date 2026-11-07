@@ -17,17 +17,16 @@ Deft has not had a release. After 0.1.0, only the latest release gets security f
 Deft reads files that an agent or a person may not trust, so these matter most:
 
 - A crafted file that causes code execution, a crash that loses data, or a write outside the output path.
-- A command that overwrites its input or touches the network when it is not marked `[net]`.
-- A way around the checksum check in `deft engine install`.
+- A command that overwrites its input or touches the network.
 - Arguments reaching a shell. External programs must never run through one.
 
-Bugs in ffmpeg and yt-dlp belong with those projects, unless deft makes them worse.
+Bugs in ffmpeg belong with those projects, unless deft makes them worse.
 
 ## How deft limits risk
 
 - Files are processed locally. Deft collects no usage data and keeps no logs of your runs.
-- Only `network: true` operations and `deft engine install` may touch the network; `--offline` refuses them.
+- Deft never touches the network.
 - Inputs are not overwritten, and writes go to a temporary file before an atomic rename.
-- External programs run without a shell, and `deft engine install` verifies checksums.
+- External programs run without a shell.
 
 Fuzz testing has not been done yet.

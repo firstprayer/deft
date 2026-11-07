@@ -163,8 +163,6 @@ pub(crate) fn session(p: &args::Parsed) -> Result<Session> {
     let tmp = tempfile::tempdir()
         .map_err(|e| err(ErrorCode::OutputUnwritable, format!("temp directory: {e}")))?;
     let mut ctx = Ctx::new(tmp.path().to_path_buf());
-    ctx.offline |= p.offline;
-    ctx.install_engines |= p.install_engines;
     ctx.keep_metadata = p.keep_metadata;
     ctx.timeout = p.timeout.map(std::time::Duration::from_secs_f64);
     Ok(Session { ctx, _tmp: tmp })

@@ -54,8 +54,6 @@ Run one command's cases with `cargo test -p deftcli --test e2e_cases image/resiz
 Set `DEFT_E2E_KEEP=<folder>` to keep each case's files and what it printed.
 
 Every sandbox starts with the fixtures from `deft_testkit::write_fixtures`.
-`yt-dlp` is replaced by a fake that records its arguments in `yt-dlp.log`, so
-YouTube cases need no network.
 
 `tests/e2e/coverage.rs` fails the build when a command, an option or a choice
 value has no case. Adding an option therefore means adding its case.

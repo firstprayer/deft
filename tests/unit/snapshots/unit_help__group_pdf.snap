@@ -17,24 +17,18 @@ deft pdf - commands (input -> output)
   flatten         pdf -> pdf          Bake forms into pages
   from-images     image... -> pdf     One page per image
   from-md         md -> pdf           Typeset Markdown as PDF
-  grayscale       pdf -> pdf          Remove colour (Ghostscript)
   merge           pdf... -> pdf       Join PDFs in the given order
   meta            pdf -> pdf          Read or set metadata and bookmarks
   number          pdf -> pdf          Add page numbers: --format
   ocr             pdf -> pdf|txt      Make a scan searchable
   redact          pdf -> pdf          Black out for good: --box or --text
-  repair          pdf -> pdf          Rebuild a damaged PDF (Ghostscript)
   resize          pdf -> pdf          Fit pages to --page-size a4
   rotate          pdf -> pdf          Turn pages clockwise: --angle 90, --pages
   search          pdf -> report       Find text: --text invoice
   select          pdf -> pdf          Keep and reorder pages
   split           pdf -> pdf...       Split: per page, --every N, --ranges
   strip           pdf -> pdf          Remove metadata
-  to-docx         pdf -> docx         Editable Word file, layout not kept [beta]
   to-images       pdf -> png|jpg...   Render pages: --dpi, --pages
-  to-md           pdf -> md           Text as Markdown paragraphs [beta]
-  to-pdfa         pdf -> pdf          Archive as PDF/A-2 (Ghostscript) [beta]
-  to-sheet        pdf -> sheet        All text as one table [beta]
   to-text         pdf -> txt          Extract text
   watermark       pdf -> pdf          Stamp text or an image on pages
 More: deft pdf <command> --help

@@ -118,7 +118,7 @@ pub fn write() -> Result<(), String> {
     );
     let _ = writeln!(
         s,
-        "{FONTS}\n\nExternal programs such as ffmpeg and yt-dlp are not part of Deft; they keep their own licenses.\n\n## Components\n\n| Crate | License |\n|---|---|"
+        "{FONTS}\n\nExternal programs such as ffmpeg are not part of Deft; they keep their own licenses.\n\n## Components\n\n| Crate | License |\n|---|---|"
     );
     for (name, license) in &table {
         let _ = writeln!(s, "| {name} | {license} |");

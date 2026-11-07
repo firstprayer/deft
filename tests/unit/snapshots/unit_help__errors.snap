@@ -1,12 +1,11 @@
 ---
-source: crates/deft-cli/tests/help_snapshots.rs
+source: crates/deft-cli/../../tests/unit/help.rs
 expression: "help::errors()"
 ---
 Error codes (stable). Exit: 0 ok, 1 failed, 2 usage, 3 input, 4 engine missing, 5 partial.
   UNKNOWN_COMMAND      2 No such group or command; see the suggestions
   BAD_OPTION           2 Unknown or misplaced option
   BAD_VALUE            2 An option value does not match its syntax
-  OFFLINE              2 The command needs the network but --offline is set
   INPUT_NOT_FOUND      3 An input path does not exist
   INPUT_UNSUPPORTED    3 The input format is not supported by this command
   INPUT_MISMATCH       3 The input is a different format than the command expects
@@ -19,6 +18,5 @@ Error codes (stable). Exit: 0 ok, 1 failed, 2 usage, 3 input, 4 engine missing, 
   NO_CONVERSION_PATH   3 No chain of converters reaches the requested format
   TARGET_UNREACHABLE   1 The requested target (such as a file size) cannot be reached
   LIMIT_EXCEEDED       3 The input exceeds a safety limit (pixels, pages, size)
-  NETWORK              1 A network request failed
   TIMEOUT              1 The operation exceeded --timeout
   INTERNAL             1 A bug in deft; please report it

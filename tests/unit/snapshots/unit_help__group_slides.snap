@@ -4,8 +4,6 @@ expression: "help::group(g.name)"
 ---
 deft slides - commands (input -> output)
   info     pptx -> report  Slide count, titles, images, notes
-  from-md  md -> pptx      Make a deck: each heading or --- starts a slide [beta]
   to-md    pptx -> md      Outline in Markdown: a heading per slide, bullets, images
-  to-pdf   pptx -> pdf     Handout PDF of slide content [beta]
   to-text  pptx -> txt     Extract the text of every slide, form feed between slides
 More: deft slides <command> --help

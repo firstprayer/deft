@@ -1,5 +1,4 @@
-//! External engines: locating, installing and running programs such as ffmpeg
-//! and yt-dlp. Engines are never invoked through a shell; arguments are passed
+//! External engines: locating and running programs such as ffmpeg. Engines are never invoked through a shell; arguments are passed
 //! as an array. An engine can be overridden with `DEFT_ENGINE_<NAME>=<path>`.
 
 use deft_core::error::{ErrorCode, Result, err};
@@ -15,8 +14,6 @@ pub struct Engine {
     pub purpose: &'static str,
     /// Argument that prints the version.
     pub version_arg: &'static str,
-    /// Can `deft engine install` fetch it?
-    pub installable: bool,
     /// How to install it by hand.
     pub manual: &'static str,
 }
@@ -28,49 +25,30 @@ pub const ENGINES: &[Engine] = &[
         name: "ffmpeg",
         purpose: "video and audio processing",
         version_arg: "-version",
-        installable: false,
         manual: "brew install ffmpeg | apt install ffmpeg | winget install ffmpeg",
     },
     Engine {
         name: "ffprobe",
         purpose: "video and audio inspection (ships with ffmpeg)",
         version_arg: "-version",
-        installable: false,
         manual: "brew install ffmpeg | apt install ffmpeg | winget install ffmpeg",
-    },
-    Engine {
-        name: "yt-dlp",
-        purpose: "downloading from YouTube and other sites",
-        version_arg: "--version",
-        installable: true,
-        manual: "deft engine install yt-dlp",
-    },
-    Engine {
-        name: "gs",
-        purpose: "repairing PDFs, PDF/A and grayscale (Ghostscript)",
-        version_arg: "--version",
-        installable: false,
-        manual: "brew install ghostscript | apt install ghostscript | winget install ghostscript",
     },
     Engine {
         name: "sqlite3",
         purpose: "SQL over tables and SQLite files",
         version_arg: "--version",
-        installable: false,
         manual: "brew install sqlite | apt install sqlite3 | winget install sqlite",
     },
     Engine {
         name: "chrome",
         purpose: "exact web page rendering (Chrome, Chromium or Edge)",
         version_arg: "--version",
-        installable: false,
         manual: "install Google Chrome or Chromium",
     },
     Engine {
         name: "tesseract",
         purpose: "reading text in images (OCR)",
         version_arg: "--version",
-        installable: false,
         manual: "brew install tesseract | apt install tesseract-ocr | winget install tesseract",
     },
 ];
@@ -140,27 +118,18 @@ fn browser(on_path: &dyn Fn(&str) -> Option<PathBuf>) -> Option<PathBuf> {
         .or_else(|| APPS.iter().map(PathBuf::from).find(|p| p.is_file()))
 }
 
-/// Find an engine or fail with ENGINE_MISSING (installing it first when
-/// `--install-engines` is set and that is possible).
+/// Find an engine or fail with ENGINE_MISSING.
 pub fn require(ctx: &Ctx, name: &str, needed_by: &str) -> Result<PathBuf> {
     if let Some(p) = locate(ctx, name) {
         return Ok(p);
     }
     let def =
         engine(name).ok_or_else(|| err(ErrorCode::Internal, format!("unknown engine {name}")))?;
-    if ctx.install_engines && def.installable {
-        return install(ctx, name);
-    }
-    let hint = if def.installable {
-        format!("deft engine install {name}   (one-time download) or rerun with --install-engines")
-    } else {
-        format!("install it: {}", def.manual)
-    };
     Err(err(
         ErrorCode::EngineMissing,
         format!("{needed_by} needs {name} (not found)"),
     )
-    .hint(hint))
+    .hint(format!("install it: {}", def.manual)))
 }
 
 pub fn version(path: &Path, version_arg: &str) -> Option<String> {
@@ -292,99 +261,6 @@ pub fn tail(text: &str, lines: usize) -> String {
         .filter(|l| !l.is_empty())
         .collect();
     v[v.len().saturating_sub(lines)..].join(" | ")
-}
-
-fn yt_dlp_asset() -> Option<&'static str> {
-    match (std::env::consts::OS, std::env::consts::ARCH) {
-        ("macos", _) => Some("yt-dlp_macos"),
-        ("linux", "aarch64") => Some("yt-dlp_linux_aarch64"),
-        ("linux", _) => Some("yt-dlp_linux"),
-        ("windows", _) => Some("yt-dlp.exe"),
-        _ => None,
-    }
-}
-
-fn fetch(url: &str) -> Result<Vec<u8>> {
-    let net = |e: String| err(ErrorCode::Network, format!("{url}: {e}"));
-    let mut resp = ureq::get(url).call().map_err(|e| net(e.to_string()))?;
-    resp.body_mut()
-        .with_config()
-        .limit(512 * 1024 * 1024)
-        .read_to_vec()
-        .map_err(|e| net(e.to_string()))
-}
-
-fn sha256_hex(data: &[u8]) -> String {
-    use sha2::{Digest, Sha256};
-    Sha256::digest(data)
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
-}
-
-/// Download an engine into the managed directory, verifying its checksum.
-pub fn install(ctx: &Ctx, name: &str) -> Result<PathBuf> {
-    if ctx.offline {
-        return Err(err(
-            ErrorCode::Offline,
-            format!("installing {name} needs the network, but --offline is set"),
-        ));
-    }
-    let def =
-        engine(name).ok_or_else(|| err(ErrorCode::BadValue, format!("unknown engine {name}")))?;
-    if !def.installable {
-        return Err(err(
-            ErrorCode::EngineMissing,
-            format!("{name} cannot be installed by deft yet"),
-        )
-        .hint(format!("install it: {}", def.manual)));
-    }
-    let asset = yt_dlp_asset().ok_or_else(|| {
-        err(
-            ErrorCode::EngineMissing,
-            "no yt-dlp build for this platform",
-        )
-    })?;
-    let base = "https://github.com/yt-dlp/yt-dlp/releases/latest/download";
-    let sums = String::from_utf8_lossy(&fetch(&format!("{base}/SHA2-256SUMS"))?).to_string();
-    let expected = sums
-        .lines()
-        .find_map(|l| {
-            l.split_once(char::is_whitespace)
-                .filter(|(_, f)| f.trim().trim_start_matches('*') == asset)
-                .map(|(h, _)| h.to_string())
-        })
-        .ok_or_else(|| {
-            err(
-                ErrorCode::Network,
-                format!("no checksum published for {asset}"),
-            )
-        })?;
-    let data = fetch(&format!("{base}/{asset}"))?;
-    let actual = sha256_hex(&data);
-    if actual != expected {
-        return Err(err(
-            ErrorCode::Network,
-            format!("checksum mismatch for {asset}: expected {expected}, got {actual}"),
-        ));
-    }
-    std::fs::create_dir_all(&ctx.engine_dir).map_err(|e| {
-        err(
-            ErrorCode::OutputUnwritable,
-            format!("{}: {e}", ctx.engine_dir.display()),
-        )
-    })?;
-    let dest = ctx.engine_dir.join(exe(name));
-    let tmp = dest.with_extension("download");
-    std::fs::write(&tmp, &data).map_err(|e| err(ErrorCode::OutputUnwritable, e.to_string()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))
-            .map_err(|e| err(ErrorCode::OutputUnwritable, e.to_string()))?;
-    }
-    std::fs::rename(&tmp, &dest).map_err(|e| err(ErrorCode::OutputUnwritable, e.to_string()))?;
-    Ok(dest)
 }
 
 #[cfg(test)]

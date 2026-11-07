@@ -224,7 +224,7 @@ pub fn op_schema(op: &Op) -> serde_json::Value {
         "type": "object",
         "properties": props,
         "required": required,
-        "x-deft": {"accept": accept, "multiple_inputs": multiple, "output": op.output.label, "network": op.network, "engines": op.engines, "paths": op.paths()},
+        "x-deft": {"accept": accept, "multiple_inputs": multiple, "output": op.output.label, "engines": op.engines, "paths": op.paths()},
     })
 }
 
@@ -238,22 +238,14 @@ pub const ENGINE_HELP: &str = "deft engine <command> - Manage the programs deft 
 Commands:
   list                    Show each engine and where it is
   path <name>             Print where an engine is
-  install <name>          Download an engine and verify its checksum
-  update <name>           Replace an engine with the latest version
   run <name> -- <args>    Run an engine directly
 
 Example:
-  deft engine install yt-dlp
+  deft engine list
 ";
 
 pub fn engine(rest: &[String]) -> Result<Outcome> {
-    let (mut ctx, _tmp) = engine_ctx()?;
-    // This command takes no parsed options, so the flag is read here: installing
-    // must never reach the network when the caller said --offline.
-    ctx.offline |= rest
-        .iter()
-        .take_while(|a| *a != "--")
-        .any(|a| a == "--offline");
+    let (ctx, _tmp) = engine_ctx()?;
     let sub = rest.first().map(String::as_str).unwrap_or("list");
     let name = rest.get(1).map(String::as_str);
     match sub {
@@ -278,19 +270,6 @@ pub fn engine(rest: &[String]) -> Result<Outcome> {
                 Some(p) => Ok(Outcome::text(format!("{}\n", p.display()))),
                 None => Err(err(ErrorCode::EngineMissing, format!("{n} not found"))),
             }
-        }
-        "install" | "update" => {
-            let n = name.ok_or_else(|| {
-                err(
-                    ErrorCode::BadOption,
-                    format!("usage: deft engine {sub} <name>"),
-                )
-            })?;
-            let p = deft_engines::install(&ctx, n)?;
-            Ok(Outcome::text(format!(
-                "ok engine.{sub} {n} -> {}\n",
-                p.display()
-            )))
         }
         "run" => {
             let n = name.ok_or_else(|| {
@@ -319,7 +298,7 @@ pub fn engine(rest: &[String]) -> Result<Outcome> {
             ErrorCode::UnknownCommand,
             format!("no engine command {other:?}"),
         )
-        .hint("deft engine list | path | install | update | run")),
+        .hint("deft engine list | path | run")),
     }
 }
 

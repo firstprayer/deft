@@ -55,18 +55,6 @@ pub const COMMON: &[(&str, Option<char>, bool, &str)] = &[
         "Format of stdin when it cannot be detected",
     ),
     (
-        "install-engines",
-        None,
-        false,
-        "Download missing engines (or DEFT_AUTO_INSTALL=1)",
-    ),
-    (
-        "offline",
-        None,
-        false,
-        "Refuse all network access (or DEFT_OFFLINE=1)",
-    ),
-    (
         "timeout",
         None,
         true,
@@ -94,8 +82,6 @@ pub struct Parsed {
     pub recursive: bool,
     pub in_place: bool,
     pub stdin_format: Option<Format>,
-    pub install_engines: bool,
-    pub offline: bool,
     pub timeout: Option<f64>,
     pub keep_metadata: bool,
     pub help: bool,
@@ -131,8 +117,6 @@ fn set_common(p: &mut Parsed, name: &str, value: Option<String>) -> Result<()> {
                 )
             })?);
         }
-        "install-engines" => p.install_engines = true,
-        "offline" => p.offline = true,
         "timeout" => {
             p.timeout = Some(
                 parse_duration(&need(value)?)

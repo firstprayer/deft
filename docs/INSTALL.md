@@ -46,10 +46,9 @@ Deft is one binary, but some groups call external programs. `deft doctor` shows 
 | Group | Needs | How to get it |
 |---|---|---|
 | `video`, `audio`, and commands that read or write them | ffmpeg | Your package manager, such as `brew install ffmpeg` |
-| `youtube` | yt-dlp | `deft engine install yt-dlp`, which verifies a checksum |
 | `pdf`, `image`, `sheet`, `md` | Nothing | Built in |
 
-`deft engine install` only supports yt-dlp. ffmpeg must be installed by hand.
+Deft does not install these for you; install ffmpeg by hand.
 
 ## Agent setup
 

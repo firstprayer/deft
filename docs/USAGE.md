@@ -8,7 +8,7 @@ For the full command list, see [COMMANDS.md](COMMANDS.md). To install, see [INST
 deft <group> <command> [inputs...] [-o output] [--option value ...]
 ```
 
-A group is an index: by file type (`pdf`), or by source (`youtube`). `deft convert`, `deft info` and `deft find` work on any file.
+A group is an index by file type, such as `pdf`. `deft convert`, `deft info` and `deft find` work on any file.
 
 ## Finding a command
 
@@ -121,7 +121,7 @@ hint: add --password <password>
 
 $ deft pdf compres photos.pdf
 error UNKNOWN_COMMAND deft pdf has no command "compres"
-hint: did you mean: deft pdf compress | deft audio compress | deft image compress
+hint: did you mean: deft pdf compress | deft video compress | deft image compress
 ```
 <!-- /ERROR -->
 
@@ -142,8 +142,7 @@ Several inputs run in parallel, one job per CPU core; set the count with `-j`. F
 ## Safety
 
 - `--dry-run` shows what would happen and writes nothing.
-- `--offline` or `DEFT_OFFLINE=1` refuses all network access.
-- Commands marked `[net]` in help use the network. Nothing else does, apart from `deft engine install`.
+- Deft never uses the network.
 - Deft collects no usage data and keeps no logs of your runs.
 
 ## Agent setup
@@ -158,12 +157,11 @@ The skill text is generated from the command registry, so reinstall it after upd
 
 ## Engines
 
-Video and audio commands run ffmpeg; `youtube` commands run yt-dlp. Neither ships inside deft.
+Video and audio commands run ffmpeg. It does not ship inside deft.
 
 ```bash
 deft doctor                     # what is available
 deft engine list
-deft engine install yt-dlp      # fetches yt-dlp and checks its checksum
 deft engine run ffmpeg -- -i a.mp4 -c copy b.mkv    # anything deft has no command for
 ```
 

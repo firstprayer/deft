@@ -7,7 +7,7 @@ use crate::job::{Job, OpResult};
 use crate::value::Kind;
 
 /// A logical group of commands. Groups are only an index: they can be organised
-/// by file type (pdf) or by source (youtube).
+/// by file type, such as pdf.
 #[derive(Debug)]
 pub struct Group {
     pub name: &'static str,
@@ -238,7 +238,6 @@ pub struct Op {
     pub mounts: &'static [&'static str],
     pub converts: &'static [Edge],
     pub engines: &'static [&'static str],
-    pub network: bool,
     pub examples: &'static [&'static str],
     /// Search keywords and synonyms for `deft find`.
     pub tags: &'static [&'static str],
@@ -275,7 +274,6 @@ impl Op {
         mounts: &[],
         converts: &[],
         engines: &[],
-        network: false,
         examples: &[],
         tags: &[],
         result: &[],

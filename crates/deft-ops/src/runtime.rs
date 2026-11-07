@@ -143,7 +143,7 @@ fn expand_inputs(op: &Op, req: &Request) -> Result<Vec<InputFile>> {
                 ErrorCode::InputUnsupported,
                 format!("{raw}: deft {} works on local files", op.path()),
             )
-            .hint("download it first, e.g. deft youtube download <url> for videos"));
+            .hint("download it first"));
         }
         if raw == "-" {
             let bytes = req.stdin.clone().unwrap_or_default();
@@ -469,12 +469,6 @@ type Slot = Mutex<Option<(Result<OpResult>, Vec<InputFile>)>>;
 /// Execute a request.
 pub fn execute(op: &'static Op, mut req: Request, ctx: &Ctx) -> Result<Report> {
     let started = Instant::now();
-    if op.network && ctx.offline {
-        return Err(err(
-            ErrorCode::Offline,
-            format!("deft {} needs the network, but --offline is set", op.path()),
-        ));
-    }
     let inputs = expand_inputs(op, &req)?;
     finalize_params(op, &mut req.params, req.output.as_deref())?;
     let out_format = requested_format(op, req.output.as_deref())?;
@@ -649,7 +643,6 @@ fn deliver(
                 // A file's name must match its contents.
                 if let (Some(want), Some(got)) = (Format::from_path(f), p.format)
                     && want != got
-                    && !op.network
                     && op.output.arity == OutputArity::One
                 {
                     return Err(err(
@@ -856,14 +849,6 @@ pub fn convert(req: Request, to: Option<String>, ctx: &Ctx) -> Result<Report> {
                 warnings.push(
                     "approximate conversion: layout may differ from the original".to_string(),
                 );
-            }
-            for (op, _) in &chain {
-                if op.network && ctx.offline {
-                    return Err(err(
-                        ErrorCode::Offline,
-                        format!("{} needs the network", op.id),
-                    ));
-                }
             }
             let stem = input.stem();
             let dest = match req.output.as_deref() {

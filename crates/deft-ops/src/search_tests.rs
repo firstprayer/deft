@@ -11,7 +11,7 @@ fn first(query: &str) -> String {
 #[test]
 fn a_rare_word_outranks_a_common_one() {
     assert_eq!(first("compress pdf"), "pdf compress");
-    assert_eq!(first("rotate video"), "video rotate");
+    assert_eq!(first("compress video"), "video compress");
 }
 
 #[test]
@@ -25,7 +25,7 @@ fn inflected_words_match() {
 fn misspelled_words_are_corrected() {
     for (query, expected) in [
         ("compres pdf", "pdf compress"),
-        ("rotat video", "video rotate"),
+        ("compres video", "video compress"),
         ("watermrk pdf", "pdf watermark"),
         ("shrnk pdf", "pdf compress"),
     ] {
@@ -65,7 +65,7 @@ fn format_pairs_name_the_converter() {
 fn a_named_file_picks_commands_that_accept_it() {
     assert_eq!(first("rotate scan.png by 90 degrees"), "image rotate");
     assert_eq!(first("rotate report.pdf"), "pdf rotate");
-    assert_eq!(first("compress talk.mp3"), "audio compress");
+    assert_eq!(first("normalize talk.mp3"), "audio normalize");
 }
 
 #[test]
@@ -125,6 +125,6 @@ fn a_doubled_consonant_is_undone() {
         hits.iter().map(|h| &h.0).collect::<Vec<_>>()
     );
     assert!(registry().unknown_job("padding").is_empty());
-    assert_eq!(first("cropping video"), "video crop");
+    assert_eq!(first("cropping image"), "image crop");
     assert_eq!(first("trimming audio"), "audio split");
 }

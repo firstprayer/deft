@@ -184,7 +184,7 @@ pub fn render(value: &Value, format: Format, style: Style) -> Result<(Vec<u8>, V
                     ErrorCode::InputUnsupported,
                     "TOML needs a table at the top; this document is a list or a single value",
                 )
-                .hint("wrap it first: deft data query <file> --expr '{items: .}'"));
+                .hint("wrap the value in an object first"));
             }
             let dropped = drop_nulls(&mut v);
             if dropped > 0 {

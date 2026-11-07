@@ -6,22 +6,21 @@ deft 0.1.0 - local file toolkit. Usage: deft <group> <command> [inputs] [-o outp
 
 Groups:
   pdf      Merge, split, compress, encrypt, forms, OCR, compare, convert
-  image    Resize, crop, convert, compress, filters, montage, OCR
-  video    Trim, crop, speed, convert, compress, GIF, frames (ffmpeg)
-  audio    Convert, trim, merge, fade, speed, tag, normalize (ffmpeg)
+  image    Resize, crop, convert, compress, adjust, montage, OCR
+  video    Trim, merge, convert, compress, subtitles, GIF, frames (ffmpeg)
+  audio    Convert, trim, tag, normalize, denoise, cut silence (ffmpeg)
   doc      Word/ODT/RTF: to text, Markdown, HTML, PDF; find and replace
-  slides   PowerPoint: extract text, Markdown outline, PDF handout
-  data     JSON/YAML/TOML/XML: convert, query with jq syntax, merge, diff
-  sheet    Excel/CSV/ODS tables: filter, sort, join, pivot, convert
+  slides   PowerPoint: extract text, Markdown outline
+  data     JSON/YAML/TOML/XML: convert, format, merge, diff, validate
+  sheet    Excel/CSV/ODS tables: SQL query, pivot, merge, split, convert
   md       Markdown to PDF, HTML, Word, EPUB; table of contents
   html     HTML to Markdown, text, Word, PDF; screenshots
   epub     E-books: info, to text, Markdown and PDF
-  email    EML files: headers, text, attachments
+  email    EML files: text and attachments
   contact  VCF address books: to and from CSV
   calendar ICS calendars: to and from CSV
   gps      GPX and KML tracks: convert, distance and time
-  youtube  Info, download, audio, subtitles, thumbnail (yt-dlp)
-  file     Any file: hash, duplicates, batch rename, base64, encoding
+  file     Any file: find duplicates, fix text encoding
   qr       Create QR codes and barcodes; read QR codes
 
 Any file:

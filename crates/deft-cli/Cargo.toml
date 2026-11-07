@@ -50,8 +50,6 @@ name = "e2e_visual"
 path = "../../tests/e2e/visual.rs"
 
 [features]
-default = ["youtube"]
-youtube = ["deft-ops/youtube"]
 
 [dependencies]
 deft-core.workspace = true
