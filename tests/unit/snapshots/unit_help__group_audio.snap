@@ -5,7 +5,7 @@ expression: "help::group(g.name)"
 deft audio - commands (input -> output)
   info            audio -> report  Duration, codec, sample rate, channels
   convert         audio -> audio   Change format: --to mp3|m4a|wav|flac|ogg|opus
-  denoise         audio -> audio   Reduce steady background noise such as hiss or hum
+  denoise         audio -> audio   Reduce steady background noise such as hiss
   normalize       audio -> audio   Even out loudness (EBU R128)
   remove-silence  audio -> audio   Cut silent parts: --threshold -40 --min-silence 0.5
   split           audio -> audio   Cut out a part: --from 0:10 --to-time 0:25

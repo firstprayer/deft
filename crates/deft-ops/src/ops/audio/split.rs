@@ -1,5 +1,6 @@
 use super::_common::{
-    AUDIO, FFMPEG, audio_out, end_args, ffmpeg, file_result, input_path, seek_args, temp_out,
+    AUDIO, FFMPEG, audio_out, check_from, duration, end_args, ffmpeg, file_result, input_path,
+    probe, seek_args, strs, temp_out,
 };
 use deft_core::prelude::*;
 
@@ -28,13 +29,25 @@ pub static OP: Op = Op {
 };
 
 fn run(job: &Job) -> Result<OpResult> {
-    let format = job.target(job.input().require_format()?);
+    let source = job.input().require_format()?;
+    let format = job.target(source);
+    check_from(job.params, duration(&probe(job, job.input(), OP.id)?))?;
     let out = temp_out(job, format);
     let mut args = seek_args(job.params);
     args.extend(end_args(job.params)?);
     args.push("-i".to_string());
     args.push(input_path(job)?);
-    args.extend(audio_out(job, OP.id, format, &out)?);
+    // Audio has no keyframes, so a copy cuts as exactly as re-encoding, with no loss.
+    let copies = matches!(
+        format,
+        Format::Mp3 | Format::M4a | Format::Ogg | Format::Flac
+    );
+    if copies && format == source {
+        args.extend(strs(&["-vn", "-c:a", "copy"]));
+        args.push(out.display().to_string());
+    } else {
+        args.extend(audio_out(job, OP.id, format, &out)?);
+    }
     ffmpeg(job, OP.id, args)?;
     Ok(file_result(out, format))
 }
