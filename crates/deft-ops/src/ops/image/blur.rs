@@ -13,9 +13,8 @@ pub static OP: Op = Op {
                 min: 0.1,
                 max: 500.0,
             },
-            "Blur strength in pixels",
-        )
-        .default("5"),
+            "Strength in pixels (default 5; with --box, enough to hide text)",
+        ),
         param("box", Kind::Text, "Only this region: x,y,width,height"),
         QUALITY,
     ],
@@ -23,14 +22,7 @@ pub static OP: Op = Op {
         "deft image blur photo-1.jpg --radius 8 -o soft.jpg",
         "deft image blur photo-1.jpg --box 100,100,200,80 -o hidden.jpg",
     ],
-    tags: &[
-        "gaussian",
-        "soften",
-        "censor",
-        "hide plate",
-        "hide face",
-        "pixelate",
-    ],
+    tags: &["gaussian", "soften", "censor", "hide plate", "hide face"],
     result: &["width", "height"],
     suffix: Some("blurred"),
     run,
@@ -63,7 +55,11 @@ fn run(job: &Job) -> Result<OpResult> {
         }
         None => None,
     };
-    let radius = job.params.float("radius") as f32;
+    // A box is there to hide something, and 5 leaves text readable.
+    let radius = job.params.opt_float("radius").map_or_else(
+        || region.map_or(5.0, |(_, _, _, h)| (h as f32 / 4.0).max(12.0)),
+        |r| r as f32,
+    );
     save(
         job,
         &deft_tools_image::edit::blur(&img, radius, region),

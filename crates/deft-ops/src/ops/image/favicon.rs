@@ -1,5 +1,6 @@
 use super::_common::{IN, open};
 use deft_core::prelude::*;
+use deft_tools_image::Fit;
 
 const PNGS: &[(&str, u32)] = &[
     ("favicon-16x16.png", 16),
@@ -24,7 +25,15 @@ pub static OP: Op = Op {
 };
 
 fn run(job: &Job) -> Result<OpResult> {
-    let (img, _) = open(job)?;
+    let input = job.input();
+    let img = if input.require_format()? == Format::Svg {
+        // Drawn at the largest icon's size, so the big icons are sharp.
+        let spec = SizeSpec::parse("512x512").map_err(|m| bad_value("size", m))?;
+        let max = job.ctx.limits.max_pixels;
+        deft_tools_image::render_svg_sized(input.bytes()?, &spec, Fit::Contain, max)?
+    } else {
+        open(job)?.0
+    };
     let side = img.width().max(img.height());
     let square = deft_tools_image::edit::pad(
         &img,

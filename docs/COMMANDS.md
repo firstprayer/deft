@@ -78,7 +78,7 @@ Resize, crop, convert, compress, adjust, montage, OCR
 | `deft image to-pdf` | One page per image |  | `deft image to-pdf photo-1.jpg photo-2.jpg -o album.pdf` |
 | `deft image to-video` | Slideshow: --duration, --fps, --audio | ffmpeg, ffprobe | `deft video from-images photo-1.jpg photo-2.jpg --duration 2 -o show.mp4` |
 | `deft image transparent` | Make a colour see-through: --color white --fuzz 10 |  | `deft image transparent logo.png --color white -o cutout.png` |
-| `deft image trim` | Cut away plain borders, matching the corner colour |  | `deft image trim bordered.png -o tight.png` |
+| `deft image trim` | Cut away plain borders; --speck 4 ignores stray dots |  | `deft image trim bordered.png -o tight.png` |
 | `deft image watermark` | Add text or a logo: --text, --image, --position |  | `deft image watermark photo-1.jpg --text Sample -o marked.jpg` |
 
 ## video

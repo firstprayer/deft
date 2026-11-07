@@ -27,6 +27,7 @@ deft-testkit = { path = "crates/deft-testkit" }
 lopdf = { version = "=0.46.0", default-features = false }
 hayro = "=0.8.0"
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp", "tiff", "bmp", "ico", "avif", "rayon"] }
+moxcms = "0.8.1"
 fast_image_resize = { version = "6.1.0", features = ["image"] }
 oxipng = { version = "10.2.1", default-features = false, features = ["parallel"] }
 resvg = "=0.48.1"

@@ -8,6 +8,8 @@ const IN: &[Format] = &[
     Format::Tiff,
     Format::Bmp,
     Format::Svg,
+    Format::Heic,
+    Format::Avif,
 ];
 
 pub static OP: Op = Op {
@@ -25,12 +27,7 @@ pub static OP: Op = Op {
 };
 
 fn run(job: &Job) -> Result<OpResult> {
-    let input = job.input();
-    let img = deft_tools_image::decode(
-        input.bytes()?,
-        input.require_format()?,
-        job.ctx.limits.max_pixels,
-    )?;
+    let img = crate::generated::image::_common::decode(job, job.input())?;
     let codes = deft_tools_image::codes::read_qr(&img);
     let n = codes.len();
     let mut res = OpResult::report(facts![("codes", codes)], format!("{n} found"));

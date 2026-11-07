@@ -5,7 +5,7 @@ use deft_tools_image::Fit;
 pub static OP: Op = Op {
     id: "image.to-gif",
     summary: "Animate images into a GIF: --fps 2",
-    details: &["Frames are fitted to the first image (or --size)."],
+    details: &["Frames are fitted to the largest image (or --size), on white."],
     input: Input::all(IN, 1, "image"),
     output: Output::one(&[Format::Gif], "gif"),
     params: &[
@@ -35,35 +35,37 @@ pub static OP: Op = Op {
 
 fn run(job: &Job) -> Result<OpResult> {
     let p = job.params;
-    let mut frames = Vec::new();
-    let mut canvas = None;
-    for input in &job.inputs {
-        let mut img = decode(job, input)?;
-        if canvas.is_none() {
-            if let Some(s) = p.opt_size("size") {
-                img = deft_tools_image::resize(&img, &s, Fit::Contain, true)?;
-            }
-            canvas = Some((img.width(), img.height()));
+    let images = job
+        .inputs
+        .iter()
+        .map(|i| decode(job, i))
+        .collect::<Result<Vec<_>>>()?;
+    let (w, h) = match p.opt_size("size") {
+        Some(s) => {
+            let first = deft_tools_image::resize(&images[0], &s, Fit::Contain, true)?;
+            (first.width(), first.height())
         }
-        let (w, h) = canvas.expect("set above");
-        let fitted = if (img.width(), img.height()) == (w, h) {
-            img
-        } else {
-            let spec = SizeSpec {
-                width: Some(w),
-                height: Some(h),
-                percent: None,
-                source: String::new(),
-            };
-            let small = deft_tools_image::resize(&img, &spec, Fit::Contain, true)?;
-            deft_tools_image::edit::pad(
-                &small,
-                w,
-                h,
-                [0, 0, 0, 255],
-                deft_core::value::Position { x: 0.5, y: 0.5 },
-            )
-        };
+        None => (
+            images.iter().map(|i| i.width()).max().unwrap_or(1),
+            images.iter().map(|i| i.height()).max().unwrap_or(1),
+        ),
+    };
+    let spec = SizeSpec {
+        width: Some(w),
+        height: Some(h),
+        percent: None,
+        source: String::new(),
+    };
+    let mut frames = Vec::new();
+    for img in &images {
+        let small = deft_tools_image::resize(img, &spec, Fit::Contain, true)?;
+        let fitted = deft_tools_image::edit::pad(
+            &small,
+            w,
+            h,
+            [255, 255, 255, 255],
+            deft_core::value::Position { x: 0.5, y: 0.5 },
+        );
         frames.push(fitted.to_rgba8());
     }
     let n = frames.len();

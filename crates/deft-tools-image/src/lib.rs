@@ -9,6 +9,8 @@ use std::io::Cursor;
 pub mod codes;
 pub mod edit;
 pub mod exif;
+pub mod heif;
+pub mod webp;
 
 pub use image;
 
@@ -76,6 +78,23 @@ pub fn exif_orientation(bytes: &[u8]) -> u8 {
         .unwrap_or(1)
 }
 
+/// Whether a file holds more than one frame.
+pub fn is_animated(bytes: &[u8], format: Format) -> bool {
+    use image::AnimationDecoder;
+    let cursor = Cursor::new(bytes);
+    match format {
+        Format::Gif => image::codecs::gif::GifDecoder::new(cursor)
+            .is_ok_and(|d| d.into_frames().take(2).count() == 2),
+        Format::Webp => {
+            image::codecs::webp::WebPDecoder::new(cursor).is_ok_and(|d| d.has_animation())
+        }
+        Format::Png => {
+            image::codecs::png::PngDecoder::new(cursor).is_ok_and(|d| d.is_apng().unwrap_or(false))
+        }
+        _ => false,
+    }
+}
+
 /// Width, height and component count from a JPEG's SOF marker.
 pub fn jpeg_info(bytes: &[u8]) -> Option<(u32, u32, u8)> {
     if !bytes.starts_with(&[0xFF, 0xD8]) {
@@ -106,20 +125,80 @@ pub fn jpeg_info(bytes: &[u8]) -> Option<(u32, u32, u8)> {
 
 /// Encoding options.
 #[derive(Clone, Copy, Debug)]
-pub struct Encode {
+pub struct Encode<'a> {
     /// 1-100, for lossy formats.
     pub quality: u8,
     /// Background used when a format without alpha receives transparent pixels.
     pub background: [u8; 3],
+    /// The colour profile of the pixels. Formats that can hold one get it;
+    /// for the others the pixels are converted to sRGB.
+    pub icc: Option<&'a [u8]>,
 }
 
-impl Default for Encode {
+impl Default for Encode<'_> {
     fn default() -> Self {
         Encode {
             quality: 85,
             background: [255, 255, 255],
+            icc: None,
         }
     }
+}
+
+/// The embedded colour profile of an image.
+pub fn icc_profile(bytes: &[u8], format: Format) -> Option<Vec<u8>> {
+    match format {
+        Format::Heic | Format::Avif => heif::read(bytes)?.icc,
+        Format::Svg => None,
+        _ => ImageReader::new(Cursor::new(bytes))
+            .with_guessed_format()
+            .ok()?
+            .into_decoder()
+            .ok()?
+            .icc_profile()
+            .ok()?,
+    }
+}
+
+/// A profile describes one colour model. The CMYK profile of a CMYK JPEG, say,
+/// does not fit the RGB pixels it decodes to.
+pub fn profile_fits(icc: &[u8], img: &DynamicImage) -> bool {
+    let model: &[u8] = if img.color().has_color() {
+        b"RGB "
+    } else {
+        b"GRAY"
+    };
+    icc.get(16..20) == Some(model)
+}
+
+fn embed_profile(enc: &mut impl image::ImageEncoder, icc: Option<&[u8]>) {
+    if let Some(p) = icc {
+        // Only called for encoders that accept a profile.
+        let _ = enc.set_icc_profile(p.to_vec());
+    }
+}
+
+/// Convert pixels from an RGB profile to sRGB. None if the profile is unusable.
+fn to_srgb(img: &DynamicImage, icc: &[u8]) -> Option<DynamicImage> {
+    use moxcms::{ColorProfile, Layout, TransformOptions};
+    let source = ColorProfile::new_from_slice(icc).ok()?;
+    let transform = source
+        .create_transform_8bit(
+            Layout::Rgba,
+            &ColorProfile::new_srgb(),
+            Layout::Rgba,
+            TransformOptions::default(),
+        )
+        .ok()?;
+    let from = img.to_rgba8();
+    let mut to = from.clone();
+    transform.transform(from.as_raw(), &mut to).ok()?;
+    let out = DynamicImage::ImageRgba8(to);
+    Some(if img.color().has_alpha() {
+        out
+    } else {
+        DynamicImage::ImageRgb8(out.to_rgb8())
+    })
 }
 
 pub const WRITABLE: &[Format] = &[
@@ -169,10 +248,17 @@ pub fn encode(img: &DynamicImage, format: Format, opt: Encode) -> Result<Vec<u8>
     let mut out = Vec::new();
     let enc_err =
         |e: image::ImageError| err(ErrorCode::Internal, format!("encoding {format}: {e}"));
+    let icc = opt.icc.filter(|p| profile_fits(p, img));
+    let converted = match format {
+        Format::Avif | Format::Gif | Format::Ico | Format::Bmp => icc.and_then(|p| to_srgb(img, p)),
+        _ => None,
+    };
+    let img = converted.as_ref().unwrap_or(img);
     match format {
         Format::Jpeg => {
             let q = opt.quality.clamp(1, 100);
             let mut enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, q);
+            embed_profile(&mut enc, icc);
             if img.color().has_color() {
                 enc.encode_image(&flatten(img, opt.background))
                     .map_err(enc_err)?;
@@ -182,11 +268,12 @@ pub fn encode(img: &DynamicImage, format: Format, opt: Encode) -> Result<Vec<u8>
             }
         }
         Format::Png => {
-            let enc = image::codecs::png::PngEncoder::new_with_quality(
+            let mut enc = image::codecs::png::PngEncoder::new_with_quality(
                 &mut out,
                 image::codecs::png::CompressionType::Best,
                 image::codecs::png::FilterType::Adaptive,
             );
+            embed_profile(&mut enc, icc);
             let img = normalize_depth(img);
             enc.write_image(
                 img.as_bytes(),
@@ -197,7 +284,8 @@ pub fn encode(img: &DynamicImage, format: Format, opt: Encode) -> Result<Vec<u8>
             .map_err(enc_err)?;
         }
         Format::Webp => {
-            let enc = image::codecs::webp::WebPEncoder::new_lossless(&mut out);
+            let mut enc = image::codecs::webp::WebPEncoder::new_lossless(&mut out);
+            embed_profile(&mut enc, icc);
             let px = if img.color().has_alpha() {
                 DynamicImage::ImageRgba8(img.to_rgba8())
             } else {
@@ -243,8 +331,10 @@ pub fn encode(img: &DynamicImage, format: Format, opt: Encode) -> Result<Vec<u8>
                 .map_err(enc_err)?;
         }
         Format::Tiff => {
+            let mut enc = image::codecs::tiff::TiffEncoder::new(Cursor::new(&mut out));
+            embed_profile(&mut enc, icc);
             normalize_depth(img)
-                .write_to(&mut Cursor::new(&mut out), image::ImageFormat::Tiff)
+                .write_with_encoder(enc)
                 .map_err(enc_err)?;
         }
         Format::Bmp => {
@@ -662,8 +752,9 @@ pub fn render_svg(bytes: &[u8], width: Option<u32>) -> Result<DynamicImage> {
         .map_err(|e| err(ErrorCode::InputCorrupt, format!("svg: {e}")))?;
     let size = tree.size();
     let scale = width.map(|w| w as f32 / size.width()).unwrap_or(1.0);
-    let pw = ((size.width() * scale).ceil() as u32).max(1);
-    let ph = ((size.height() * scale).ceil() as u32).max(1);
+    // The small subtraction keeps float error from adding a pixel.
+    let pw = width.unwrap_or(size.width().ceil() as u32).max(1);
+    let ph = ((size.height() * scale - 0.01).ceil() as u32).max(1);
     let mut pixmap = resvg::tiny_skia::Pixmap::new(pw, ph)
         .ok_or_else(|| err(ErrorCode::LimitExceeded, "svg is too large"))?;
     resvg::render(
@@ -679,6 +770,41 @@ pub fn render_svg(bytes: &[u8], width: Option<u32>) -> Result<DynamicImage> {
     Ok(DynamicImage::ImageRgba8(img))
 }
 
+/// Render an SVG at the size a spec asks for. Vector art has no pixels to
+/// lose, so it may grow.
+pub fn render_svg_sized(
+    bytes: &[u8],
+    spec: &deft_core::value::SizeSpec,
+    fit: Fit,
+    max_pixels: u64,
+) -> Result<DynamicImage> {
+    let opt = resvg::usvg::Options::default();
+    let tree = resvg::usvg::Tree::from_data(bytes, &opt)
+        .map_err(|e| err(ErrorCode::InputCorrupt, format!("svg: {e}")))?;
+    let (w, h) = (tree.size().width() as f64, tree.size().height() as f64);
+    let (tw, th) = spec.target(w.ceil() as u32, h.ceil() as u32);
+    let (sx, sy) = (tw as f64 / w, th as f64 / h);
+    // Fill and cover draw too large, and the resize below brings them to size.
+    let scale = if spec.is_box() && fit == Fit::Contain {
+        sx.min(sy)
+    } else {
+        sx.max(sy)
+    };
+    let (pw, ph) = ((w * scale).round() as u64, (h * scale).round() as u64);
+    if pw * ph > max_pixels {
+        return Err(err(
+            ErrorCode::LimitExceeded,
+            format!("image would be {pw}x{ph}, over the {max_pixels}-pixel safety limit"),
+        ));
+    }
+    let img = render_svg(bytes, Some(pw as u32))?;
+    if spec.is_box() {
+        resize(&img, spec, fit, false)
+    } else {
+        Ok(img)
+    }
+}
+
 /// Lossless PNG optimisation.
 pub fn optimize_png(bytes: &[u8], strip: bool) -> Result<Vec<u8>> {
     let mut opts = oxipng::Options::from_preset(2);
@@ -691,41 +817,69 @@ pub fn optimize_png(bytes: &[u8], strip: bool) -> Result<Vec<u8>> {
         .map_err(|e| err(ErrorCode::InputCorrupt, format!("png: {e}")))
 }
 
-/// Remove metadata without re-encoding. JPEG: drops APPn (except JFIF and,
-/// when `keep_icc`, the ICC profile) and comments, keeping the orientation in
-/// a minimal EXIF block so the image still displays upright. PNG: drops text,
-/// time and EXIF chunks. Returns None for other formats.
-pub fn strip_metadata(bytes: &[u8], format: Format, keep_icc: bool) -> Option<Vec<u8>> {
+/// What removing metadata left.
+pub struct Stripped {
+    pub bytes: Vec<u8>,
+    /// Bytes dropped after the end of the image, such as the second picture or
+    /// the video that phones append.
+    pub trailing: usize,
+}
+
+/// Remove metadata without re-encoding, keeping the orientation so the image
+/// still displays upright. JPEG: drops APPn (except JFIF, Adobe and, when
+/// `keep_icc`, the ICC profile), comments and anything after the image. PNG:
+/// drops text, time and EXIF chunks. WebP: drops the EXIF and XMP chunks.
+/// Returns None for other formats.
+pub fn strip_metadata(bytes: &[u8], format: Format, keep_icc: bool) -> Option<Stripped> {
     match format {
         Format::Jpeg => strip_jpeg(bytes, keep_icc),
-        Format::Png => strip_png(bytes, keep_icc),
+        Format::Png => strip_png(bytes, keep_icc).map(|bytes| Stripped { bytes, trailing: 0 }),
+        Format::Webp => webp::strip(bytes, keep_icc).map(|bytes| Stripped { bytes, trailing: 0 }),
         _ => None,
     }
 }
 
-fn strip_jpeg(bytes: &[u8], keep_icc: bool) -> Option<Vec<u8>> {
+/// Where the entropy-coded data starting at `from` ends: the next real marker.
+fn scan_end(bytes: &[u8], from: usize) -> usize {
+    let mut i = from;
+    while i + 1 < bytes.len() {
+        if bytes[i] == 0xFF && !matches!(bytes[i + 1], 0x00 | 0xD0..=0xD7 | 0xFF) {
+            return i;
+        }
+        i += 1;
+    }
+    bytes.len()
+}
+
+fn strip_jpeg(bytes: &[u8], keep_icc: bool) -> Option<Stripped> {
     let orientation = exif_orientation(bytes);
     let mut out = vec![0xFF, 0xD8];
     if orientation != 1 {
         out.extend_from_slice(&minimal_exif(orientation));
     }
     let mut i = 2;
-    while i + 4 <= bytes.len() {
+    let mut scanned = false;
+    while i + 2 <= bytes.len() {
         if bytes[i] != 0xFF {
             return None;
         }
         let marker = bytes[i + 1];
-        if marker == 0xDA {
-            // Start of scan: copy the rest verbatim.
-            out.extend_from_slice(&bytes[i..]);
-            return Some(out);
+        if marker == 0xD9 {
+            out.extend_from_slice(&bytes[i..i + 2]);
+            let trailing = bytes.len() - i - 2;
+            return Some(Stripped {
+                bytes: out,
+                trailing,
+            });
         }
-        let len = u16::from_be_bytes([bytes[i + 2], bytes[i + 3]]) as usize;
+        let len = u16::from_be_bytes([*bytes.get(i + 2)?, *bytes.get(i + 3)?]) as usize;
         let seg = bytes.get(i..i + 2 + len)?;
-        let payload = &seg[4..];
+        let payload = seg.get(4..)?;
         let keep = match marker {
             0xE0 => payload.starts_with(b"JFIF\0") && orientation == 1,
             0xE2 => keep_icc && payload.starts_with(b"ICC_PROFILE\0"),
+            // Says how CMYK and RGB data is stored; colours change without it.
+            0xEE => payload.starts_with(b"Adobe"),
             0xE1 | 0xE3..=0xEF | 0xFE => false,
             _ => true,
         };
@@ -733,17 +887,33 @@ fn strip_jpeg(bytes: &[u8], keep_icc: bool) -> Option<Vec<u8>> {
             out.extend_from_slice(seg);
         }
         i += 2 + len;
+        if marker == 0xDA {
+            let end = scan_end(bytes, i);
+            out.extend_from_slice(&bytes[i..end]);
+            i = end;
+            scanned = true;
+        }
     }
-    None
+    // A cut file has no end marker, but its picture data is all there is.
+    scanned.then_some(Stripped {
+        bytes: out,
+        trailing: 0,
+    })
 }
 
-/// An APP1 segment containing only the EXIF orientation tag.
-pub fn minimal_exif(orientation: u8) -> Vec<u8> {
+/// A TIFF stream containing only the EXIF orientation tag.
+pub(crate) fn orientation_tiff(orientation: u8) -> Vec<u8> {
     let mut tiff = Vec::new();
     tiff.extend_from_slice(b"MM\0\x2A\0\0\0\x08"); // big-endian TIFF header, IFD at 8
     tiff.extend_from_slice(&[0, 1]); // one entry
     tiff.extend_from_slice(&[0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, orientation, 0, 0]); // Orientation SHORT 1
     tiff.extend_from_slice(&[0, 0, 0, 0]); // no next IFD
+    tiff
+}
+
+/// An APP1 segment containing only the EXIF orientation tag.
+pub fn minimal_exif(orientation: u8) -> Vec<u8> {
+    let tiff = orientation_tiff(orientation);
     let mut seg = vec![0xFF, 0xE1];
     seg.extend_from_slice(&((2 + 6 + tiff.len()) as u16).to_be_bytes());
     seg.extend_from_slice(b"Exif\0\0");
@@ -772,24 +942,36 @@ fn strip_png(bytes: &[u8], keep_icc: bool) -> Option<Vec<u8>> {
             break;
         }
     }
-    Some(out)
+    let orientation = exif_orientation(bytes);
+    Some(if orientation == 1 {
+        out
+    } else {
+        exif::into_png(&out, &orientation_tiff(orientation))
+    })
 }
 
-/// (has EXIF/text metadata, has GPS) from a cheap scan.
+/// (has EXIF, XMP or text metadata, has GPS).
 pub fn metadata_summary(bytes: &[u8], format: Format) -> (bool, bool) {
     let has = |needle: &[u8]| bytes.windows(needle.len()).any(|w| w == needle);
+    let tags = exif::read(bytes);
+    // XMP is plain text in every format, and it can hold a location of its own.
+    let xmp_gps = has(b"GPSLatitude");
+    let any = !tags.is_empty() || has(b"<x:xmpmeta") || xmp_gps;
+    let gps = tags.keys().any(|k| k.starts_with("GPS")) || xmp_gps;
     match format {
         Format::Jpeg => {
             let exif = has(b"Exif\0\0");
-            // GPS IFD pointer tag 0x8825 (type LONG) in either byte order.
-            let gps = exif && (has(&[0x88, 0x25, 0x00, 0x04]) || has(&[0x25, 0x88, 0x04, 0x00]));
-            (exif, gps)
+            // The GPS IFD pointer tag 0x8825 (type LONG) in either byte order
+            // also finds it in pictures appended after the main one.
+            let pointer =
+                exif && (has(&[0x88, 0x25, 0x00, 0x04]) || has(&[0x25, 0x88, 0x04, 0x00]));
+            (any || exif, gps || pointer)
         }
         Format::Png => (
-            has(b"eXIf") || has(b"tEXt") || has(b"iTXt") || has(b"zTXt"),
-            false,
+            any || has(b"eXIf") || has(b"tEXt") || has(b"iTXt") || has(b"zTXt"),
+            gps,
         ),
-        _ => (false, false),
+        _ => (any, gps),
     }
 }
 

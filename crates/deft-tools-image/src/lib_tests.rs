@@ -17,7 +17,7 @@ fn orientation_is_applied_and_kept_when_stripping() {
     assert_eq!(exif_orientation(&jpg), 6);
     let img = decode(&jpg, Format::Jpeg, u64::MAX).unwrap();
     assert_eq!(img.dimensions(), (20, 40)); // rotated upright
-    let stripped = strip_metadata(&jpg, Format::Jpeg, true).unwrap();
+    let stripped = strip_metadata(&jpg, Format::Jpeg, true).unwrap().bytes;
     assert_eq!(exif_orientation(&stripped), 6);
     assert_eq!(jpeg_info(&stripped), Some((40, 20, 3)));
     assert!(decode(&stripped, Format::Jpeg, u64::MAX).is_ok());
@@ -135,4 +135,57 @@ fn svg_renders() {
     let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><rect width="20" height="10" fill="red"/></svg>"#;
     let img = render_svg(svg, Some(40)).unwrap();
     assert_eq!(img.dimensions(), (40, 20));
+}
+
+#[test]
+fn strip_keeps_the_adobe_marker_that_says_how_colours_are_stored() {
+    let mut jpg = sample_jpeg(1);
+    let adobe = b"\xFF\xEE\x00\x0EAdobe\x00\x64\x00\x00\x00\x00\x02";
+    jpg.splice(2..2, adobe.iter().copied());
+    let stripped = strip_metadata(&jpg, Format::Jpeg, false).unwrap();
+    assert!(stripped.bytes.windows(adobe.len()).any(|w| w == adobe));
+}
+
+#[test]
+fn strip_finds_the_end_of_a_jpeg_past_markers_inside_the_scan() {
+    let jpg = sample_jpeg(1);
+    let extra = sample_jpeg(1);
+    let both = [jpg.clone(), extra.clone()].concat();
+    let stripped = strip_metadata(&both, Format::Jpeg, true).unwrap();
+    assert_eq!(stripped.trailing, extra.len());
+    assert_eq!(stripped.bytes.len(), jpg.len());
+}
+
+#[test]
+fn a_cut_jpeg_keeps_what_it_has() {
+    let jpg = sample_jpeg(1);
+    let cut = &jpg[..jpg.len() - 10];
+    let stripped = strip_metadata(cut, Format::Jpeg, true).unwrap();
+    assert_eq!(stripped.bytes, cut);
+}
+
+#[test]
+fn a_profile_only_travels_with_pixels_of_its_colour_model() {
+    let mut icc = vec![0u8; 128];
+    icc[16..20].copy_from_slice(b"CMYK");
+    let rgb = DynamicImage::ImageRgb8(RgbImage::new(4, 4));
+    assert!(!profile_fits(&icc, &rgb));
+    icc[16..20].copy_from_slice(b"RGB ");
+    assert!(profile_fits(&icc, &rgb));
+    assert!(!profile_fits(
+        &icc,
+        &DynamicImage::ImageLuma8(image::GrayImage::new(4, 4))
+    ));
+}
+
+#[test]
+fn an_unusable_profile_leaves_the_pixels_alone() {
+    let img = DynamicImage::ImageRgb8(RgbImage::from_pixel(4, 4, image::Rgb([9, 8, 7])));
+    let mut icc = vec![0u8; 128];
+    icc[16..20].copy_from_slice(b"RGB ");
+    let opt = Encode {
+        icc: Some(&icc),
+        ..Default::default()
+    };
+    assert!(encode(&img, Format::Bmp, opt).is_ok());
 }

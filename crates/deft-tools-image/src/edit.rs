@@ -31,10 +31,10 @@ pub fn adjust(
     let mut out = img.to_rgba8();
     let contrast = (100.0 + contrast) / 100.0;
     let saturation = (100.0 + saturation) / 100.0;
-    let lift = brightness / 100.0 * 255.0;
+    let gain = 1.0 + brightness / 100.0;
     let table: Vec<f32> = (0..=255)
         .map(|v| {
-            let mut x = v as f32 + lift;
+            let mut x = v as f32 * gain;
             x = (x - 127.5) * contrast + 127.5;
             x = x.clamp(0.0, 255.0);
             255.0 * (x / 255.0).powf(1.0 / gamma)
@@ -58,21 +58,72 @@ fn distance(a: [u8; 4], b: [u8; 4]) -> u8 {
         .max(a[3].abs_diff(b[3]))
 }
 
-/// Bounds of everything that differs from the top-left corner, within a
-/// tolerance from 0 to 100. Returns x, y, w, h.
-pub fn trim_box(img: &DynamicImage, fuzz: f32) -> Option<(u32, u32, u32, u32)> {
-    let rgba = img.to_rgba8();
-    let edge = rgba.get_pixel(0, 0).0;
-    let limit = (fuzz / 100.0 * 255.0) as u8;
+/// The colour most of the image's outer edge has. One corner alone could be a
+/// speck, or a mark the border does not share.
+fn border_colour(rgba: &RgbaImage) -> [u8; 4] {
     let (w, h) = rgba.dimensions();
-    let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0, 0);
-    for (x, y, p) in rgba.enumerate_pixels() {
-        if distance(p.0, edge) > limit {
-            x0 = x0.min(x);
-            y0 = y0.min(y);
-            x1 = x1.max(x);
-            y1 = y1.max(y);
+    let mut seen = std::collections::HashMap::new();
+    let edge = (0..w)
+        .flat_map(|x| [(x, 0), (x, h - 1)])
+        .chain((0..h).flat_map(|y| [(0, y), (w - 1, y)]));
+    for (x, y) in edge {
+        *seen.entry(rgba.get_pixel(x, y).0).or_insert(0u32) += 1;
+    }
+    seen.into_iter()
+        .max_by_key(|(colour, n)| (*n, *colour))
+        .map_or([0; 4], |(colour, _)| colour)
+}
+
+/// Clear every patch of touching marks of at most `speck` pixels. A patch is
+/// measured whole, so a thin rule stays however thin it is.
+fn drop_specks(marks: &mut [bool], w: usize, speck: usize) {
+    let mut seen = vec![false; marks.len()];
+    for start in 0..marks.len() {
+        if !marks[start] || seen[start] {
+            continue;
         }
+        seen[start] = true;
+        let (mut patch, mut next) = (vec![start], 0);
+        while next < patch.len() {
+            let (x, y) = (patch[next] % w, patch[next] / w);
+            next += 1;
+            for ny in y.saturating_sub(1)..=y + 1 {
+                for nx in x.saturating_sub(1)..=(x + 1).min(w - 1) {
+                    let i = ny * w + nx;
+                    if i < marks.len() && marks[i] && !seen[i] {
+                        seen[i] = true;
+                        patch.push(i);
+                    }
+                }
+            }
+        }
+        if patch.len() <= speck {
+            patch.into_iter().for_each(|i| marks[i] = false);
+        }
+    }
+}
+
+/// Bounds of what differs from the border colour, within a tolerance from 0 to
+/// 100, leaving out patches of at most `speck` pixels. Returns x, y, w, h.
+pub fn trim_box(img: &DynamicImage, fuzz: f32, speck: usize) -> Option<(u32, u32, u32, u32)> {
+    let rgba = img.to_rgba8();
+    let (w, h) = rgba.dimensions();
+    if w == 0 || h == 0 {
+        return None;
+    }
+    let edge = border_colour(&rgba);
+    let limit = (fuzz / 100.0 * 255.0) as u8;
+    let mut marks: Vec<bool> = rgba.pixels().map(|p| distance(p.0, edge) > limit).collect();
+    if speck > 0 {
+        drop_specks(&mut marks, w as usize, speck);
+    }
+    let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0, 0);
+    for (i, _) in marks.iter().enumerate().filter(|(_, m)| **m) {
+        let (x, y) = (i as u32 % w, i as u32 / w);
+        x0 = x0.min(x);
+        y0 = y0.min(y);
+        x1 = x1.max(x);
+        y1 = y1.max(y);
     }
     (x0 <= x1 && y0 <= y1).then(|| (x0, y0, x1 + 1 - x0, y1 + 1 - y0))
 }
@@ -138,17 +189,13 @@ pub fn montage(images: &[DynamicImage], grid: Grid) -> Result<DynamicImage> {
     let mut out = RgbaImage::from_pixel(w, h, Rgba(grid.background));
     for (n, img) in images.iter().enumerate() {
         let (c, r) = (n as u32 % cols, n as u32 / cols);
-        let fitted = if img.width() > tw || img.height() > th || grid.tile.is_some() {
-            let spec = deft_core::value::SizeSpec {
-                width: Some(tw),
-                height: Some(th),
-                percent: None,
-                source: String::new(),
-            };
-            crate::resize(img, &spec, crate::Fit::Contain, true)?
-        } else {
-            img.clone()
+        let spec = deft_core::value::SizeSpec {
+            width: Some(tw),
+            height: Some(th),
+            percent: None,
+            source: String::new(),
         };
+        let fitted = crate::resize(img, &spec, crate::Fit::Contain, true)?;
         let x = grid.gap + c * (tw + grid.gap) + (tw - fitted.width().min(tw)) / 2;
         let y = grid.gap + r * (th + grid.gap) + (th - fitted.height().min(th)) / 2;
         overlay(&mut out, &fitted.to_rgba8(), x as i64, y as i64, 1.0);

@@ -5,7 +5,7 @@ use deft_tools_image::Fit;
 pub static OP: Op = Op {
     id: "image.resize",
     summary: "Scale: --size 800x, 1920x1080, 50%",
-    details: &["Images never grow unless --upscale is set."],
+    details: &["Images never grow unless --upscale is set. SVG is drawn at the size asked for."],
     input: Input::each(IN, "image"),
     output: Output::one(INOUT, "image"),
     params: &[
@@ -41,12 +41,14 @@ pub static OP: Op = Op {
 
 fn run(job: &Job) -> Result<OpResult> {
     let p = job.params;
+    let (spec, fit) = (p.size("size"), Fit::parse(&p.text("fit")));
+    let input = job.input();
+    if input.require_format()? == Format::Svg {
+        let max = job.ctx.limits.max_pixels;
+        let out = deft_tools_image::render_svg_sized(input.bytes()?, &spec, fit, max)?;
+        return save(job, &out, Format::Svg);
+    }
     let (img, format) = open(job)?;
-    let out = deft_tools_image::resize(
-        &img,
-        &p.size("size"),
-        Fit::parse(&p.text("fit")),
-        p.flag("upscale"),
-    )?;
+    let out = deft_tools_image::resize(&img, &spec, fit, p.flag("upscale"))?;
     save(job, &out, format)
 }

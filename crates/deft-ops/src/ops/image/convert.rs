@@ -1,10 +1,13 @@
-use super::_common::{IN, QUALITY, open};
+use super::_common::{IN, QUALITY, encode, open, profile};
 use deft_core::prelude::*;
 
 pub static OP: Op = Op {
     id: "image.convert",
     summary: "Change format: --to png|jpg|webp|avif|gif|tiff|bmp|ico",
-    details: &["WebP output is lossless. Transparent areas become --background in JPEG."],
+    details: &[
+        "Photos become lossy WebP (needs ffmpeg), PNG and GIF lossless, unless --quality is given.",
+        "Transparent areas become --background in JPEG.",
+    ],
     input: Input::each(IN, "image"),
     output: Output::one(super::_common::INOUT, "image"),
     params: &[
@@ -22,7 +25,7 @@ pub static OP: Op = Op {
         .default("white"),
     ],
     converts: &[Edge {
-        from: deft_tools_image::READABLE,
+        from: IN,
         to: super::_common::INOUT,
         quality: Quality::Faithful,
     }],
@@ -49,14 +52,20 @@ fn run(job: &Job) -> Result<OpResult> {
     let format = Format::from_name(&to).expect("choice");
     let (img, _) = open(job)?;
     let [r, g, b, _] = p.color("background");
+    let icc = profile(job);
     let opt = deft_tools_image::Encode {
-        quality: p.int("quality") as u8,
+        quality: p.opt_int("quality").unwrap_or(85) as u8,
         background: [r, g, b],
+        icc: icc.as_deref(),
     };
-    let bytes = deft_tools_image::encode(&img, format, opt)?;
+    let (bytes, warnings) = encode(job, &img, format, opt)?;
     let (w, h) = (img.width(), img.height());
-    Ok(OpResult::one(Produced::bytes(bytes, format))
+    let mut res = OpResult::one(Produced::bytes(bytes, format))
         .fact("width", w)
         .fact("height", h)
-        .note(format!("{w}x{h}")))
+        .note(format!("{w}x{h}"));
+    for warning in warnings {
+        res = res.warn(warning);
+    }
+    Ok(res)
 }

@@ -1,7 +1,7 @@
 use super::_common::{IN, INOUT, QUALITY, open, save};
 use deft_core::format::sniff;
 use deft_core::prelude::*;
-use deft_tools_image::image::DynamicImage;
+use deft_tools_image::image::{DynamicImage, RgbaImage};
 
 pub static OP: Op = Op {
     id: "image.watermark",
@@ -75,6 +75,9 @@ fn run(job: &Job) -> Result<OpResult> {
     let (img, format) = open(job)?;
     let (w, h) = (img.width(), img.height());
     let angle = p.float("angle") as f32;
+    let margin = (w.min(h) as f64 * 0.03).round() as u32;
+    let room = (w - 2 * margin, h - 2 * margin);
+    let mut warning = None;
     let mark = match (p.opt_text("text"), p.opt_path("image")) {
         (Some(_), Some(_)) => {
             return Err(err(ErrorCode::BadOption, "use --text or --image, not both"));
@@ -89,7 +92,13 @@ fn run(job: &Job) -> Result<OpResult> {
                 font: p.opt_text("font"),
                 ..deft_tools_image::TextStyle::new(size, p.color("color"))
             };
-            deft_tools_image::render_text(&t, &style)?
+            let (mark, used) = fit_text(&t, style, room)?;
+            if used < 10.0 {
+                warning = Some(format!(
+                    "the text only fits at {used:.0} pixels high; shorten it or use a larger image"
+                ));
+            }
+            mark
         }
         (None, Some(path)) => {
             let bytes = std::fs::read(&path).map_err(|e| {
@@ -100,8 +109,12 @@ fn run(job: &Job) -> Result<OpResult> {
             })?;
             let f = sniff(&bytes[..bytes.len().min(4096)], Some(&path))
                 .ok_or_else(|| err(ErrorCode::InputUnsupported, "--image: unknown file type"))?;
-            let logo = deft_tools_image::decode(&bytes, f, job.ctx.limits.max_pixels)?;
             let target = ((w as f64 * p.float("scale")).round() as u32).max(1);
+            let logo = if f == Format::Svg {
+                deft_tools_image::render_svg(&bytes, Some(target))?
+            } else {
+                deft_tools_image::decode(&bytes, f, job.ctx.limits.max_pixels)?
+            };
             let spec = SizeSpec::parse(&format!("{target}x")).map_err(|m| bad_value("scale", m))?;
             let sized =
                 deft_tools_image::resize(&logo, &spec, deft_tools_image::Fit::Contain, true)?;
@@ -109,7 +122,6 @@ fn run(job: &Job) -> Result<OpResult> {
         }
     };
     let mut base = img.to_rgba8();
-    let margin = (w.min(h) as f64 * 0.03).round() as u32;
     let (x, y) =
         deft_tools_image::anchor((w, h), mark.dimensions(), p.position("position"), margin);
     deft_tools_image::overlay(&mut base, &mark, x, y, p.int("opacity") as f32 / 100.0);
@@ -118,5 +130,42 @@ fn run(job: &Job) -> Result<OpResult> {
     } else {
         DynamicImage::ImageRgb8(DynamicImage::ImageRgba8(base).to_rgb8())
     };
-    save(job, &out, format)
+    let res = save(job, &out, format)?;
+    Ok(match warning {
+        Some(w) => res.warn(w),
+        None => res,
+    })
+}
+
+/// Draw text so that all of it is on the image: wrap it if it runs too wide,
+/// then shrink it if it still does not fit. Returns the text height used too.
+fn fit_text(
+    text: &str,
+    style: deft_tools_image::TextStyle,
+    room: (u32, u32),
+) -> Result<(RgbaImage, f32)> {
+    let mark = deft_tools_image::render_text(text, &style)?;
+    if mark.width() <= room.0 && mark.height() <= room.1 {
+        return Ok((mark, style.size));
+    }
+    let wrapped = if style.angle == 0.0 {
+        deft_tools_image::wrap_text(text, room.0 as f32 / style.size).join("\n")
+    } else {
+        text.to_string()
+    };
+    let mark = deft_tools_image::render_text(&wrapped, &style)?;
+    let scale = (room.0 as f32 / mark.width() as f32)
+        .min(room.1 as f32 / mark.height() as f32)
+        .min(1.0);
+    if scale == 1.0 {
+        return Ok((mark, style.size));
+    }
+    // Slightly under, because the outline does not shrink in step.
+    let size = style.size * scale * 0.98;
+    let style = deft_tools_image::TextStyle {
+        size,
+        outline: style.outline.map(|(c, w)| (c, w * scale)),
+        ..style
+    };
+    Ok((deft_tools_image::render_text(&wrapped, &style)?, size))
 }

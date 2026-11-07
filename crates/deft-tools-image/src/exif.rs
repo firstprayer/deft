@@ -12,18 +12,51 @@ fn degrees(field: &exif::Field) -> Option<f64> {
     Some(part(0) + part(1) / 60.0 + part(2) / 3600.0)
 }
 
+fn parse(bytes: &[u8]) -> Option<exif::Exif> {
+    // One odd tag should not hide the rest, such as a location.
+    let mut reader = exif::Reader::new();
+    reader.continue_on_error(true);
+    let partial = |e: exif::Error| e.distill_partial_result(|_| {});
+    reader
+        .read_from_container(&mut std::io::Cursor::new(bytes))
+        .or_else(partial)
+        .ok()
+        .filter(|data| data.fields().next().is_some())
+        .or_else(|| {
+            // Many writers start the WebP chunk with the prefix JPEG uses.
+            let raw = crate::webp::exif_chunk(bytes)?;
+            let tiff = raw.strip_prefix(b"Exif\0\0").unwrap_or(raw);
+            reader.read_raw(tiff.to_vec()).or_else(partial).ok()
+        })
+}
+
+/// Text fields are often UTF-8, which `display_value` escapes.
+fn text_of(field: &exif::Field, data: &exif::Exif) -> String {
+    match &field.value {
+        exif::Value::Ascii(parts) if parts.iter().flatten().any(|b| !b.is_ascii()) => parts
+            .iter()
+            .map(|p| String::from_utf8_lossy(p).to_string())
+            .collect::<Vec<_>>()
+            .join(", "),
+        exif::Value::Undefined(raw, _) if field.tag == exif::Tag::UserComment => {
+            let text = raw.strip_prefix(b"ASCII\0\0\0").unwrap_or(raw);
+            String::from_utf8_lossy(text).to_string()
+        }
+        _ => field.display_value().with_unit(data).to_string(),
+    }
+}
+
 /// Every EXIF tag as text, plus `latitude` and `longitude` when present.
 pub fn read(bytes: &[u8]) -> Map<String, Value> {
     let mut out = Map::new();
-    let reader = exif::Reader::new();
-    let Ok(data) = reader.read_from_container(&mut std::io::Cursor::new(bytes)) else {
+    let Some(data) = parse(bytes) else {
         return out;
     };
     for field in data.fields() {
         if field.ifd_num != exif::In::PRIMARY {
             continue;
         }
-        let text = field.display_value().with_unit(&data).to_string();
+        let text = text_of(field, &data);
         let text = text.trim_matches('"').trim().to_string();
         if text.len() <= 200 && !text.is_empty() {
             out.insert(field.tag.to_string(), json!(text));
@@ -83,7 +116,7 @@ fn keep(f: &exif::Field) -> bool {
 }
 
 /// The EXIF block as a TIFF stream: the old fields plus the new ones.
-fn tiff(bytes: &[u8], fields: &Fields) -> Result<Vec<u8>> {
+fn tiff(bytes: &[u8], fields: &Fields, orientation: bool) -> Result<Vec<u8>> {
     use exif::{Tag, Value};
     let mut new = Vec::new();
     for (tag, value) in [
@@ -112,6 +145,7 @@ fn tiff(bytes: &[u8], fields: &Fields) -> Result<Vec<u8>> {
     let kept: Vec<&exif::Field> = old
         .iter()
         .filter(|f| !new.iter().any(|n| n.tag == f.tag))
+        .filter(|f| orientation || f.tag != Tag::Orientation)
         .collect();
     let mut writer = exif::experimental::Writer::new();
     for f in kept.into_iter().chain(&new) {
@@ -153,7 +187,7 @@ fn into_jpeg(bytes: &[u8], block: &[u8]) -> Result<Vec<u8>> {
 }
 
 /// Swap the eXIf chunk of a PNG, placing it right after the header chunk.
-fn into_png(bytes: &[u8], block: &[u8]) -> Vec<u8> {
+pub(crate) fn into_png(bytes: &[u8], block: &[u8]) -> Vec<u8> {
     let mut chunk = (block.len() as u32).to_be_bytes().to_vec();
     chunk.extend_from_slice(b"eXIf");
     chunk.extend_from_slice(block);
@@ -177,10 +211,24 @@ fn into_png(bytes: &[u8], block: &[u8]) -> Vec<u8> {
     out
 }
 
+/// Copy the EXIF of `from` into `to`, an encoded image of the given format.
+/// Orientation stays behind, because decoded pixels are already upright.
+pub fn copy(from: &[u8], to: &[u8], format: Format) -> Result<Vec<u8>> {
+    let block = tiff(from, &Fields::default(), false)?;
+    match format {
+        Format::Jpeg => into_jpeg(to, &block),
+        Format::Png => Ok(into_png(to, &block)),
+        other => Err(err(
+            ErrorCode::InputUnsupported,
+            format!("cannot write metadata into {other}"),
+        )),
+    }
+}
+
 /// Set EXIF fields, leaving the pixels and other tags alone. An embedded
 /// thumbnail is dropped, because it no longer has a place to live.
 pub fn write(bytes: &[u8], format: Format, fields: &Fields) -> Result<Vec<u8>> {
-    let block = tiff(bytes, fields)?;
+    let block = tiff(bytes, fields, true)?;
     match format {
         Format::Jpeg => into_jpeg(bytes, &block),
         Format::Png => Ok(into_png(bytes, &block)),

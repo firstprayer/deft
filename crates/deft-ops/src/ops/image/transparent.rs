@@ -12,7 +12,10 @@ const OUT: &[Format] = &[
 pub static OP: Op = Op {
     id: "image.transparent",
     summary: "Make a colour see-through: --color white --fuzz 10",
-    details: &["JPEG cannot hold transparency, so JPEG input becomes PNG."],
+    details: &[
+        "The colour goes everywhere it appears, not only around the edges.",
+        "JPEG cannot hold transparency, so JPEG input becomes PNG.",
+    ],
     input: Input::each(IN, "image"),
     output: Output::one(OUT, "image"),
     params: &[
