@@ -1,13 +1,15 @@
 use super::_common::{PASSWORD, open, plural, resolve_set};
 use deft_core::prelude::*;
+use std::collections::HashMap;
 
 pub static OP: Op = Op {
     id: "pdf.redact",
     summary: "Black out for good: --box or --text",
     details: &[
         "--box is in points from the top-left of the page; separate several with semicolons.",
-        "--text blacks out each line piece holding it. Check the result: scans have no text.",
+        "--text blacks out each place it appears. Check the result: scans have no text.",
         "Redacted pages become images, so nothing survives under the boxes.",
+        "Their form fields go too. --text also clears the word from metadata and bookmarks.",
     ],
     input: Input::each(&[Format::Pdf], "pdf"),
     output: Output::one(&[Format::Pdf], "pdf"),
@@ -68,12 +70,17 @@ fn run(job: &Job) -> Result<OpResult> {
     let indexes = resolve_set(&p.pages("pages"), ids.len())?;
     let bytes = deft_tools_pdf::save(&mut doc)?;
     let r = deft_tools_pdf::Renderer::new(&bytes)?;
+    let mut found: HashMap<usize, Vec<[f64; 4]>> = HashMap::new();
+    if let Some(t) = &words {
+        r.each_page_text(&indexes, |i, page| {
+            let hits = page.find(t).into_iter().flat_map(|hit| hit.regions);
+            found.insert(i, hits.collect());
+        });
+    }
     let mut redacted = 0;
     for &i in &indexes {
         let mut boxes = fixed.clone();
-        if let Some(t) = &words {
-            boxes.extend(deft_tools_pdf::layout::find(&doc, ids[i], t));
-        }
+        boxes.extend(found.remove(&i).unwrap_or_default());
         if boxes.is_empty() {
             continue;
         }

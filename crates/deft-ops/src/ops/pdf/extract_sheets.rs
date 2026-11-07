@@ -42,10 +42,10 @@ fn run(job: &Job) -> Result<OpResult> {
     let doc = open(job.input(), job.params)?;
     let ids = deft_tools_pdf::page_ids(&doc);
     let indexes = resolve(&job.params.pages("pages"), ids.len())?;
-    let pages = indexes
-        .iter()
-        .map(|&i| deft_tools_pdf::layout::tables(&doc, ids[i]))
-        .collect();
+    let mut pages = Vec::with_capacity(indexes.len());
+    deft_tools_pdf::text::reader(&doc)?.each_page_text(&indexes, |_, page| {
+        pages.push(deft_tools_pdf::layout::tables(&page));
+    });
     let stem = job.input().stem();
     let tables: Vec<Table> = deft_tools_pdf::layout::join_pages(pages)
         .into_iter()

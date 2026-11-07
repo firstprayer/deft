@@ -11,6 +11,7 @@ pub mod forms;
 pub mod layout;
 pub mod meta;
 pub mod pages;
+pub mod text;
 
 pub use lopdf;
 
@@ -484,12 +485,11 @@ pub fn info(doc: &Document) -> Info {
 /// Plain text of the given pages (zero-based), pages separated by form feeds.
 pub fn extract_text(doc: &Document, indexes: &[usize]) -> Result<String> {
     let mut out = String::new();
-    for (n, &i) in indexes.iter().enumerate() {
+    for (n, page) in text::reader(doc)?.page_texts(indexes).iter().enumerate() {
         if n > 0 {
             out.push_str("\x0c\n");
         }
-        let text = doc.extract_text(&[(i + 1) as u32]).unwrap_or_default();
-        out.push_str(text.trim_end());
+        out.push_str(page);
         out.push('\n');
     }
     Ok(out)

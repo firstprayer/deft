@@ -23,8 +23,9 @@ impl PageChange {
     }
 }
 
-fn lines(doc: &Document, index: usize) -> String {
-    doc.extract_text(&[(index + 1) as u32]).unwrap_or_default()
+fn page_texts(doc: &Document, pages: usize) -> Result<Vec<String>> {
+    let indexes: Vec<usize> = (0..pages).collect();
+    Ok(crate::text::reader(doc)?.page_texts(&indexes))
 }
 
 /// Compare page by page. With `visual`, pages are rendered at `dpi` too.
@@ -37,17 +38,16 @@ pub fn compare(
     max_pixels: u64,
 ) -> Result<Vec<PageChange>> {
     let (na, nb) = (crate::page_ids(a).len(), crate::page_ids(b).len());
+    let (ta, tb) = (page_texts(a, na)?, page_texts(b, nb)?);
     let mut out = Vec::new();
     for i in 0..na.max(nb) {
         let mut change = PageChange {
             page: i + 1,
             ..Default::default()
         };
-        let (x, y) = (
-            if i < na { lines(a, i) } else { String::new() },
-            if i < nb { lines(b, i) } else { String::new() },
-        );
-        for d in similar::TextDiff::from_lines(&x, &y).iter_all_changes() {
+        let blank = String::new();
+        let (x, y) = (ta.get(i).unwrap_or(&blank), tb.get(i).unwrap_or(&blank));
+        for d in similar::TextDiff::from_lines(x, y).iter_all_changes() {
             let text = d.value().trim().to_string();
             if text.is_empty() {
                 continue;

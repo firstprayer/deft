@@ -93,20 +93,6 @@ fn pieces_of_one_phrase_stay_one_cell() {
 }
 
 #[test]
-fn a_kern_wider_than_a_cell_gap_splits_one_operator() {
-    let row = Object::Array(vec![
-        Object::string_literal("6.0"),
-        Object::Integer(-1500),
-        Object::string_literal("73.1"),
-    ]);
-    let (found, _) = pieces(None, None, &row);
-    assert_eq!(found.len(), 2);
-    assert_eq!(found[0].1, "6.0");
-    assert_eq!(found[1].1, "73.1");
-    assert!((found[1].0 - 3.0).abs() < 0.01, "{}", found[1].0);
-}
-
-#[test]
 fn centred_columns_and_a_group_label_stay_in_the_table() {
     let lines = vec![
         line(700.0, &[(50.0, "Model"), (200.0, "Score")]),

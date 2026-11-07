@@ -1,12 +1,10 @@
-//! Where text sits on a page, read from the content stream. It gives rows and
-//! columns for table extraction. Widths come from the font where it lists them,
-//! and otherwise are an estimate of half an em per character.
+//! Rows and columns from where text sits on a page, for table extraction.
 
-use crate::num;
-use lopdf::{Document, Encoding, Object, ObjectId};
+use crate::text::PageText;
 use std::collections::BTreeMap;
 
-/// One piece of text, as drawn by a single operator.
+/// One piece of text, as drawn by a single operator. `y` is its baseline, measured
+/// from the bottom of the page as shown.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Run {
     pub x: f64,
@@ -14,215 +12,6 @@ pub struct Run {
     pub size: f64,
     pub text: String,
     pub width: f64,
-}
-
-type Matrix = [f64; 6];
-
-fn multiply(a: Matrix, b: Matrix) -> Matrix {
-    [
-        a[0] * b[0] + a[1] * b[2],
-        a[0] * b[1] + a[1] * b[3],
-        a[2] * b[0] + a[3] * b[2],
-        a[2] * b[1] + a[3] * b[3],
-        a[4] * b[0] + a[5] * b[2] + b[4],
-        a[4] * b[1] + a[5] * b[3] + b[5],
-    ]
-}
-
-fn matrix(o: &[Object]) -> Option<Matrix> {
-    let v: Vec<f64> = o.iter().filter_map(num).collect();
-    <[f64; 6]>::try_from(v).ok()
-}
-
-/// Glyph widths of a simple font, in thousandths of an em.
-#[derive(Default)]
-struct Widths {
-    first: i64,
-    glyphs: Vec<f64>,
-    /// Composite fonts spend two bytes on a glyph.
-    composite: bool,
-}
-
-impl Widths {
-    fn of(doc: &Document, font: &lopdf::Dictionary) -> Widths {
-        let resolve = |o: &Object| match o {
-            Object::Reference(id) => doc.get_object(*id).ok().cloned(),
-            other => Some(other.clone()),
-        };
-        let first = font
-            .get(b"FirstChar")
-            .ok()
-            .and_then(resolve)
-            .and_then(|o| o.as_i64().ok());
-        let glyphs = font.get(b"Widths").ok().and_then(resolve);
-        let glyphs = glyphs.as_ref().and_then(|o| o.as_array().ok());
-        Widths {
-            composite: font
-                .get(b"Subtype")
-                .is_ok_and(|t| t.as_name().is_ok_and(|n| n == b"Type0")),
-            first: first.unwrap_or(0),
-            glyphs: glyphs
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|o| resolve(o).as_ref().and_then(num))
-                        .collect()
-                })
-                .unwrap_or_default(),
-        }
-    }
-
-    /// The advance of these bytes, in ems.
-    fn advance(&self, bytes: &[u8]) -> f64 {
-        if self.composite {
-            return bytes.len() as f64 * 0.25;
-        }
-        if self.glyphs.is_empty() {
-            return bytes.len() as f64 * 0.5;
-        }
-        let glyph = |b: &u8| {
-            let at = i64::from(*b) - self.first;
-            usize::try_from(at)
-                .ok()
-                .and_then(|i| self.glyphs.get(i))
-                .copied()
-        };
-        bytes.iter().map(|b| glyph(b).unwrap_or(500.0)).sum::<f64>() / 1000.0
-    }
-}
-
-/// A kern this wide, in thousandths of an em, is a gap between words.
-const WORD_GAP: f64 = 200.0;
-/// One this wide separates cells: LaTeX writes a whole table row in one operator.
-const CELL_GAP: f64 = 700.0;
-
-/// Text drawn by one operator, split at wide gaps, as (start, text, width) in ems,
-/// and the total advance.
-fn pieces(
-    encoding: Option<&Encoding>,
-    widths: Option<&Widths>,
-    o: &Object,
-) -> (Vec<(f64, String, f64)>, f64) {
-    let mut out = Vec::new();
-    let (mut x, mut start) = (0.0, 0.0);
-    let mut text = String::new();
-    let items = match o {
-        Object::Array(items) => items.as_slice(),
-        other => std::slice::from_ref(other),
-    };
-    for item in items {
-        match item {
-            Object::String(bytes, _) => {
-                match encoding {
-                    Some(e) => text.push_str(&Document::decode_text(e, bytes).unwrap_or_default()),
-                    None => text.push_str(&String::from_utf8_lossy(bytes)),
-                }
-                x += widths.map_or(bytes.len() as f64 * 0.5, |w| w.advance(bytes));
-            }
-            Object::Integer(_) | Object::Real(_) => {
-                let kern = num(item).unwrap_or(0.0);
-                if kern <= -CELL_GAP {
-                    out.push((start, std::mem::take(&mut text), x - start));
-                    x -= kern / 1000.0;
-                    start = x;
-                    continue;
-                }
-                x -= kern / 1000.0;
-                if kern < -WORD_GAP && !text.ends_with(' ') {
-                    text.push(' ');
-                }
-            }
-            _ => {}
-        }
-    }
-    out.push((start, text, x - start));
-    (out, x)
-}
-
-/// Every run of text on a page, in drawing order.
-pub fn runs(doc: &Document, page: ObjectId) -> Vec<Run> {
-    let Ok(content) = doc.get_and_decode_page_content(page) else {
-        return vec![];
-    };
-    let fonts = doc.get_page_fonts(page).unwrap_or_default();
-    let encodings: BTreeMap<Vec<u8>, Encoding> = fonts
-        .iter()
-        .filter_map(|(name, f)| Some((name.clone(), f.get_font_encoding(doc).ok()?)))
-        .collect();
-    let widths: BTreeMap<Vec<u8>, Widths> = fonts
-        .iter()
-        .map(|(name, f)| (name.clone(), Widths::of(doc, f)))
-        .collect();
-    let identity: Matrix = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
-    let mut ctm = identity;
-    let mut stack = Vec::new();
-    let (mut tm, mut line) = (identity, identity);
-    let (mut font, mut size, mut leading) = (Vec::new(), 0.0, 0.0);
-    let mut out = Vec::new();
-    for op in &content.operations {
-        let args = &op.operands;
-        match op.operator.as_str() {
-            "q" => stack.push(ctm),
-            "Q" => ctm = stack.pop().unwrap_or(identity),
-            "cm" => {
-                if let Some(m) = matrix(args) {
-                    ctm = multiply(m, ctm);
-                }
-            }
-            "BT" => {
-                tm = identity;
-                line = identity;
-            }
-            "Tf" => {
-                if let [Object::Name(n), s] = args.as_slice() {
-                    font = n.clone();
-                    size = num(s).unwrap_or(0.0);
-                }
-            }
-            "TL" => leading = args.first().and_then(num).unwrap_or(leading),
-            "Tm" => {
-                if let Some(m) = matrix(args) {
-                    tm = m;
-                    line = m;
-                }
-            }
-            "Td" | "TD" => {
-                if let [x, y] = args.as_slice() {
-                    let (x, y) = (num(x).unwrap_or(0.0), num(y).unwrap_or(0.0));
-                    if op.operator == "TD" {
-                        leading = -y;
-                    }
-                    line = multiply([1.0, 0.0, 0.0, 1.0, x, y], line);
-                    tm = line;
-                }
-            }
-            "T*" | "'" | "\"" | "Tj" | "TJ" => {
-                if matches!(op.operator.as_str(), "T*" | "'" | "\"") {
-                    line = multiply([1.0, 0.0, 0.0, 1.0, 0.0, -leading], line);
-                    tm = line;
-                }
-                let Some(last) = args.last() else {
-                    continue;
-                };
-                let (found, advance) = pieces(encodings.get(&font), widths.get(&font), last);
-                let m = multiply(tm, ctm);
-                let scale = size * m[0].abs().max(m[1].abs());
-                for (start, text, width) in found {
-                    if !text.trim().is_empty() {
-                        out.push(Run {
-                            x: m[4] + start * scale,
-                            y: m[5],
-                            size: size * m[3].abs().max(m[0].abs()),
-                            text: text.trim().to_string(),
-                            width: width * scale,
-                        });
-                    }
-                }
-                tm = multiply([1.0, 0.0, 0.0, 1.0, advance * size, 0.0], tm);
-            }
-            _ => {}
-        }
-    }
-    out
 }
 
 /// Lines of a page, top to bottom, each sorted left to right.
@@ -240,52 +29,6 @@ fn rows(mut all: Vec<Run>) -> Vec<Vec<Run>> {
         row.sort_by(|a, b| a.x.total_cmp(&b.x));
     }
     rows
-}
-
-/// Left edges that recur down these lines, so plain paragraphs fall into the
-/// first column.
-fn column_starts(lines: &[Vec<Run>]) -> Vec<f64> {
-    let mut starts: Vec<(f64, usize)> = Vec::new();
-    for run in lines.iter().flatten() {
-        match starts.iter_mut().find(|(x, _)| (*x - run.x).abs() < 6.0) {
-            Some(s) => s.1 += 1,
-            None => starts.push((run.x, 1)),
-        }
-    }
-    let needed = (lines.len() / 4).max(2);
-    let mut columns: Vec<f64> = starts
-        .iter()
-        .filter(|(_, n)| *n >= needed)
-        .map(|(x, _)| *x)
-        .collect();
-    columns.sort_by(f64::total_cmp);
-    if columns.is_empty() {
-        columns.push(0.0);
-    }
-    columns
-}
-
-fn grid(lines: &[Vec<Run>], columns: &[f64]) -> Vec<Vec<String>> {
-    lines
-        .iter()
-        .map(|row| {
-            let mut cells = vec![String::new(); columns.len()];
-            for run in row {
-                let at = columns.iter().rposition(|c| *c <= run.x + 6.0).unwrap_or(0);
-                if !cells[at].is_empty() {
-                    cells[at].push(' ');
-                }
-                cells[at].push_str(&run.text);
-            }
-            cells
-        })
-        .collect()
-}
-
-/// Rows of cells from a page, as one grid.
-pub fn table(doc: &Document, page: ObjectId) -> Vec<Vec<String>> {
-    let lines = rows(runs(doc, page));
-    grid(&lines, &column_starts(&lines))
 }
 
 /// A table found on a page, with the left edges of its columns.
@@ -558,8 +301,8 @@ fn page_tables(lines: &[Vec<Run>]) -> Vec<Found> {
 }
 
 /// Each table on a page, kept apart. Unlike `table`, text outside tables is left out.
-pub fn tables(doc: &Document, page: ObjectId) -> Vec<Found> {
-    let lines: Vec<Vec<Run>> = rows(runs(doc, page)).iter().map(|l| cells(l)).collect();
+pub fn tables(page: &PageText) -> Vec<Found> {
+    let lines: Vec<Vec<Run>> = rows(page.runs()).iter().map(|l| cells(l)).collect();
     page_tables(&lines)
 }
 
@@ -589,23 +332,6 @@ pub fn join_pages(pages: Vec<Vec<Found>>) -> Vec<Vec<Vec<String>>> {
         }
     }
     out.into_iter().map(|t| t.rows).collect()
-}
-
-/// Regions, in points from the top-left of the page, of the runs holding `text`.
-pub fn find(doc: &Document, page: ObjectId, text: &str) -> Vec<[f64; 4]> {
-    let needle = text.to_lowercase();
-    let (_, height) = crate::display_size(doc, page);
-    let [x0, y0, ..] = crate::page_box(doc, page);
-    runs(doc, page)
-        .into_iter()
-        .filter(|r| r.text.to_lowercase().contains(&needle))
-        .map(|r| {
-            // Widths are unknown, so allow a generous 0.65 em per character.
-            let width = r.text.chars().count() as f64 * r.size * 0.65;
-            let top = height - (r.y - y0) - r.size;
-            [r.x - x0 - 1.0, top - 1.0, width + 2.0, r.size * 1.4 + 2.0]
-        })
-        .collect()
 }
 
 #[cfg(test)]

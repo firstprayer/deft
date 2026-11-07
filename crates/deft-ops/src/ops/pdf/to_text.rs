@@ -41,11 +41,18 @@ fn run(job: &Job) -> Result<OpResult> {
     )?;
     let text = deft_tools_pdf::extract_text(&doc, &indexes)?;
     let chars = text.chars().count();
-    let mut res = OpResult::one(Produced::bytes(text.into_bytes(), Format::Txt))
+    let mut res = OpResult::one(Produced::bytes(text.clone().into_bytes(), Format::Txt))
         .fact("chars", chars)
         .note(format!("{chars} characters"));
     if chars <= indexes.len() * 2 {
         res = res.warn("no text found; the PDF may be a scan");
+    }
+    let lost = deft_tools_pdf::text::undecoded(&text);
+    if lost > 0.05 {
+        res = res.warn(format!(
+            "{:.0}% of the text could not be decoded; pdf ocr reads the pages instead",
+            lost * 100.0
+        ));
     }
     Ok(res)
 }
