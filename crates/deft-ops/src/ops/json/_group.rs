@@ -6,5 +6,5 @@ pub static GROUP: Group = Group {
     summary: "JSON: convert, format, merge, diff, validate",
     aliases: &["jsonl", "ndjson"],
     synonyms: SYNONYMS,
-    order: 45,
+    order: 47,
 };

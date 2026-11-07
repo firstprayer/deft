@@ -6,5 +6,5 @@ pub static GROUP: Group = Group {
     summary: "XML: convert, format, merge, diff, validate",
     aliases: &[],
     synonyms: SYNONYMS,
-    order: 48,
+    order: 47,
 };

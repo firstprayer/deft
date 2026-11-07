@@ -6,5 +6,5 @@ pub static GROUP: Group = Group {
     summary: "YAML: convert, format, merge, diff, validate",
     aliases: &["yml"],
     synonyms: SYNONYMS,
-    order: 46,
+    order: 47,
 };

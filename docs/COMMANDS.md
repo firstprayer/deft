@@ -142,18 +142,6 @@ PowerPoint: extract text, Markdown outline
 | `deft slides to-md` | Outline in Markdown: a heading per slide, bullets, images |  | `deft slides to-md deck.pptx -o deck.md` |
 | `deft slides to-text` | Extract the text of every slide, form feed between slides |  | `deft slides to-text deck.pptx --notes -o deck.txt` |
 
-## json
-
-JSON: convert, format, merge, diff, validate
-
-| Command | What it does | Needs | Example |
-|---|---|---|---|
-| `deft json convert` | Change format: --to json\|jsonl\|yaml\|toml\|xml |  | `deft json convert messy.json --to yaml -o out.yaml` |
-| `deft json diff` | Compare two files by structure |  | `deft json diff messy.json override.json` |
-| `deft json format` | Pretty-print or minify: --compact, --sort-keys |  | `deft json format messy.json -o tidy.json` |
-| `deft json merge` | Deep-merge files; later files win |  | `deft json merge messy.json override.json -o merged.json` |
-| `deft json validate` | Check syntax, or a JSON Schema with --schema |  | `deft json validate messy.json` |
-
 ## sheet
 
 Excel/CSV/ODS tables: SQL query, pivot, merge, split, convert
@@ -170,17 +158,17 @@ Excel/CSV/ODS tables: SQL query, pivot, merge, split, convert
 | `deft sheet stats` | Per-column counts, empties, min, max, mean, sum |  | `deft sheet stats people.csv` |
 | `deft sheet to-md` | Markdown table (first row is the header) |  | `deft sheet to-md people.csv -o people.md` |
 
-## yaml
+## json
 
-YAML: convert, format, merge, diff, validate
+JSON: convert, format, merge, diff, validate
 
 | Command | What it does | Needs | Example |
 |---|---|---|---|
-| `deft yaml convert` | Change format: --to json\|toml\|xml\|jsonl |  | `deft yaml convert config.yaml --to json -o out.json` |
-| `deft yaml diff` | Compare two files by structure |  | `deft yaml diff config.yaml override.yaml` |
-| `deft yaml format` | Tidy a file: --sort-keys |  | `deft yaml format config.yaml -o tidy.yaml` |
-| `deft yaml merge` | Deep-merge files; later files win |  | `deft yaml merge config.yaml override.yaml -o merged.yaml` |
-| `deft yaml validate` | Check syntax, or a JSON Schema with --schema |  | `deft yaml validate config.yaml` |
+| `deft json convert` | Change format: --to json\|jsonl\|yaml\|toml\|xml |  | `deft json convert messy.json --to yaml -o out.yaml` |
+| `deft json diff` | Compare two files by structure |  | `deft json diff messy.json override.json` |
+| `deft json format` | Pretty-print or minify: --compact, --sort-keys |  | `deft json format messy.json -o tidy.json` |
+| `deft json merge` | Deep-merge files; later files win |  | `deft json merge messy.json override.json -o merged.json` |
+| `deft json validate` | Check syntax, or a JSON Schema with --schema |  | `deft json validate messy.json` |
 
 ## toml
 
@@ -205,6 +193,18 @@ XML: convert, format, merge, diff, validate
 | `deft xml format` | Tidy a file: --sort-keys |  | `deft xml format shop.xml -o tidy.xml` |
 | `deft xml merge` | Deep-merge files; later files win |  | `deft xml merge shop.xml override.xml -o merged.xml` |
 | `deft xml validate` | Check syntax, or a JSON Schema with --schema |  | `deft xml validate shop.xml` |
+
+## yaml
+
+YAML: convert, format, merge, diff, validate
+
+| Command | What it does | Needs | Example |
+|---|---|---|---|
+| `deft yaml convert` | Change format: --to json\|toml\|xml\|jsonl |  | `deft yaml convert config.yaml --to json -o out.json` |
+| `deft yaml diff` | Compare two files by structure |  | `deft yaml diff config.yaml override.yaml` |
+| `deft yaml format` | Tidy a file: --sort-keys |  | `deft yaml format config.yaml -o tidy.yaml` |
+| `deft yaml merge` | Deep-merge files; later files win |  | `deft yaml merge config.yaml override.yaml -o merged.yaml` |
+| `deft yaml validate` | Check syntax, or a JSON Schema with --schema |  | `deft yaml validate config.yaml` |
 
 ## md
 
