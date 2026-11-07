@@ -1,5 +1,6 @@
 //! AcroForm fields: listing, filling and flattening.
 
+use crate::meta::text_object;
 use crate::pages::{annot_rect, draw_forms};
 use crate::{deref, num, page_ids, pdf_string, rect_of, text_string, text_width, win_ansi};
 use deft_core::error::{ErrorCode, Result, err};
@@ -201,7 +202,7 @@ fn collect(
     });
 }
 
-fn acro_form(doc: &Document) -> Option<&Dictionary> {
+pub(crate) fn acro_form(doc: &Document) -> Option<&Dictionary> {
     let catalog = doc.catalog().ok()?;
     deref(doc, catalog.get(b"AcroForm").ok()?).as_dict().ok()
 }
@@ -224,6 +225,211 @@ pub fn fields(doc: &Document) -> Vec<Field> {
         collect(doc, r, "", &mut out, &mut seen);
     }
     out
+}
+
+/// The form dictionary for changing, wherever the catalog keeps it.
+fn acro_form_mut(doc: &mut Document) -> Option<&mut Dictionary> {
+    let id = doc
+        .catalog()
+        .ok()?
+        .get(b"AcroForm")
+        .ok()?
+        .as_reference()
+        .ok();
+    match id {
+        Some(id) => doc.get_dictionary_mut(id).ok(),
+        None => doc
+            .catalog_mut()
+            .ok()?
+            .get_mut(b"AcroForm")
+            .ok()?
+            .as_dict_mut()
+            .ok(),
+    }
+}
+
+fn root_fields(doc: &Document, form: &Dictionary) -> Vec<Object> {
+    form.get(b"Fields")
+        .ok()
+        .map(|o| deref(doc, o))
+        .and_then(|o| o.as_array().ok())
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// Whether this field still has a place on the page, trimming widgets that do not.
+fn is_placed(doc: &mut Document, id: ObjectId, placed: &HashSet<ObjectId>) -> bool {
+    let children = kids(doc, id);
+    if children.is_empty() {
+        let widget = doc
+            .get_dictionary(id)
+            .is_ok_and(|d| d.has(b"Rect") || d.has(b"Subtype"));
+        return !widget || placed.contains(&id);
+    }
+    let left: Vec<ObjectId> = children
+        .iter()
+        .copied()
+        .filter(|k| is_placed(doc, *k, placed))
+        .collect();
+    if left.len() != children.len()
+        && let Ok(d) = doc.get_dictionary_mut(id)
+    {
+        d.set(
+            "Kids",
+            left.iter()
+                .map(|k| Object::Reference(*k))
+                .collect::<Vec<_>>(),
+        );
+    }
+    !left.is_empty()
+}
+
+/// Drop every field with no widget on these pages, and so its value. An XFA
+/// packet holds its own copy of the values, so it goes too.
+pub(crate) fn keep_fields_on(doc: &mut Document, pages: &[ObjectId]) {
+    let Some(form) = acro_form(doc) else {
+        return;
+    };
+    let roots = root_fields(doc, form);
+    let placed: HashSet<ObjectId> = pages
+        .iter()
+        .filter_map(|p| doc.get_dictionary(*p).ok()?.get(b"Annots").ok())
+        .filter_map(|o| deref(doc, o).as_array().ok())
+        .flatten()
+        .filter_map(|o| o.as_reference().ok())
+        .collect();
+    let left: Vec<Object> = roots
+        .iter()
+        .filter(|o| o.as_reference().is_ok_and(|id| is_placed(doc, id, &placed)))
+        .cloned()
+        .collect();
+    let empty = left.is_empty();
+    let changed = left.len() != roots.len();
+    if let Some(form) = acro_form_mut(doc) {
+        form.set("Fields", left);
+        if changed {
+            form.remove(b"XFA");
+        }
+    }
+    if empty && let Ok(catalog) = doc.catalog_mut() {
+        catalog.remove(b"AcroForm");
+    }
+}
+
+/// Remove the XFA packet of a form that also has plain fields. Returns false when
+/// the XFA packet is the whole form and has to stay.
+pub(crate) fn drop_xfa(doc: &mut Document) -> bool {
+    let Some(form) = acro_form(doc) else {
+        return true;
+    };
+    if !form.has(b"XFA") {
+        return true;
+    }
+    if root_fields(doc, form).is_empty() {
+        return false;
+    }
+    remove_xfa(doc);
+    true
+}
+
+/// Remove the XFA packet, which holds its own copy of the field values.
+pub(crate) fn remove_xfa(doc: &mut Document) {
+    if let Some(form) = acro_form_mut(doc) {
+        form.remove(b"XFA");
+    }
+}
+
+fn field_name(doc: &Document, field: &Object) -> Option<String> {
+    let dict = deref(doc, field).as_dict().ok()?;
+    text_string(doc, dict.get(b"T").ok()?)
+}
+
+/// A name for a field that is not in `taken`.
+fn free_name(name: &str, taken: &HashSet<String>) -> String {
+    (2..)
+        .map(|n| format!("{name}-{n}"))
+        .find(|candidate| !taken.contains(candidate))
+        .unwrap_or_else(|| name.to_string())
+}
+
+/// Add the form of a merged document to this one. Its objects must already be
+/// part of `doc`. Fields sharing a name share a value, so a clash gets a new name.
+pub(crate) fn append_form(doc: &mut Document, other: &Dictionary) {
+    let added = root_fields(doc, other);
+    if added.is_empty() {
+        return;
+    }
+    let Some(form) = acro_form(doc) else {
+        let mut copy = other.clone();
+        copy.remove(b"XFA");
+        if let Ok(catalog) = doc.catalog_mut() {
+            catalog.set("AcroForm", Object::Dictionary(copy));
+        }
+        return;
+    };
+    let mut fields = root_fields(doc, form);
+    let mut taken: HashSet<String> = fields.iter().filter_map(|f| field_name(doc, f)).collect();
+    for field in &added {
+        let Some(name) = field_name(doc, field) else {
+            continue;
+        };
+        let fresh = if taken.contains(&name) {
+            free_name(&name, &taken)
+        } else {
+            name
+        };
+        if let Ok(id) = field.as_reference()
+            && let Ok(d) = doc.get_dictionary_mut(id)
+        {
+            d.set("T", text_object(&fresh));
+        }
+        taken.insert(fresh);
+    }
+    fields.extend(added);
+    let resources = merged_resources(doc, other);
+    let appearances = other
+        .get(b"NeedAppearances")
+        .and_then(Object::as_bool)
+        .unwrap_or(false);
+    if let Some(form) = acro_form_mut(doc) {
+        form.set("Fields", fields);
+        // The packet describes the first form only, and viewers prefer it.
+        form.remove(b"XFA");
+        if let Some(resources) = resources {
+            form.set("DR", resources);
+        }
+        if appearances {
+            form.set("NeedAppearances", true);
+        }
+    }
+}
+
+/// The default resources of both forms. Field appearances name fonts in them.
+fn merged_resources(doc: &Document, other: &Dictionary) -> Option<Dictionary> {
+    let dict = |form: &Dictionary, key: &[u8]| {
+        form.get(key)
+            .ok()
+            .map(|o| deref(doc, o))
+            .and_then(|o| o.as_dict().ok())
+            .cloned()
+    };
+    let theirs = dict(other, b"DR")?;
+    let mut ours = acro_form(doc)
+        .and_then(|f| dict(f, b"DR"))
+        .unwrap_or_default();
+    for (category, value) in theirs.iter() {
+        let Some(names) = deref(doc, value).as_dict().ok() else {
+            continue;
+        };
+        let mut joined = dict(&ours, category).unwrap_or_default();
+        for (name, item) in names.iter() {
+            if !joined.has(name) {
+                joined.set(name.clone(), item.clone());
+            }
+        }
+        ours.set(category.clone(), Object::Dictionary(joined));
+    }
+    Some(ours)
 }
 
 /// Size from a default appearance string such as `/Helv 10 Tf 0 g`.

@@ -10,6 +10,7 @@ pub mod extract;
 pub mod forms;
 pub mod layout;
 pub mod meta;
+mod outline;
 pub mod pages;
 pub mod text;
 
@@ -267,36 +268,21 @@ fn prune(doc: &mut Document) {
     doc.objects.retain(|id, _| seen.contains(id));
 }
 
-/// After removing pages, cut what still points at them: bookmarks, the
-/// structure tree, named destinations and links. Otherwise the removed pages
-/// stay reachable and their content stays in the file.
+/// After removing pages, cut what still points at them: bookmarks and fields on
+/// those pages, the structure tree, named destinations and links. Otherwise the
+/// removed pages stay reachable and their content stays in the file.
 fn detach_removed_pages(doc: &mut Document, kept: &[ObjectId]) -> Result<()> {
     let keep: HashSet<ObjectId> = kept.iter().copied().collect();
+    outline::inline_named_dests(doc);
+    outline::keep_pages(doc, &keep);
+    forms::keep_fields_on(doc, kept);
     if let Ok(catalog) = doc.catalog_mut() {
-        for key in [
-            &b"Outlines"[..],
-            b"StructTreeRoot",
-            b"Dests",
-            b"Names",
-            b"OpenAction",
-        ] {
+        for key in [&b"StructTreeRoot"[..], b"Dests", b"Names", b"OpenAction"] {
             catalog.remove(key);
         }
     }
-    let points_away = |doc: &Document, annot: &Dictionary| -> bool {
-        let dest = annot.get(b"Dest").ok().or_else(|| {
-            annot
-                .get(b"A")
-                .ok()
-                .map(|a| deref(doc, a))
-                .and_then(|a| a.as_dict().ok())
-                .and_then(|a| a.get(b"D").ok())
-        });
-        dest.map(|d| deref(doc, d))
-            .and_then(|d| d.as_array().ok())
-            .and_then(|a| a.first())
-            .and_then(|o| o.as_reference().ok())
-            .is_some_and(|id| !keep.contains(&id))
+    let points_away = |doc: &Document, annot: &Dictionary| {
+        outline::dest_page(doc, annot).is_some_and(|id| !keep.contains(&id))
     };
     for &page in kept {
         let annots: Vec<Object> = match doc
@@ -366,16 +352,20 @@ fn shift_ids(doc: &mut Document, offset: u32) {
     doc.max_id += offset;
 }
 
-/// Join documents in order. The first document's catalog (outline, metadata)
-/// is kept.
+/// Join documents in order. The first document's catalog is kept, and the forms
+/// and bookmarks of the others join it.
 pub fn merge(mut docs: Vec<Document>) -> Result<Document> {
     let mut base = docs.remove(0);
     flatten_inheritance(&mut base);
     let mut all = page_ids(&base);
     for mut other in docs {
         flatten_inheritance(&mut other);
+        // Its names go with its catalog.
+        outline::inline_named_dests(&mut other);
         shift_ids(&mut other, base.max_id);
         let pages = page_ids(&other);
+        let bookmarks = other.catalog().ok().and_then(outline::root_of);
+        let form = forms::acro_form(&other).cloned();
         let skip: HashSet<ObjectId> = other
             .objects
             .iter()
@@ -393,6 +383,12 @@ pub fn merge(mut docs: Vec<Document>) -> Result<Document> {
         }
         base.max_id = base.max_id.max(max_id);
         all.extend(pages);
+        if let Some(root) = bookmarks {
+            outline::append(&mut base, root);
+        }
+        if let Some(form) = form {
+            forms::append_form(&mut base, &form);
+        }
     }
     set_page_tree(&mut base, &all)?;
     Ok(base)
