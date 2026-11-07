@@ -11,8 +11,8 @@ const IN: &[Format] = &[
     Format::Tiff,
 ];
 
-/// Above this many pictures, one filter graph would hold too many inputs.
-const MANY_IMAGES: usize = 64;
+/// Pictures fitted by one ffmpeg run; each is an open input with its own threads.
+const BATCH: usize = 64;
 
 pub static OP: Op = Op {
     id: "video.from-images",
@@ -36,7 +36,7 @@ pub static OP: Op = Op {
         param(
             "audio",
             Kind::Path,
-            "Soundtrack; the video stops at its end",
+            "Soundtrack; with no timing, the pictures share its length",
         ),
         param("size", Kind::Size, "Frame size, e.g. 1280x720"),
     ],
@@ -87,7 +87,7 @@ fn run(job: &Job) -> Result<OpResult> {
             None => 2.0,
         },
     };
-    let first = deft_tools_image::dimensions(job.input().bytes()?)
+    let first = upright_size(job.input().bytes()?)
         .ok_or_else(|| corrupt(&job.input().display, "unreadable image"))?;
     let (w, h) = match p.opt_size("size") {
         Some(SizeSpec {
@@ -99,62 +99,68 @@ fn run(job: &Job) -> Result<OpResult> {
         None => first,
     };
     let (w, h) = (w & !1, h & !1);
-    let fit = format!(
-        "scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=30,format=yuv420p"
-    );
-    let same_format = job.inputs.iter().all(|i| i.format == job.input().format);
+    let pattern = fit_pictures(job, w, h)?;
     let out = temp_out(job, format);
-    let mut args;
-    let mut picture = "0:v".to_string();
-    let mut filter = fit.clone();
-    if same_format && job.inputs.len() > MANY_IMAGES {
-        // The concat demuxer copes with thousands of frames, but it drops pictures
-        // whose size or pixel format differs, so it is kept for long sequences.
-        let mut list = String::new();
-        for input in &job.inputs {
-            let path = std::path::absolute(input.local_path(job.ctx)?)?;
-            let quoted = path.display().to_string().replace('\'', "'\\''");
-            list.push_str(&format!("file '{quoted}'\nduration {per}\n"));
-        }
-        let list_path = job.ctx.temp_path("images.txt");
-        std::fs::write(&list_path, list)?;
-        args = strs(&["-f", "concat", "-safe", "0", "-i"]);
-        args.push(list_path.display().to_string());
-    } else {
-        args = Vec::new();
-        filter.clear();
-        let mut labels = String::new();
-        for (n, input) in job.inputs.iter().enumerate() {
-            args.extend(strs(&["-loop", "1", "-t"]));
-            args.push(format!("{per}"));
-            args.push("-i".to_string());
-            args.push(input.local_path(job.ctx)?.display().to_string());
-            filter.push_str(&format!("[{n}:v]{fit}[v{n}];"));
-            labels.push_str(&format!("[v{n}]"));
-        }
-        let n = job.inputs.len();
-        filter.push_str(&format!("{labels}concat=n={n}:v=1:a=0[out]"));
-        picture = "[out]".to_string();
-    }
     let inputs = job.inputs.len();
-    let audio_index = if picture == "[out]" { inputs } else { 1 };
-    if let Some(sound) = audio {
+    // Read as one sequence at the rate of the pictures, so each lasts exactly its
+    // time. Above 30 per second the video follows, or pictures would be dropped.
+    let rate = (1.0 / per).ceil().clamp(30.0, 120.0);
+    let mut args = vec!["-framerate".to_string(), format!("{}", 1.0 / per)];
+    args.extend(strs(&["-start_number", "0", "-i"]));
+    args.push(pattern);
+    if let Some(sound) = &audio {
         args.extend(strs(&["-i"]));
         args.push(sound.display().to_string());
     }
-    let filter_flag = if picture == "[out]" {
-        "-filter_complex"
-    } else {
-        "-vf"
-    };
-    args.extend([filter_flag.to_string(), filter]);
-    args.extend(["-map".to_string(), picture]);
-    if p.opt_path("audio").is_some() {
-        args.extend(["-map".to_string(), format!("{audio_index}:a")]);
+    // The fitted files are full-range JPEGs; players expect video in the usual range.
+    let filter = format!("fps={rate},scale=in_range=full:out_range=limited,format=yuv420p");
+    args.extend(["-vf".to_string(), filter]);
+    args.extend(strs(&["-map", "0:v"]));
+    if audio.is_some() {
+        args.extend(strs(&["-map", "1:a"]));
     }
     args.extend(["-t".to_string(), format!("{}", per * inputs as f64)]);
     args.extend(video_codec_args(format, None));
     args.push(out.display().to_string());
     ffmpeg(job, OP.id, args)?;
-    Ok(file_result(out, format).fact("images", job.inputs.len()))
+    Ok(file_result(out, format).fact("images", inputs))
+}
+
+/// Size of a picture as it is shown, after its EXIF orientation.
+fn upright_size(bytes: &[u8]) -> Option<(u32, u32)> {
+    let (w, h) = deft_tools_image::dimensions(bytes)?;
+    Some(if deft_tools_image::exif_orientation(bytes) >= 5 {
+        (h, w)
+    } else {
+        (w, h)
+    })
+}
+
+/// Fit every picture to one size and pixel format, as numbered files, and return
+/// their ffmpeg pattern. ffmpeg loses pictures when either changes within a
+/// sequence, and phone photos change both.
+fn fit_pictures(job: &Job, w: u32, h: u32) -> Result<String> {
+    let dir = job.ctx.temp_path("fitted");
+    std::fs::create_dir_all(&dir)?;
+    let fit = format!(
+        "scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,format=yuvj444p"
+    );
+    for (batch, inputs) in job.inputs.chunks(BATCH).enumerate() {
+        let mut args = Vec::new();
+        let mut filter = Vec::new();
+        let mut outputs = Vec::new();
+        for (n, input) in inputs.iter().enumerate() {
+            args.push("-i".to_string());
+            args.push(input.local_path(job.ctx)?.display().to_string());
+            filter.push(format!("[{n}:v]{fit}[v{n}]"));
+            outputs.extend(["-map".to_string(), format!("[v{n}]")]);
+            outputs.extend(strs(&["-frames:v", "1", "-update", "1", "-q:v", "2"]));
+            let name = format!("{:06}.jpg", batch * BATCH + n);
+            outputs.push(dir.join(name).display().to_string());
+        }
+        args.extend(["-filter_complex".to_string(), filter.join(";")]);
+        args.extend(outputs);
+        ffmpeg(job, OP.id, args)?;
+    }
+    Ok(dir.join("%06d.jpg").display().to_string())
 }
