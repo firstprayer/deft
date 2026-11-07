@@ -462,6 +462,97 @@ pub fn select(doc: &mut Document, indexes: &[usize]) -> Result<()> {
     Ok(())
 }
 
+/// Split into documents of the given pages (zero-based) each. Each part is
+/// made from the objects its pages and the document level need, not from a
+/// copy of the whole file, so a long document splits in time that grows with
+/// its length.
+pub fn split(doc: &mut Document, groups: &[Vec<usize>]) -> Result<Vec<Document>> {
+    flatten_inheritance(doc);
+    outline::inline_named_dests(doc);
+    let ids = page_ids(doc);
+    let pages: HashSet<ObjectId> = ids.iter().copied().collect();
+    // What an object needs, not going on into pages, which every part picks
+    // for itself, nor up to a parent.
+    let reach = |doc: &Document, from: Vec<ObjectId>, seen: &mut HashSet<ObjectId>| {
+        let mut stack = from;
+        while let Some(id) = stack.pop() {
+            if !seen.insert(id) {
+                continue;
+            }
+            let Some(o) = doc.objects.get(&id) else {
+                continue;
+            };
+            let mut next = Vec::new();
+            match o {
+                Object::Dictionary(d) => d
+                    .iter()
+                    .filter(|(k, _)| !matches!(k.as_slice(), b"Parent" | b"StructTreeRoot"))
+                    .for_each(|(_, v)| references(v, &mut next)),
+                other => references(other, &mut next),
+            }
+            stack.extend(next.into_iter().filter(|n| !pages.contains(n)));
+        }
+    };
+    let mut shared = HashSet::new();
+    let mut roots = Vec::new();
+    doc.trailer
+        .iter()
+        .for_each(|(_, o)| references(o, &mut roots));
+    reach(doc, roots, &mut shared);
+    // The page tree's own nodes, so the part keeps every page's place.
+    for o in doc
+        .objects
+        .iter()
+        .filter(|(_, o)| o.as_dict().is_ok_and(|d| d.has_type(b"Pages")))
+    {
+        shared.insert(*o.0);
+    }
+    let objects = std::mem::take(&mut doc.objects);
+    let table = std::mem::replace(
+        &mut doc.reference_table,
+        lopdf::xref::Xref::new(0, lopdf::xref::XrefType::CrossReferenceStream),
+    );
+    let frame = doc.clone();
+    doc.objects = objects;
+    doc.reference_table = table;
+    let mut parts = Vec::with_capacity(groups.len());
+    for group in groups {
+        let mut keep = shared.clone();
+        let picked: Vec<ObjectId> = group.iter().map(|&i| ids[i]).collect();
+        reach(doc, picked, &mut keep);
+        let mut part = frame.clone();
+        part.objects = keep
+            .iter()
+            .filter_map(|id| Some((*id, doc.objects.get(id)?.clone())))
+            .collect();
+        // Pages of other parts are absent: lopdf keeps their places as
+        // stand-ins, which select then drops.
+        select_known(&mut part, &ids, group)?;
+        parts.push(part);
+    }
+    Ok(parts)
+}
+
+/// `select` for a part whose other pages are absent; `ids` are all the
+/// document's pages in order.
+fn select_known(doc: &mut Document, ids: &[ObjectId], indexes: &[usize]) -> Result<()> {
+    if indexes.is_empty() {
+        return Err(err(
+            ErrorCode::BadValue,
+            "no pages left; a PDF needs at least one page",
+        ));
+    }
+    let labels = catalog::page_labels(doc, ids.len());
+    let picked: Vec<ObjectId> = indexes.iter().map(|&i| ids[i]).collect();
+    detach_removed_pages(doc, &picked)?;
+    set_page_tree(doc, &picked)?;
+    if let Some(labels) = labels {
+        let kept: Vec<_> = indexes.iter().map(|&i| labels[i].clone()).collect();
+        catalog::set_page_labels(doc, &kept);
+    }
+    Ok(())
+}
+
 /// Add `offset` to every object number. lopdf's renumbering takes seconds on
 /// long documents.
 fn shift_ids(doc: &mut Document, offset: u32) {

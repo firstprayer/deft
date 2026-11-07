@@ -400,3 +400,28 @@ fn info_counts_the_pictures_pages_show_and_only_real_forms() {
     assert_eq!(i.images, 1);
     assert!(!i.forms, "an empty form is no form");
 }
+
+#[test]
+fn split_gives_the_same_parts_as_select() {
+    let bytes = text_pdf("part", 4);
+    let groups = vec![vec![0], vec![1, 2], vec![3]];
+    let mut doc = load(&bytes, None).unwrap();
+    let parts = split(&mut doc, &groups).unwrap();
+    for (group, mut part) in groups.iter().zip(parts) {
+        let mut selected = load(&bytes, None).unwrap();
+        select(&mut selected, group).unwrap();
+        let (a, b) = (save(&mut part).unwrap(), save(&mut selected).unwrap());
+        let (a, b) = (load(&a, None).unwrap(), load(&b, None).unwrap());
+        assert_eq!(page_ids(&a).len(), group.len());
+        let all: Vec<usize> = (0..group.len()).collect();
+        assert_eq!(
+            extract_text(&a, &all).unwrap(),
+            extract_text(&b, &all).unwrap()
+        );
+        assert!(
+            extract_text(&a, &[0])
+                .unwrap()
+                .contains(&format!("page {}", group[0] + 1))
+        );
+    }
+}
