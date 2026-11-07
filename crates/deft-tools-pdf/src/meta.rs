@@ -205,15 +205,42 @@ fn state_key_length(doc: &mut Document) {
     let Ok(id) = doc.trailer.get(b"Encrypt").and_then(Object::as_reference) else {
         return;
     };
-    let filter = doc
+    let Ok(filters) = doc
         .get_dictionary_mut(id)
         .and_then(|d| d.get_mut(b"CF"))
         .and_then(Object::as_dict_mut)
-        .and_then(|cf| cf.get_mut(b"StdCF"))
-        .and_then(Object::as_dict_mut);
-    if let Ok(filter) = filter {
-        filter.set("Length", 32);
+    else {
+        return;
+    };
+    for (_, filter) in filters.iter_mut() {
+        let Ok(filter) = filter.as_dict_mut() else {
+            continue;
+        };
+        let length = match filter.get(b"CFM").and_then(Object::as_name) {
+            Ok(b"AESV3") => 32,
+            Ok(b"AESV2") => 16,
+            _ => continue,
+        };
+        filter.set("Length", length);
     }
+}
+
+/// Whether the input was password-protected (and opened with its password).
+pub fn is_protected(doc: &Document) -> bool {
+    doc.encryption_state.is_some()
+}
+
+/// Serialise, protected again with the input's own passwords and permissions
+/// when it had them. Only decryption should take a password away.
+pub fn save_protected(doc: &mut Document) -> Result<Vec<u8>> {
+    let Some(state) = doc.encryption_state.take() else {
+        return crate::save(doc);
+    };
+    // The same file key and password entries make the same passwords open it.
+    doc.encrypt(&state)
+        .map_err(|e| err(ErrorCode::Internal, format!("encryption: {e}")))?;
+    state_key_length(doc);
+    save_encrypted(doc)
 }
 
 /// Serialise an encrypted document, which cannot use object streams.
@@ -223,3 +250,7 @@ pub fn save_encrypted(doc: &mut Document) -> Result<Vec<u8>> {
         .map_err(|e| err(ErrorCode::Internal, format!("writing PDF: {e}")))?;
     Ok(out)
 }
+
+#[cfg(test)]
+#[path = "meta_tests.rs"]
+mod tests;

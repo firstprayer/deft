@@ -445,6 +445,19 @@ pub fn merge(mut docs: Vec<Document>) -> Result<Document> {
     flatten_inheritance(&mut base);
     let mut all = page_ids(&base);
     for mut other in docs {
+        // A protected input keeps the result protected. Older revisions derive
+        // the key from the file ID, so the ID goes with the protection.
+        if base.encryption_state.is_none()
+            && let Some(state) = other.encryption_state.take()
+        {
+            base.encryption_state = Some(state);
+            match other.trailer.get(b"ID").ok().cloned() {
+                Some(id) => base.trailer.set("ID", id),
+                None => {
+                    base.trailer.remove(b"ID");
+                }
+            }
+        }
         flatten_inheritance(&mut other);
         // Its names go with its catalog.
         outline::inline_named_dests(&mut other);

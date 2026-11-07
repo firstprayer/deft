@@ -1,4 +1,4 @@
-use super::_common::{PASSWORD, open, write};
+use super::_common::{PASSWORD, open};
 use deft_core::prelude::*;
 
 pub static OP: Op = Op {
@@ -18,5 +18,6 @@ pub static OP: Op = Op {
 
 fn run(job: &Job) -> Result<OpResult> {
     let mut doc = open(job.input(), job.params)?;
-    Ok(OpResult::one(write(&mut doc)?))
+    let bytes = deft_tools_pdf::save(&mut doc)?;
+    Ok(OpResult::one(Produced::bytes(bytes, Format::Pdf)))
 }

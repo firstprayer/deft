@@ -87,8 +87,7 @@ fn run(job: &Job) -> Result<OpResult> {
     }
     let keep: Vec<usize> = (0..count).collect();
     deft_tools_pdf::select(&mut merged, &keep)?;
-    let out = deft_tools_pdf::save(&mut merged)?;
-    Ok(OpResult::one(Produced::bytes(out, Format::Pdf))
+    Ok(OpResult::one(super::_common::write(&mut merged)?)
         .fact("pages", indexes.len())
         .note(plural(indexes.len(), "page")))
 }

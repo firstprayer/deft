@@ -49,7 +49,7 @@ fn attempt(bytes: &[u8], job: &Job, policy: Option<ImagePolicy>) -> Result<(Vec<
         .map(|p| deft_tools_pdf::recompress_images(&mut doc, p))
         .unwrap_or(0);
     deft_tools_pdf::compress_structure(&mut doc);
-    Ok((deft_tools_pdf::save(&mut doc)?, n))
+    Ok((deft_tools_pdf::meta::save_protected(&mut doc)?, n))
 }
 
 fn run(job: &Job) -> Result<OpResult> {

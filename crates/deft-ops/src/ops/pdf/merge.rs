@@ -22,7 +22,19 @@ fn run(job: &Job) -> Result<OpResult> {
     let docs = job
         .inputs
         .iter()
-        .map(|i| open(i, job.params))
+        .map(|i| {
+            open(i, job.params).map_err(|e| {
+                if e.code != ErrorCode::InputEncrypted || job.params.opt_text("password").is_none()
+                {
+                    return e;
+                }
+                // One --password serves every input.
+                e.hint(
+                    "--password is tried on every input; unlock the others first: \
+                     deft pdf decrypt <file> --password <its password>",
+                )
+            })
+        })
         .collect::<Result<Vec<_>>>()?;
     let expected: usize = docs.iter().map(|d| deft_tools_pdf::page_ids(d).len()).sum();
     let mut merged = deft_tools_pdf::merge(docs)?;
