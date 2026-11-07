@@ -1085,6 +1085,7 @@ dependencies = [
  "fast_image_resize",
  "image",
  "kamadak-exif",
+ "moxcms",
  "oxipng",
  "qrcode",
  "resvg 0.48.1",

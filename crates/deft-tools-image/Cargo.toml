@@ -9,6 +9,7 @@ publish = false
 [dependencies]
 deft-core.workspace = true
 image.workspace = true
+moxcms.workspace = true
 fast_image_resize.workspace = true
 oxipng.workspace = true
 resvg.workspace = true

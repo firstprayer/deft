@@ -24,7 +24,7 @@ pub static OP: Op = Op {
     ],
     mounts: &["pdf from-images"],
     converts: &[Edge {
-        from: deft_tools_image::READABLE,
+        from: IN,
         to: &[Format::Pdf],
         quality: Quality::Lossless,
     }],

@@ -30,9 +30,12 @@ fn run(job: &Job) -> Result<OpResult> {
     let input = job.input();
     let bytes = input.bytes()?;
     let format = input.require_format()?;
+    let heif = deft_tools_image::heif::read(bytes);
     let dims = if format == Format::Svg {
         let img = deft_tools_image::render_svg(bytes, None)?;
         Some((img.width(), img.height()))
+    } else if let Some(h) = &heif {
+        Some((h.width, h.height))
     } else {
         deft_tools_image::dimensions(bytes)
     };
@@ -43,7 +46,10 @@ fn run(job: &Job) -> Result<OpResult> {
         ));
     }
     let (metadata, gps) = deft_tools_image::metadata_summary(bytes, format);
-    let orientation = deft_tools_image::exif_orientation(bytes);
+    let orientation = match &heif {
+        Some(h) => h.orientation,
+        None => deft_tools_image::exif_orientation(bytes),
+    };
     // Report the size as displayed: orientations 5-8 swap width and height.
     let dims = dims.map(|(w, h)| if orientation >= 5 { (h, w) } else { (w, h) });
     let note = match dims {
