@@ -293,3 +293,28 @@ fn a_file_with_only_its_attachments_encrypted_opens() {
         assert_eq!(page_ids(&load(&out, None).unwrap()).len(), 2);
     }
 }
+
+#[test]
+fn the_region_of_form_fields_is_measured_as_shown() {
+    let mut doc = load(&text_pdf("form", 1), None).unwrap();
+    let page = page_ids(&doc)[0];
+    let widget = dictionary! {
+        "Subtype" => "Widget", "FT" => "Tx",
+        "Rect" => vec![100.into(), 800.into(), 300.into(), 820.into()],
+    };
+    let hidden = dictionary! {
+        "Subtype" => "Widget", "F" => 2,
+        "Rect" => vec![0.into(), 0.into(), 10.into(), 10.into()],
+    };
+    doc.get_dictionary_mut(page).unwrap().set(
+        "Annots",
+        vec![Object::Dictionary(widget), Object::Dictionary(hidden)],
+    );
+    // From the top-left of the 595x842 page, with the border around it.
+    let r = pages::annotations_region(&doc, page).unwrap();
+    assert_eq!(r, [99.0, 21.0, 202.0, 22.0]);
+    rotate(&mut doc, &[0], 90);
+    let r = pages::annotations_region(&doc, page).unwrap();
+    // Turned clockwise, the top of the page is on the right.
+    assert_eq!(r, [799.0, 99.0, 22.0, 202.0]);
+}

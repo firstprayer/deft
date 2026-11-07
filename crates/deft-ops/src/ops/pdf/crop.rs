@@ -37,6 +37,21 @@ fn region(text: &str) -> Result<[f64; 4]> {
     <[f64; 4]>::try_from(v).map_err(|_| bad_value("box", "use x,y,width,height in points"))
 }
 
+/// The smallest region holding both, as x, y, width, height.
+fn union(a: Option<[f64; 4]>, b: Option<[f64; 4]>) -> Option<[f64; 4]> {
+    match (a, b) {
+        (Some(a), Some(b)) => {
+            let (x0, y0) = (a[0].min(b[0]), a[1].min(b[1]));
+            let (x1, y1) = (
+                (a[0] + a[2]).max(b[0] + b[2]),
+                (a[1] + a[3]).max(b[1] + b[3]),
+            );
+            Some([x0, y0, x1 - x0, y1 - y0])
+        }
+        (a, b) => a.or(b),
+    }
+}
+
 fn run(job: &Job) -> Result<OpResult> {
     let p = job.params;
     let mut doc = open(job.input(), p)?;
@@ -48,9 +63,9 @@ fn run(job: &Job) -> Result<OpResult> {
         let r = deft_tools_pdf::Renderer::of(&doc)?;
         let pad = margin.unwrap_or(0.0);
         for &i in &indexes {
-            let Some([x, y, w, h]) =
-                deft_tools_pdf::pages::content_region(&r, i, job.ctx.limits.max_pixels)?
-            else {
+            let drawn = deft_tools_pdf::pages::content_region(&r, i, job.ctx.limits.max_pixels)?;
+            let fields = deft_tools_pdf::pages::annotations_region(&doc, ids[i]);
+            let Some([x, y, w, h]) = union(drawn, fields) else {
                 continue;
             };
             let (pw, ph) = deft_tools_pdf::display_size(&doc, ids[i]);
