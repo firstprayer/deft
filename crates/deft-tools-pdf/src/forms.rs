@@ -571,6 +571,134 @@ fn scalar(v: &Value) -> String {
     }
 }
 
+/// A name without its [n] indexes: "f1_01" for "f1_01[0]".
+fn without_indexes(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    let mut rest = name;
+    while let Some(open) = rest.find('[') {
+        let close = rest[open..].find(']').map(|c| open + c);
+        match close {
+            Some(close) if rest[open + 1..close].chars().all(|c| c.is_ascii_digit()) => {
+                out.push_str(&rest[..open]);
+                rest = &rest[close + 1..];
+            }
+            _ => {
+                out.push_str(&rest[..=open]);
+                rest = &rest[open + 1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The field a name means: its full name, the last part of it when that is
+/// unique, or either without the [0] indexes of XFA-made forms (IRS forms
+/// name every field f1_01[0]) when that is unique.
+fn find_field<'a>(all: &'a [Field], name: &str) -> Result<&'a Field> {
+    if let Some(f) = all.iter().find(|f| f.name == name) {
+        return Ok(f);
+    }
+    let last = |f: &Field| f.name.rsplit('.').next().unwrap_or("").to_string();
+    let mut matches: Vec<&Field> = all.iter().filter(|f| last(f) == name).collect();
+    if matches.is_empty() && !name.contains('[') {
+        let plain = without_indexes(name);
+        matches = all
+            .iter()
+            .filter(|f| without_indexes(&f.name) == plain || without_indexes(&last(f)) == plain)
+            .collect();
+    }
+    match matches.as_slice() {
+        [f] => Ok(f),
+        [] => Err(err(ErrorCode::BadValue, format!("no field {name:?}"))
+            .hint("list the names: deft pdf fields <file>")),
+        many => Err(err(
+            ErrorCode::BadValue,
+            format!(
+                "{name:?} matches {} fields ({}, ...); use the full name",
+                many.len(),
+                many[0].name
+            ),
+        )),
+    }
+}
+
+/// Select options of a multi-select list box.
+fn set_list(
+    doc: &mut Document,
+    f: &Field,
+    value: &Value,
+    font: ObjectId,
+    warnings: &mut Vec<String>,
+) -> Result<()> {
+    let picked: Vec<String> = value.as_array().into_iter().flatten().map(scalar).collect();
+    for p in &picked {
+        if !f.options.contains(p) {
+            warnings.push(format!("{}: {p:?} is not one of its options", f.name));
+        }
+    }
+    let indexes: Vec<Object> = f
+        .options
+        .iter()
+        .enumerate()
+        .filter(|(_, o)| picked.contains(o))
+        .map(|(i, _)| Object::Integer(i as i64))
+        .collect();
+    let v = Object::Array(picked.iter().map(|p| text_object(p)).collect());
+    set_on(doc, f.id, b"V", v)?;
+    set_on(doc, f.id, b"I", Object::Array(indexes))?;
+    for w in f.widgets.clone() {
+        let rect = doc.get_dictionary(w).ok().and_then(|d| annot_rect(doc, d));
+        if let Some(s) = rect.and_then(|r| list_appearance(f, &picked, r, font)) {
+            let id = doc.add_object(s);
+            set_on(doc, w, b"AP", Object::Dictionary(dictionary! { "N" => id }))?;
+        }
+    }
+    Ok(())
+}
+
+/// A list box drawn with its options, the selected ones highlighted.
+fn list_appearance(f: &Field, picked: &[String], rect: [f64; 4], font: ObjectId) -> Option<Stream> {
+    let (w, h) = (rect[2] - rect[0], rect[3] - rect[1]);
+    let da = f.default_appearance.as_deref();
+    let size = match font_size(da) {
+        s if s > 0.0 => s,
+        _ => 10.0,
+    };
+    let leading = size * 1.15;
+    let color = color_ops(da);
+    let mut ops = String::from("/Tx BMC q\n");
+    let mut top = h - 1.0;
+    for option in &f.options {
+        if top - leading < 0.0 {
+            break;
+        }
+        let bytes = win_ansi(option).ok()?;
+        let y = top - leading;
+        if picked.contains(option) {
+            ops.push_str(&format!(
+                "0.6 0.75 0.9 rg 0 {y:.2} {w:.2} {leading:.2} re f\n"
+            ));
+        }
+        ops.push_str(&format!(
+            "BT /DeftHelv {size:.2} Tf {color} 1 0 0 1 2 {:.2} Tm {} Tj ET\n",
+            y + size * 0.25,
+            pdf_string(&bytes)
+        ));
+        top = y;
+    }
+    ops.push_str("Q EMC\n");
+    Some(Stream::new(
+        dictionary! {
+            "Type" => "XObject",
+            "Subtype" => "Form",
+            "BBox" => vec![0.into(), 0.into(), Object::Real(w as f32), Object::Real(h as f32)],
+            "Resources" => dictionary! { "Font" => dictionary! { "DeftHelv" => font } },
+        },
+        ops.into_bytes(),
+    ))
+}
+
 /// A text field with /MaxLen holds and shows at most that many characters (a
 /// comb field one per box), so a longer value would be cut on the page while
 /// the form data kept all of it.
@@ -645,29 +773,27 @@ pub fn fill(doc: &mut Document, values: &BTreeMap<String, Value>) -> Result<Vec<
     let mut warnings = Vec::new();
     let mut needs_viewer = false;
     for (name, value) in values {
-        let matches: Vec<&Field> = all
-            .iter()
-            .filter(|f| f.name == *name || f.name.rsplit('.').next() == Some(name.as_str()))
-            .collect();
-        let Some(f) = matches
-            .iter()
-            .find(|f| f.name == *name)
-            .or(matches.first())
-            .copied()
-        else {
-            return Err(err(ErrorCode::BadValue, format!("no field {name:?}"))
-                .hint("list the names: deft pdf fields <file>"));
-        };
-        if matches.len() > 1 && !matches.iter().any(|f| f.name == *name) {
-            return Err(err(
-                ErrorCode::BadValue,
-                format!(
-                    "{name:?} matches {} fields; use the full name",
-                    matches.len()
-                ),
-            ));
-        }
+        let f = find_field(&all, name)?;
         match f.kind {
+            "choice" if value.is_array() && f.flags & (1 << 21) != 0 => {
+                set_list(doc, f, value, font, &mut warnings)?;
+            }
+            _ if value.is_array() || value.is_object() => {
+                let got = if value.is_array() {
+                    "a list"
+                } else {
+                    "an object"
+                };
+                let want = if matches!(f.kind, "checkbox" | "radio") {
+                    "true, false or an option"
+                } else {
+                    "text"
+                };
+                return Err(err(
+                    ErrorCode::BadValue,
+                    format!("{}: expected {want}, got {got}", f.name),
+                ));
+            }
             "checkbox" | "radio" => set_button(doc, f, value)?,
             "text" | "choice" => {
                 let text = scalar(value);
