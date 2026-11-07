@@ -23,35 +23,16 @@ pub static OP: Op = Op {
     ..Op::DEFAULT
 };
 
-/// GitHub's anchor for a heading.
-fn slug(text: &str) -> String {
-    text.to_lowercase()
-        .chars()
-        .filter_map(|c| match c {
-            ' ' => Some('-'),
-            c if c.is_alphanumeric() || c == '-' || c == '_' => Some(c),
-            _ => None,
-        })
-        .collect()
-}
-
 const OPEN: &str = "<!-- toc -->";
 const CLOSE: &str = "<!-- /toc -->";
 
 /// The list of entries for these headings. GitHub numbers repeats across all
 /// headings, listed or not, so every heading is counted.
 fn entries(headings: &[deft_tools_doc::markdown::Heading], depth: usize) -> Vec<String> {
-    let mut seen = std::collections::HashMap::new();
+    let mut anchors = deft_core::text::Anchors::default();
     let mut out = Vec::new();
     for (i, h) in headings.iter().enumerate() {
-        let base = slug(&h.plain);
-        let count: &mut usize = seen.entry(base.clone()).or_default();
-        let anchor = if *count == 0 {
-            base
-        } else {
-            format!("{base}-{count}")
-        };
-        *count += 1;
+        let anchor = anchors.next(&h.plain);
         // A leading title names the document, so it is not an entry.
         let is_title = i == 0 && h.level == 1;
         if !is_title && h.level <= depth {

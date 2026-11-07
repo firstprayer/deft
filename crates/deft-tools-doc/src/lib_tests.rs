@@ -512,3 +512,80 @@ fn slide_tables_links_and_untitled_slides() {
         "{md}"
     );
 }
+
+#[test]
+fn book_chapters_become_valid_xhtml() {
+    let one = "<h1 id=\"a\">A</h1><p align=\"center\">x&nbsp;y <Listing number=\"1\"><pre>code</pre></Listing> <tt>t</tt></p><p><a href=\"#b\">to b</a> <a href=\"#nowhere\">dead</a> <a href=\"other.md\">file</a> <img src=\"web.png\" alt=\"pic\"><img src=\"in.png\" alt=\"kept\"><br><input type=\"checkbox\" checked disabled></p><script>x()</script>";
+    let two = "<h2 id=\"b\">B</h2><p id=\"b\">again</p>";
+    let names = ["c1.xhtml".to_string(), "c2.xhtml".to_string()];
+    let has = |src: &str| src == "in.png";
+    let out = xhtml::for_book(&[one.to_string(), two.to_string()], &names, &has);
+    for body in &out.bodies {
+        let doc = format!("<body xmlns=\"http://www.w3.org/1999/xhtml\">{body}</body>");
+        roxmltree::Document::parse(&doc).unwrap_or_else(|e| panic!("{e}: {body}"));
+    }
+    let first = &out.bodies[0];
+    assert!(first.contains("x\u{a0}y"), "{first}");
+    assert!(
+        !first.contains("isting") && !first.contains("align"),
+        "{first}"
+    );
+    assert!(
+        first.contains("<pre>code</pre>") && first.contains("<code>t</code>"),
+        "{first}"
+    );
+    assert!(first.contains("<a href=\"c2.xhtml#b\">to b</a>"), "{first}");
+    assert!(
+        first.contains(" dead ") && first.contains(" file "),
+        "{first}"
+    );
+    assert!(
+        first.contains("pic<img src=\"in.png\" alt=\"kept\"/><br/>"),
+        "{first}"
+    );
+    assert!(first.contains("checked=\"checked\""), "{first}");
+    assert!(
+        !first.contains("script") && !first.contains("x()"),
+        "{first}"
+    );
+    assert_eq!(out.bodies[1].matches("id=\"b\"").count(), 1);
+    assert_eq!(out.pictures_left_out, 1);
+    assert!(out.markup_dropped >= 3);
+}
+
+#[test]
+fn word_links_to_headings_use_bookmarks() {
+    let doc = Document {
+        blocks: markdown::parse(
+            "# Intro\n\nSee [the end](#the-end) or [web](https://a.example).\n\n## The End\n\n## The End\n",
+        ),
+        ..Default::default()
+    };
+    let bytes = docx::write(&doc).unwrap();
+    let pkg = zipped::Package::open(&bytes).unwrap();
+    let body = pkg.text("word/document.xml").unwrap();
+    let rels = pkg.text("word/_rels/document.xml.rels").unwrap();
+    assert!(
+        body.contains("<w:hyperlink w:anchor=\"the-end\">"),
+        "{body}"
+    );
+    for name in ["intro", "the-end", "the-end-1"] {
+        assert!(body.contains(&format!("w:name=\"{name}\"")), "{body}");
+    }
+    assert!(!rels.contains("Target=\"#"), "{rels}");
+    assert!(rels.contains("https://a.example"), "{rels}");
+}
+
+#[test]
+fn a_rule_before_a_heading_is_not_front_matter() {
+    let md = "# Title\n\n### 1. One\n\ntext\n\n---\n### 2. Two\n\nmore\n\n---\n## Three\n";
+    let names: Vec<String> = markdown::headings(md)
+        .into_iter()
+        .map(|h| h.plain)
+        .collect();
+    assert_eq!(names, ["Title", "1. One", "2. Two", "Three"]);
+    let fronted = "---\ntitle: x\n---\n# Real\n";
+    let found = markdown::headings(fronted);
+    assert_eq!(found.len(), 1);
+    assert_eq!((found[0].plain.as_str(), found[0].line), ("Real", 3));
+}

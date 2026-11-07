@@ -54,3 +54,17 @@ fn long_text_gets_places_to_break() {
     let plain = "short words stay as they are";
     assert_eq!(breakable(plain), plain);
 }
+
+#[test]
+fn headings_get_the_anchors_toc_links_to() {
+    let md = "# Table of Contents\n\n[top](#table-of-contents) and Cell<T> where T: Ord, <em>kept</em>\n\n## Table of Contents\n";
+    let html = to_html(md, false, None);
+    assert!(html.contains("<h1 id=\"table-of-contents\">"), "{html}");
+    assert!(html.contains("<h2 id=\"table-of-contents-1\">"), "{html}");
+    assert!(html.contains("Cell&lt;T&gt; where"), "{html}");
+    assert!(html.contains("<em>kept</em>"), "{html}");
+    assert_eq!(
+        heading_ids(md),
+        ["table-of-contents", "table-of-contents-1"]
+    );
+}

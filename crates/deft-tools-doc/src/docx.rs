@@ -647,6 +647,9 @@ struct Writer<'a> {
     media: Vec<(String, &'a [u8])>,
     next_id: usize,
     picture: usize,
+    /// Heading anchors, which name the bookmarks that `#anchor` links reach.
+    anchors: deft_core::text::Anchors,
+    bookmark: usize,
 }
 
 impl Writer<'_> {
@@ -723,9 +726,13 @@ impl Writer<'_> {
             if let Some(name) = &s.image {
                 out.push_str(&self.picture(name));
             } else if let Some(link) = &s.link {
-                let rid = self.rel("hyperlink", link, true);
                 let run = self.run(s, "<w:color w:val=\"0563C1\"/><w:u w:val=\"single\"/>");
-                out.push_str(&format!("<w:hyperlink r:id=\"{rid}\">{run}</w:hyperlink>"));
+                // A link to a heading of this document goes to its bookmark.
+                let target = match link.strip_prefix('#') {
+                    Some(anchor) => format!("w:anchor=\"{}\"", xml_text(anchor)),
+                    None => format!("r:id=\"{}\"", self.rel("hyperlink", link, true)),
+                };
+                out.push_str(&format!("<w:hyperlink {target}>{run}</w:hyperlink>"));
             } else {
                 out.push_str(&self.run(s, ""));
             }
@@ -742,9 +749,14 @@ impl Writer<'_> {
         match b {
             Block::Heading(level, spans) => {
                 let body = self.spans(spans);
+                let text: String = spans.iter().map(|s| s.text.as_str()).collect();
+                let name = self.anchors.next(&text);
+                self.bookmark += 1;
+                let n = self.bookmark;
                 out.push_str(&format!(
-                    "<w:p><w:pPr><w:pStyle w:val=\"Heading{}\"/></w:pPr>{body}</w:p>",
-                    (*level).clamp(1, 6)
+                    "<w:p><w:pPr><w:pStyle w:val=\"Heading{}\"/></w:pPr><w:bookmarkStart w:id=\"{n}\" w:name=\"{}\"/>{body}<w:bookmarkEnd w:id=\"{n}\"/></w:p>",
+                    (*level).clamp(1, 6),
+                    xml_text(&name)
                 ));
             }
             Block::Paragraph(spans) => {
@@ -887,6 +899,8 @@ pub fn write(doc: &Document) -> Result<Vec<u8>> {
         media: vec![],
         next_id: 2,
         picture: 0,
+        anchors: Default::default(),
+        bookmark: 0,
     };
     let mut body = String::new();
     for b in &doc.blocks {

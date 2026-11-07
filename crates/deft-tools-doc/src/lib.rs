@@ -9,6 +9,7 @@ pub mod epub;
 pub mod html;
 pub mod markdown;
 pub mod pptx;
+pub mod xhtml;
 mod zipped;
 
 /// Inline text with its style.

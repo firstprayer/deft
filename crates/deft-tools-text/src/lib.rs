@@ -49,10 +49,207 @@ const CSS: &str = "body{max-width:46rem;margin:2rem auto;padding:0 1rem;font:16p
 pre{background:#f6f8fa;padding:.8rem;overflow:auto;border-radius:6px}code{font:.9em ui-monospace,Menlo,Consolas,monospace}\
 table{border-collapse:collapse}th,td{border:1px solid #d0d7de;padding:.3rem .6rem}blockquote{margin:0;padding:0 1rem;color:#59636e;border-left:.25rem solid #d0d7de}img{max-width:100%}";
 
-/// Render Markdown to HTML. `standalone` wraps it in a full page.
-pub fn to_html(md: &str, standalone: bool, page_title: Option<&str>) -> String {
+/// The anchor of every heading, in order, as `md toc` and GitHub make them.
+pub fn heading_ids(md: &str) -> Vec<String> {
+    let mut anchors = deft_core::text::Anchors::default();
+    let mut out = Vec::new();
+    let mut text: Option<String> = None;
+    for ev in Parser::new_ext(md, options()) {
+        match ev {
+            Event::Start(Tag::Heading { .. }) => text = Some(String::new()),
+            Event::End(TagEnd::Heading(_)) => {
+                out.push(anchors.next(&text.take().unwrap_or_default()));
+            }
+            Event::Text(t) | Event::Code(t) => {
+                if let Some(h) = text.as_mut() {
+                    h.push_str(&t);
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Every element HTML defines. Inline raw HTML with another name, such as
+/// the `<T>` of `Cell<T>`, is text a writer forgot to quote.
+const HTML_TAGS: &[&str] = &[
+    "a",
+    "abbr",
+    "address",
+    "area",
+    "article",
+    "aside",
+    "audio",
+    "b",
+    "base",
+    "bdi",
+    "bdo",
+    "big",
+    "blockquote",
+    "body",
+    "br",
+    "button",
+    "canvas",
+    "caption",
+    "center",
+    "cite",
+    "code",
+    "col",
+    "colgroup",
+    "data",
+    "datalist",
+    "dd",
+    "del",
+    "details",
+    "dfn",
+    "dialog",
+    "div",
+    "dl",
+    "dt",
+    "em",
+    "embed",
+    "fieldset",
+    "figcaption",
+    "figure",
+    "font",
+    "footer",
+    "form",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "head",
+    "header",
+    "hgroup",
+    "hr",
+    "html",
+    "i",
+    "iframe",
+    "img",
+    "input",
+    "ins",
+    "kbd",
+    "label",
+    "legend",
+    "li",
+    "link",
+    "main",
+    "map",
+    "mark",
+    "math",
+    "menu",
+    "meta",
+    "meter",
+    "nav",
+    "noscript",
+    "object",
+    "ol",
+    "optgroup",
+    "option",
+    "output",
+    "p",
+    "param",
+    "picture",
+    "pre",
+    "progress",
+    "q",
+    "rp",
+    "rt",
+    "ruby",
+    "s",
+    "samp",
+    "script",
+    "search",
+    "section",
+    "select",
+    "slot",
+    "small",
+    "source",
+    "span",
+    "strike",
+    "strong",
+    "style",
+    "sub",
+    "summary",
+    "sup",
+    "svg",
+    "table",
+    "tbody",
+    "td",
+    "template",
+    "textarea",
+    "tfoot",
+    "th",
+    "thead",
+    "time",
+    "title",
+    "tr",
+    "track",
+    "tt",
+    "u",
+    "ul",
+    "var",
+    "video",
+    "wbr",
+];
+
+/// Whether inline raw HTML is a real tag, or a comment or declaration.
+fn is_markup(html: &str) -> bool {
+    let rest = html.trim_start_matches('<').trim_start_matches('/');
+    if rest.starts_with(['!', '?']) {
+        return true;
+    }
+    let name: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '-')
+        .collect::<String>()
+        .to_ascii_lowercase();
+    HTML_TAGS.contains(&name.as_str()) || name.contains('-')
+}
+
+/// Markdown events with an id on every heading, taken from `ids` in order,
+/// and inline tags HTML does not have turned back into text.
+fn html_events<'a>(md: &'a str, ids: &[String]) -> Vec<Event<'a>> {
+    let mut out = Vec::new();
+    let mut ids = ids.iter();
+    for ev in Parser::new_ext(md, options()) {
+        match ev {
+            Event::Start(Tag::Heading {
+                level,
+                id: None,
+                classes,
+                attrs,
+            }) => out.push(Event::Start(Tag::Heading {
+                level,
+                id: ids.next().map(|i| i.clone().into()),
+                classes,
+                attrs,
+            })),
+            Event::Start(Tag::Heading { .. }) => {
+                ids.next();
+                out.push(ev);
+            }
+            Event::InlineHtml(h) if !is_markup(&h) => out.push(Event::Text(h)),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// HTML for Markdown, without a page around it, with these heading ids.
+pub fn html_fragment(md: &str, ids: &[String]) -> String {
     let mut body = String::new();
-    pulldown_cmark::html::push_html(&mut body, Parser::new_ext(md, options()));
+    pulldown_cmark::html::push_html(&mut body, html_events(md, ids).into_iter());
+    body
+}
+
+/// Render Markdown to HTML. `standalone` wraps it in a full page. Headings
+/// get the anchors `md toc` links to.
+pub fn to_html(md: &str, standalone: bool, page_title: Option<&str>) -> String {
+    let body = html_fragment(md, &heading_ids(md));
     if !standalone {
         return body;
     }

@@ -6,6 +6,7 @@ pub mod error;
 pub mod format;
 pub mod job;
 pub mod spec;
+pub mod text;
 pub mod value;
 
 pub mod prelude {

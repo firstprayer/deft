@@ -186,7 +186,10 @@ pub struct Heading {
 /// The headings of a file, found by parsing, so that fences, underlined
 /// headings and front matter are all read as a renderer reads them.
 pub fn headings(md: &str) -> Vec<Heading> {
-    let options = Options::ENABLE_TABLES | Options::ENABLE_YAML_STYLE_METADATA_BLOCKS;
+    // The parser's own metadata option also takes a "---" rule followed by
+    // text anywhere in the file for front matter, and skips what follows.
+    let md = &without_front_matter(md);
+    let options = Options::ENABLE_TABLES;
     let line_of = |at: usize| md[..at].matches('\n').count();
     let mut out: Vec<Heading> = Vec::new();
     let mut open = false;
@@ -219,6 +222,31 @@ pub fn headings(md: &str) -> Vec<Heading> {
         }
     }
     out
+}
+
+/// The text with a YAML front matter block at its very start blanked out,
+/// line for line, so line numbers stay the same.
+pub fn without_front_matter(md: &str) -> String {
+    let mut lines = md.split_inclusive('\n');
+    let Some(first) = lines.next().filter(|l| l.trim_end() == "---") else {
+        return md.to_string();
+    };
+    let mut end = None;
+    let mut at = first.len();
+    for line in lines {
+        at += line.len();
+        if matches!(line.trim_end(), "---" | "...") {
+            end = Some(at);
+            break;
+        }
+    }
+    match end {
+        Some(end) => {
+            let head: String = md[..end].chars().filter(|c| *c == '\n').collect();
+            head + &md[end..]
+        }
+        None => md.to_string(),
+    }
 }
 
 /// Parse Markdown into blocks. Image paths are kept as written in `Span::image`.
