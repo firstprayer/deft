@@ -1,5 +1,5 @@
 use super::_common::{IN, NOTES, load};
-use crate::generated::md::_common::save_images;
+use crate::generated::md::_common::{folder_link, relink_images, save_images};
 use deft_core::prelude::*;
 
 pub static OP: Op = Op {
@@ -25,12 +25,7 @@ fn run(job: &Job) -> Result<OpResult> {
     let dir = job.params.opt_path("images");
     let mut md = deft_tools_doc::markdown::render(&doc);
     if let Some(d) = &dir {
-        for image in &doc.images {
-            md = md.replace(
-                &format!("]({})", image.name),
-                &format!("]({}/{})", d.display(), image.name),
-            );
-        }
+        md = relink_images(&md, &doc.images, &folder_link(job, d));
     }
     let warning = save_images(&doc.images, dir)?;
     let mut res = OpResult::one(Produced::bytes(md.into_bytes(), Format::Md))

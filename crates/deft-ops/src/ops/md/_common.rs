@@ -78,6 +78,67 @@ pub fn save_images(images: &[Image], dir: Option<std::path::PathBuf>) -> Result<
     Ok(None)
 }
 
+/// The folder of saved pictures as a Markdown file written by `job` must
+/// name it: relative to the folder the Markdown goes to, with `/`.
+pub fn folder_link(job: &Job, dir: &Path) -> String {
+    use std::path::Component;
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let absolute = |p: &Path| {
+        let mut out = std::path::PathBuf::new();
+        for c in cwd.join(p).components() {
+            match c {
+                Component::ParentDir => {
+                    out.pop();
+                }
+                Component::CurDir => {}
+                other => out.push(other),
+            }
+        }
+        out
+    };
+    let Some(from) = &job.out_dir else {
+        return dir.display().to_string().replace('\\', "/");
+    };
+    relative_link(&absolute(from), &absolute(dir))
+}
+
+/// The path from folder `from` to `to`, both absolute, with `/`.
+fn relative_link(from: &Path, to: &Path) -> String {
+    let common = from
+        .components()
+        .zip(to.components())
+        .take_while(|(a, b)| a == b)
+        .count();
+    // Different drives have nothing in common: keep the full path.
+    if common == 0 {
+        return to.display().to_string().replace('\\', "/");
+    }
+    let mut parts: Vec<String> = vec!["..".to_string(); from.components().count() - common];
+    parts.extend(
+        to.components()
+            .skip(common)
+            .map(|c| c.as_os_str().to_string_lossy().to_string()),
+    );
+    parts.join("/")
+}
+
+/// Point picture links at `folder`, the result of `folder_link`.
+pub fn relink_images(md: &str, images: &[Image], folder: &str) -> String {
+    let mut md = md.to_string();
+    let prefix = if folder.is_empty() {
+        String::new()
+    } else {
+        format!("{folder}/")
+    };
+    for image in images {
+        let name = deft_tools_doc::markdown::link_name(&image.name);
+        for end in [")", " \""] {
+            md = md.replace(&format!("]({name}{end}"), &format!("]({prefix}{name}{end}"));
+        }
+    }
+    md
+}
+
 /// The images found so far, and what could not be used.
 #[derive(Default)]
 struct Loaded {
@@ -175,4 +236,29 @@ pub fn load_images(
     let mut out = Loaded::default();
     walk(blocks, base, &mut out);
     (out.images, out.warnings)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn picture_links_are_relative_to_the_markdown_file() {
+        let root = if cfg!(windows) { "C:\\w" } else { "/w" };
+        let at = |p: &str| Path::new(root).join(p);
+        assert_eq!(relative_link(&at("sub"), &at("media")), "../media");
+        assert_eq!(relative_link(&at(""), &at("media")), "media");
+        assert_eq!(relative_link(&at("sub"), &at("sub/pics")), "pics");
+        assert_eq!(relative_link(&at("a/b"), &at("a/b")), "");
+        let images = [Image {
+            name: "my cover.png".into(),
+            bytes: vec![],
+        }];
+        let md = "![](my%20cover.png) ![Cover](my%20cover.png \"Cover\")";
+        assert_eq!(
+            relink_images(md, &images, "../media"),
+            "![](../media/my%20cover.png) ![Cover](../media/my%20cover.png \"Cover\")"
+        );
+        assert_eq!(relink_images(md, &images, ""), md);
+    }
 }

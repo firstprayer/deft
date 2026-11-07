@@ -146,9 +146,9 @@ impl Book {
             }
         }
         // Images sit in folders inside the book; keep only their file names.
-        let re = regex::Regex::new(r"!\[([^\]]*)\]\((?:[^)/]*/)*([^)/]+)\)")
+        let re = regex::Regex::new(r#"!\[([^\]]*)\]\((?:[^)/\s]*/)*([^)/\s]+)((?:\s+"[^"]*")?)\)"#)
             .map_err(|e| bad("regex", e))?;
-        let out = re.replace_all(&out, "![$1]($2)");
+        let out = re.replace_all(&out, "![$1]($2$3)");
         // Links between chapters lead nowhere once the book is one file.
         let inner = regex::Regex::new(r"(^|[^!])\[([^\]]*)\]\([^):\s]*\.x?html?(?:#[^)\s]*)?\)")
             .map_err(|e| bad("regex", e))?;

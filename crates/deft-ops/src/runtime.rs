@@ -527,6 +527,16 @@ pub fn execute(op: &'static Op, mut req: Request, ctx: &Ctx) -> Result<Report> {
     }
 
     let params = &req.params;
+    let out_dirs: Vec<Option<PathBuf>> = planned
+        .iter()
+        .map(|t| match t {
+            Target::File(p) | Target::Single(p) => {
+                Some(p.parent().map(Path::to_path_buf).unwrap_or_default())
+            }
+            Target::Dir(d) => Some(d.clone()),
+            Target::None | Target::Stdout => None,
+        })
+        .collect();
     let results: Vec<Slot> = jobs.iter().map(|_| Mutex::new(None)).collect();
     let queue: Mutex<Vec<(usize, Vec<InputFile>)>> =
         Mutex::new(jobs.into_iter().enumerate().rev().collect());
@@ -542,6 +552,7 @@ pub fn execute(op: &'static Op, mut req: Request, ctx: &Ctx) -> Result<Report> {
                         params,
                         ctx,
                         out_format,
+                        out_dir: out_dirs[index].clone(),
                     };
                     let outcome =
                         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (op.run)(&job)))
@@ -923,6 +934,7 @@ pub fn convert(req: Request, to: Option<String>, ctx: &Ctx) -> Result<Report> {
                     params: &params,
                     ctx,
                     out_format: Some(*step_to),
+                    out_dir: None,
                 };
                 let mut res = (op.run)(&job)?;
                 warnings.append(&mut res.warnings);

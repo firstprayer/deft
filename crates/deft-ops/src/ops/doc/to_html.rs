@@ -46,7 +46,10 @@ fn run(job: &Job) -> Result<OpResult> {
         };
         let data = deft_tools_file::base64_encode(&image.bytes);
         html = html.replace(
-            &format!("src=\"{}\"", image.name),
+            &format!(
+                "src=\"{}\"",
+                deft_tools_doc::markdown::link_name(&image.name)
+            ),
             &format!("src=\"data:{kind};base64,{data}\""),
         );
     }

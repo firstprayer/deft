@@ -14,11 +14,22 @@ fn escape(text: &str) -> String {
     out
 }
 
+/// A file name as a Markdown link target: spaces and brackets would end it.
+pub fn link_name(name: &str) -> String {
+    name.replace(' ', "%20")
+        .replace('(', "%28")
+        .replace(')', "%29")
+}
+
 fn inline(spans: &[Span]) -> String {
     let mut out = String::new();
     for s in spans {
         if let Some(name) = &s.image {
-            out.push_str(&format!("![{}]({name})", escape(&s.text)));
+            let picture = format!("![{}]({})", escape(&s.text), link_name(name));
+            match &s.link {
+                Some(link) => out.push_str(&format!("[{picture}]({link})")),
+                None => out.push_str(&picture),
+            }
             continue;
         }
         if s.note {
