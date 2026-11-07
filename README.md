@@ -70,7 +70,7 @@ deft pdf fill form.pdf --data values.json --flatten -o filled.pdf
 | [docs/INSTALL.md](docs/INSTALL.md) | What works today, what is planned, engines |
 | [docs/USAGE.md](docs/USAGE.md) | Syntax, inputs and outputs, results, errors, agent setup |
 | [docs/COMMANDS.md](docs/COMMANDS.md) | Every command, generated from the source |
-| [evals/README.md](evals/README.md) | The agent benchmark |
+| [deftcli.com/evals](https://deftcli.com/evals/) | The agent benchmark |
 | [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md) | Layout, rules and checks for working on deft |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to help, and the contributor agreement |
 | [CHANGELOG.md](CHANGELOG.md) | Release notes |

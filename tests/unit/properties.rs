@@ -1,8 +1,36 @@
 //! Property tests: invariants that should hold for any input.
 
 use deft_core::value::{PageSet, SizeSpec, parse_duration, right_angle};
-use deft_testkit::text_pdf;
+use deft_tools_pdf::lopdf::{Dictionary, Document, Object, Stream, dictionary};
 use proptest::prelude::*;
+
+/// A small PDF with a line of text on each page.
+fn text_pdf(label: &str, pages: usize) -> Vec<u8> {
+    let mut doc = Document::with_version("1.7");
+    let tree = doc.new_object_id();
+    let font = doc.add_object(
+        dictionary! { "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica" },
+    );
+    let mut kids = vec![];
+    for i in 0..pages {
+        let text = format!("BT /F1 24 Tf 60 760 Td ({label} page {}) Tj ET", i + 1);
+        let c = doc.add_object(Stream::new(Dictionary::new(), text.into_bytes()));
+        let p = doc.add_object(dictionary! { "Type" => "Page", "Parent" => tree, "Contents" => c });
+        kids.push(Object::Reference(p));
+    }
+    let n = kids.len() as i64;
+    doc.objects.insert(
+        tree,
+        Object::Dictionary(dictionary! {
+            "Type" => "Pages", "Kids" => kids, "Count" => n,
+            "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+            "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } },
+        }),
+    );
+    let cat = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => tree });
+    doc.trailer.set("Root", cat);
+    deft_tools_pdf::save(&mut doc).expect("save")
+}
 
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(64))]

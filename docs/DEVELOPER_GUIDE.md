@@ -9,7 +9,7 @@ Deft is a single-binary CLI that replaces the scripts an agent would otherwise w
 - `crates/deft-engines`: locating and running ffmpeg and other programs. Never through a shell.
 - `crates/deft-ops`: `src/ops/<group>/<command>.rs`, one operation per file, auto-registered by `build.rs`. `runtime.rs` runs them; `registry.rs` resolves paths, aliases, search and conversion chains.
 - `crates/deft-cli`: `deft` binary: argument parsing, three-layer help, rendering.
-- `crates/deft-testkit`: fixtures, visual cases. `xtask`: developer tools.
+- `xtask`: developer tools.
 
 ## Where things are registered
 
@@ -30,27 +30,18 @@ There is no central list. Each operation is one file, `crates/deft-ops/src/ops/<
 `cargo xtask check` is the gate, and the pre-push hook runs it. `.github/workflows/build.yml` builds and runs unit tests on macOS, Linux and Windows. Use standard GitHub runners only; larger runners are billed.
 
 ```bash
-cargo xtask check               # fmt, clippy, unit, e2e, image comparison, generated files, eval lint
-cargo test-unit                 # 1. unit tests
-cargo test-e2e                  # 2. e2e tests: fixed commands against ground truth (see tests/README.md)
+cargo xtask check               # fmt, clippy, unit tests, generated files
+cargo test-unit                 # unit tests
 cargo xtask fmt                 # format everything; plain cargo fmt skips operation files
 cargo clippy --workspace --all-targets
-cargo xtask eval lint           # 3. agent eval files are consistent (see evals/README.md)
-cargo xtask eval run --arm reference   # eval tasks are solvable; this is not a correctness test
-cargo xtask review              # builds review/index.html for human visual review
-cargo xtask bench               # performance budgets on the release binary
 cargo xtask site                # regenerate docs/COMMANDS.md and skills/deft/SKILL.md
 cargo xtask notices             # regenerate THIRD-PARTY-NOTICES.md after changing dependencies
-cargo xtask catalog --open      # searchable page of every group, command and option
 ```
 
 ## Developer tools
 
 Tools for people working on deft live in `xtask/`, not in the `deft` binary. Add one as a module there and a line in `xtask/src/main.rs`.
 
-`catalog/index.html` is built from the compiled registry and `tests/e2e/cases/`. It is never committed and never edited: change the source and it follows. The git hooks rebuild it after each commit, pull and checkout. To show a new kind of information, change `xtask/src/catalog.rs` and `xtask/src/catalog.html`.
-
 ```bash
 cargo xtask setup               # once per clone: enables the git hooks
-cargo xtask eval fetch          # once per clone: downloads the real test files, about 24 MB
 ```

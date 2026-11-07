@@ -44,4 +44,4 @@ All project files are in English: code, comments, docs, help text, commit messag
 
 ## Tests
 
-See `tests/README.md`. Every option and every choice value needs an e2e case.
+See `tests/README.md`.

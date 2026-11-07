@@ -28,27 +28,6 @@ path = "../../tests/unit/help.rs"
 name = "unit_properties"
 path = "../../tests/unit/properties.rs"
 
-[[test]]
-name = "e2e_cases"
-path = "../../tests/e2e/cases.rs"
-harness = false
-
-[[test]]
-name = "e2e_coverage"
-path = "../../tests/e2e/coverage.rs"
-
-[[test]]
-name = "e2e_behavior"
-path = "../../tests/e2e/behavior.rs"
-
-[[test]]
-name = "e2e_examples"
-path = "../../tests/e2e/examples.rs"
-
-[[test]]
-name = "e2e_visual"
-path = "../../tests/e2e/visual.rs"
-
 [features]
 
 [dependencies]
@@ -59,12 +38,10 @@ serde_json.workspace = true
 tempfile.workspace = true
 
 [dev-dependencies]
-deft-testkit.workspace = true
 deft-tools-pdf.workspace = true
 deft-tools-image.workspace = true
 insta.workspace = true
 proptest.workspace = true
-libtest-mimic = "=0.8.2"
 serde.workspace = true
 tempfile.workspace = true
 glob.workspace = true

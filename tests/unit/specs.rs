@@ -3,8 +3,32 @@
 
 use deft_core::spec::Accept;
 use deft_ops::registry;
-use deft_testkit::shell_words;
 use std::collections::{HashMap, HashSet};
+
+/// Split an example into words; single and double quotes group.
+fn shell_words(line: &str) -> Vec<String> {
+    let (mut out, mut word, mut quote, mut started) = (Vec::new(), String::new(), None, false);
+    for c in line.chars() {
+        match (c, quote) {
+            ('"' | '\'', None) => {
+                quote = Some(c);
+                started = true;
+            }
+            (_, Some(q)) if c == q => quote = None,
+            (' ', None) => {
+                if started || !word.is_empty() {
+                    out.push(std::mem::take(&mut word));
+                    started = false;
+                }
+            }
+            _ => word.push(c),
+        }
+    }
+    if started || !word.is_empty() {
+        out.push(word);
+    }
+    out
+}
 
 fn tokens(text: &str) -> usize {
     text.len().div_ceil(4)

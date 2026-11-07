@@ -22,7 +22,6 @@ deft-tools-doc = { path = "crates/deft-tools-doc" }
 deft-tools-file = { path = "crates/deft-tools-file" }
 deft-engines = { path = "crates/deft-engines" }
 deft-ops = { path = "crates/deft-ops", default-features = false }
-deft-testkit = { path = "crates/deft-testkit" }
 # Versions pinned to releases at least two weeks old (checked 2026-11-04).
 lopdf = { version = "=0.46.0", default-features = false }
 hayro = "=0.8.0"

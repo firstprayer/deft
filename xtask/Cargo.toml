@@ -5,15 +5,8 @@ edition.workspace = true
 publish = false
 
 [dependencies]
-deft-testkit.workspace = true
-deft-tools-image.workspace = true
-deft-tools-pdf.workspace = true
 deft-core.workspace = true
 deftcli = { path = "../crates/deft-cli" }
 deft-ops.workspace = true
-serde.workspace = true
 serde_json.workspace = true
-tempfile.workspace = true
-sha2.workspace = true
-toml = "=1.1.8"
 glob.workspace = true

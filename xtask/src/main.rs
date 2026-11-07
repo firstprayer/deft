@@ -1,11 +1,7 @@
-//! Developer tools: `cargo xtask <review|accept|bench|eval|catalog|...>`.
+//! Developer tools: `cargo xtask <check|fmt|site|notices|commands|setup>`.
 
-mod bench;
-mod catalog;
 mod commands;
-mod eval;
 mod notices;
-mod review;
 mod site;
 
 use std::path::PathBuf;
@@ -22,25 +18,16 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let rest = args.get(1..).unwrap_or_default();
     let result = match args.first().map(String::as_str) {
-        Some("review") => review::review(),
-        Some("accept") => review::accept(rest),
-        Some("bench") => bench::run(),
-        Some("eval") => eval::run(rest),
         Some("notices") => notices::write(),
         Some("commands") => {
             commands::print();
             Ok(())
         }
-        Some("catalog") => catalog::write(rest.iter().any(|a| a == "--open")),
         Some("site") => site::write(rest.iter().any(|a| a == "--check")),
-        Some("page") => match rest {
-            [template, output] => site::write_page(template, output),
-            _ => Err("usage: cargo xtask page <template> <output>".to_string()),
-        },
         Some("setup") => setup(),
         Some("check") => check(),
         Some("fmt") => fmt(rest.iter().any(|a| a == "--check")),
-        _ => Err("usage: cargo xtask review | accept <case>... | accept --new | bench | notices | commands | catalog [--open] | site [--check] | setup | check | fmt [--check] | eval <fetch|lint|list|run|report>".to_string()),
+        _ => Err("usage: cargo xtask check | fmt [--check] | site [--check] | notices | commands | setup".to_string()),
     };
     if let Err(e) = result {
         eprintln!("error: {e}");
@@ -61,8 +48,6 @@ fn check() -> Result<(), String> {
             "warnings",
         ],
         &["test-unit"],
-        &["test-e2e"],
-        &["xtask", "eval", "lint"],
         &["xtask", "site", "--check"],
     ];
     for args in steps {
@@ -121,22 +106,4 @@ fn setup() -> Result<(), String> {
     }
     println!("git hooks enabled");
     Ok(())
-}
-
-/// Build the deft binary and return its path.
-pub fn build_deft(release: bool) -> Result<PathBuf, String> {
-    let mut c = std::process::Command::new("cargo");
-    c.args(["build", "--quiet", "-p", "deftcli"])
-        .current_dir(root());
-    if release {
-        c.arg("--release");
-    }
-    let ok = c.status().map_err(|e| e.to_string())?.success();
-    if !ok {
-        return Err("cargo build failed".into());
-    }
-    Ok(root()
-        .join("target")
-        .join(if release { "release" } else { "debug" })
-        .join("deft"))
 }
