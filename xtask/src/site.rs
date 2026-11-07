@@ -24,7 +24,7 @@ const BASELINE: &str = "codex-without-deft";
 /// on purpose so the picker cannot read as a highlight reel.
 const PICKS: &[&str] = &[
     "pdf/rotate-one-page",
-    "convert/chain-md-to-png",
+    "pdf/compress-scan",
     "sheet/ods-to-csv",
     "image/text-on-photo",
     "video/join",
@@ -106,6 +106,10 @@ const CLOSED_SINCE_LAST_RUN: &[&str] = &[
 /// that run published, so they stay in until the agents run again; then empty
 /// this list.
 const REMOVED_SINCE_LAST_RUN: &[&str] = &[
+    "convert/chain-md-to-png",
+    "image/flip",
+    "pdf/already-rotated",
+    "pdf/empty-password",
     "archive/list",
     "archive/tar-folder",
     "archive/unzip",
