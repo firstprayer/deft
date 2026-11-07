@@ -32,6 +32,6 @@ How to use it:
 3. `deft convert <in> -o <out.ext>` converts between formats by extension.
 4. Results are one line starting with `ok`, `partial` or `error`; add `--json` to parse them. Errors include a `hint:` with the fix.
 
-Inputs are never overwritten; pass `--force` or `--in-place` to allow it. Globs and directories work as inputs; several inputs run in parallel.
+Inputs are never changed or overwritten. `--force` lets an output replace an existing file that is not an input. Globs and directories work as inputs; several inputs run in parallel.
 
 If `deft` is not installed, ask the user, then follow https://github.com/firstprayer/deft/blob/main/docs/INSTALL.md

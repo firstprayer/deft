@@ -180,7 +180,6 @@ pub(crate) fn request(p: args::Parsed, stdin: impl FnOnce() -> Vec<u8>) -> Reque
         output: p.output,
         force: p.force,
         dry_run: p.dry_run,
-        in_place: p.in_place,
         recursive: p.recursive,
         jobs: p.jobs.unwrap_or(cores),
         stdin_format: p.stdin_format,

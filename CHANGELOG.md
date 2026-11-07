@@ -23,6 +23,7 @@ Deft follows semantic versioning. Before 1.0, a minor version may change command
 
 ### Removed
 
+- `--in-place`. Deft never changes an input: not through `-o`, `--force`, a hard or symbolic link, a folder output, or pictures saved with `--images`.
 - The `archive`, `subtitle` and `audio` groups. An agent does each audio job with one ffmpeg line.
 - `html screenshot` and `html to-pdf --browser`. Deft no longer uses Chrome.
 - The `youtube` group, `deft engine install` and `update`, `--offline` and `--install-engines`. Deft no longer touches the network.

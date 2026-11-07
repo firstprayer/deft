@@ -43,12 +43,6 @@ pub const COMMON: &[(&str, Option<char>, bool, &str)] = &[
         "Descend into directories given as input",
     ),
     (
-        "in-place",
-        None,
-        false,
-        "Replace the input file (atomically)",
-    ),
-    (
         "stdin-format",
         None,
         true,
@@ -80,7 +74,6 @@ pub struct Parsed {
     pub quiet: bool,
     pub jobs: Option<usize>,
     pub recursive: bool,
-    pub in_place: bool,
     pub stdin_format: Option<Format>,
     pub timeout: Option<f64>,
     pub keep_metadata: bool,
@@ -107,7 +100,6 @@ fn set_common(p: &mut Parsed, name: &str, value: Option<String>) -> Result<()> {
             })?);
         }
         "recursive" => p.recursive = true,
-        "in-place" => p.in_place = true,
         "stdin-format" => {
             let raw = need(value)?;
             p.stdin_format = Some(Format::from_name(&raw).ok_or_else(|| {

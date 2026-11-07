@@ -20,7 +20,6 @@ pub struct Request {
     pub output: Option<String>,
     pub force: bool,
     pub dry_run: bool,
-    pub in_place: bool,
     pub recursive: bool,
     pub jobs: usize,
     pub stdin: Option<Vec<u8>>,
@@ -343,10 +342,6 @@ fn plan_target(
                 ));
             }
             Some(o) => Target::File(PathBuf::from(o)),
-            None if req.in_place => match first.and_then(|i| i.path.clone()) {
-                Some(p) => Target::File(p),
-                None => return Err(err(ErrorCode::BadOption, "--in-place needs a file input")),
-            },
             None if first.is_some_and(|i| i.path.is_none() && i.url.is_none()) => Target::Stdout,
             None => {
                 let dir = if first.is_some_and(|i| i.url.is_some()) {
@@ -409,7 +404,15 @@ fn default_name(op: &Op, stem: &str, out: Format, input: Option<Format>) -> Stri
     }
 }
 
+/// Whether two paths are one file: the same path, a link to it, or a hard link.
 fn same_file(a: &Path, b: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if let (Ok(x), Ok(y)) = (std::fs::metadata(a), std::fs::metadata(b)) {
+            return x.dev() == y.dev() && x.ino() == y.ino();
+        }
+    }
     match (a.canonicalize(), b.canonicalize()) {
         (Ok(x), Ok(y)) => x == y,
         _ => false,
@@ -421,12 +424,16 @@ fn check_writable(path: &Path, inputs: &[InputFile], req: &Request) -> Result<()
     let is_input = inputs
         .iter()
         .any(|i| i.path.as_deref().is_some_and(|p| same_file(p, path)));
-    if is_input && !req.in_place {
+    // An input is never written to, whatever the options.
+    if is_input {
         return Err(err(
             ErrorCode::OutputExists,
-            format!("{} is an input; refusing to overwrite it", path.display()),
+            format!(
+                "{} is an input; deft never changes its inputs",
+                path.display()
+            ),
         )
-        .hint("choose another -o, or pass --in-place"));
+        .hint("choose another -o"));
     }
     if path.exists() && !req.force && !is_input {
         return Err(err(
@@ -704,7 +711,7 @@ fn deliver(
                 )
             })?;
         }
-        let bytes = place(p.data, &dest, req.force || req.in_place)?;
+        let bytes = place(p.data, &dest, req.force, inputs)?;
         infos.push(OutputInfo {
             path: dest.display().to_string(),
             format: p.format,
@@ -736,7 +743,21 @@ pub fn sanitize(name: &str) -> String {
 }
 
 /// Move data into place atomically (temp file + rename).
-fn place(data: Data, dest: &Path, overwrite: bool) -> Result<Option<u64>> {
+fn place(data: Data, dest: &Path, overwrite: bool, inputs: &[InputFile]) -> Result<Option<u64>> {
+    let is_input = |p: &Path| {
+        inputs
+            .iter()
+            .any(|i| i.path.as_deref().is_some_and(|q| same_file(q, p)))
+    };
+    if is_input(dest) {
+        return Err(err(
+            ErrorCode::OutputExists,
+            format!(
+                "{} is an input; deft never changes its inputs",
+                dest.display()
+            ),
+        ));
+    }
     let unwritable = |e: std::io::Error| {
         err(
             ErrorCode::OutputUnwritable,
@@ -771,22 +792,29 @@ fn place(data: Data, dest: &Path, overwrite: bool) -> Result<Option<u64>> {
                     )
                     .hint("pass --force to merge into it"));
                 }
-                copy_dir(&src, dest).map_err(unwritable)?;
+                copy_dir(&src, dest, &is_input).map_err(unwritable)?;
             } else if std::fs::rename(&src, dest).is_err() {
-                copy_dir(&src, dest).map_err(unwritable)?;
+                copy_dir(&src, dest, &is_input).map_err(unwritable)?;
             }
             Ok(None)
         }
     }
 }
 
-fn copy_dir(src: &Path, dest: &Path) -> std::io::Result<()> {
+/// Copy a folder into place, merging with one already there. An input in the
+/// way is never replaced.
+fn copy_dir(src: &Path, dest: &Path, is_input: &dyn Fn(&Path) -> bool) -> std::io::Result<()> {
     std::fs::create_dir_all(dest)?;
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;
         let to = dest.join(entry.file_name());
         if entry.file_type()?.is_dir() {
-            copy_dir(&entry.path(), &to)?;
+            copy_dir(&entry.path(), &to, is_input)?;
+        } else if is_input(&to) {
+            return Err(std::io::Error::other(format!(
+                "{} is an input; deft never changes its inputs",
+                to.display()
+            )));
         } else {
             std::fs::copy(entry.path(), to)?;
         }
@@ -944,7 +972,7 @@ pub fn convert(req: Request, to: Option<String>, ctx: &Ctx) -> Result<Report> {
                             let path = dir.join(sanitize(&name));
                             check_writable(&path, std::slice::from_ref(&input), &req)?;
                             let (format, facts) = (p.format, p.facts);
-                            let bytes = place(p.data, &path, true)?;
+                            let bytes = place(p.data, &path, true, std::slice::from_ref(&input))?;
                             infos.push(OutputInfo {
                                 path: path.display().to_string(),
                                 format,
@@ -973,7 +1001,7 @@ pub fn convert(req: Request, to: Option<String>, ctx: &Ctx) -> Result<Report> {
                     }
                 };
                 let next = ctx.temp_path(&format!("{stem}.{}", step_to.ext()));
-                place(produced.data, &next, true)?;
+                place(produced.data, &next, true, &[])?;
                 current = next;
                 current_format = *step_to;
             }
@@ -993,7 +1021,7 @@ pub fn convert(req: Request, to: Option<String>, ctx: &Ctx) -> Result<Report> {
                     if let Some(parent) = d.parent().filter(|p| !p.as_os_str().is_empty()) {
                         std::fs::create_dir_all(parent)?;
                     }
-                    let bytes = place(Data::File(current), &d, true)?;
+                    let bytes = place(Data::File(current), &d, true, std::slice::from_ref(&input))?;
                     OutputInfo {
                         path: d.display().to_string(),
                         format: Some(target),

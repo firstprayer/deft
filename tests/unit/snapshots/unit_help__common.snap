@@ -10,7 +10,6 @@ Options available on every command:
   -q, --quiet                  No output on success
   -j, --jobs <value>           Parallel jobs (default: CPU cores)
   -r, --recursive              Descend into directories given as input
-  --in-place                   Replace the input file (atomically)
   --stdin-format <value>       Format of stdin when it cannot be detected
   --timeout <value>            Time limit for engine calls, e.g. 5m
   --keep-metadata              Keep original metadata where supported

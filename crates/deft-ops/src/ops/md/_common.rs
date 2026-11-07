@@ -72,8 +72,21 @@ pub fn save_images(images: &[Image], dir: Option<std::path::PathBuf>) -> Result<
         )));
     };
     std::fs::create_dir_all(&dir)?;
+    // A picture never replaces a different file already there, an input
+    // least of all. The same bytes again are fine.
     for image in images {
-        std::fs::write(dir.join(&image.name), &image.bytes)?;
+        let path = dir.join(&image.name);
+        if path.exists() {
+            if std::fs::read(&path).is_ok_and(|b| b == image.bytes) {
+                continue;
+            }
+            return Err(err(
+                ErrorCode::OutputExists,
+                format!("{} already exists", path.display()),
+            )
+            .hint("choose an empty folder for --images"));
+        }
+        std::fs::write(&path, &image.bytes)?;
     }
     Ok(None)
 }

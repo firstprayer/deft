@@ -47,7 +47,6 @@ Deft reads the file's header to learn its type. The extension is only a hint.
 | `-o dir/` | Written into that folder with the original names |
 | `-o -` | Written to standard output |
 | Output already exists | Fails with `OUTPUT_EXISTS`, unless you pass `--force` |
-| `--in-place` | Replaces the input, atomically. This is the only way to change an input |
 
 ## Values
 

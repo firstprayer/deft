@@ -349,7 +349,7 @@ pub fn skill_text() -> String {
     s.push_str("3. `deft convert <in> -o <out.ext>` converts between formats by extension.\n");
     s.push_str("4. Results are one line starting with `ok`, `partial` or `error`; add `--json` to parse them. Errors include a `hint:` with the fix.\n");
     s.push_str(
-        "\nInputs are never overwritten; pass `--force` or `--in-place` to allow it. Globs and directories work as inputs; several inputs run in parallel.\n\nIf `deft` is not installed, ask the user, then follow https://github.com/firstprayer/deft/blob/main/docs/INSTALL.md\n",
+        "\nInputs are never changed or overwritten. `--force` lets an output replace an existing file that is not an input. Globs and directories work as inputs; several inputs run in parallel.\n\nIf `deft` is not installed, ask the user, then follow https://github.com/firstprayer/deft/blob/main/docs/INSTALL.md\n",
     );
     s
 }
