@@ -45,6 +45,46 @@ fn chapters(md: &str) -> Vec<String> {
     out
 }
 
+/// Make a chapter's HTML fit for a book. Markdown can carry raw HTML that strict
+/// readers refuse: attributes EPUB does not allow, pictures on the web, and links
+/// to files that are not in the book. Returns how many pictures were left out.
+fn book_safe(html: &str, images: &[deft_tools_doc::Image]) -> (String, usize) {
+    let re = |p: &str| regex::Regex::new(p).expect("valid pattern");
+    let html = re(r#"(?i)\s(align|valign|bgcolor|border)="[^"]*""#).replace_all(html, "");
+    let html = re(r#"(?i)\s(width|height)="[^"]*[^0-9"][^"]*""#).replace_all(&html, "");
+    let html = re(r"(?i)</?picture\b[^>]*>|<source\b[^>]*>").replace_all(&html, "");
+    let mut left_out = 0;
+    let src = re(r#"(?i)\ssrc="([^"]*)""#);
+    let alt = re(r#"(?i)\salt="([^"]*)""#);
+    let html = re(r"(?i)<img\b[^>]*>").replace_all(&html, |c: &regex::Captures| {
+        let tag = &c[0];
+        let path = src
+            .captures(tag)
+            .map_or("", |m| m.get(1).map_or("", |g| g.as_str()));
+        if images.iter().any(|i| i.name == path) {
+            return tag.to_string();
+        }
+        left_out += 1;
+        alt.captures(tag)
+            .map_or(String::new(), |m| m[1].to_string())
+    });
+    let html = re(r#"(?is)<a\b[^>]*\bhref="([^"]*)"[^>]*>(.*?)</a>"#).replace_all(
+        &html,
+        |c: &regex::Captures| {
+            let target = c[1].to_ascii_lowercase();
+            let keep = ["http:", "https:", "mailto:", "#"]
+                .iter()
+                .any(|p| target.starts_with(p));
+            if keep {
+                c[0].to_string()
+            } else {
+                c[2].to_string()
+            }
+        },
+    );
+    (html.into_owned(), left_out)
+}
+
 fn run(job: &Job) -> Result<OpResult> {
     let p = job.params;
     let mut parts = Vec::new();
@@ -66,6 +106,7 @@ fn run(job: &Job) -> Result<OpResult> {
         }
         parts.extend(chapters(&md));
     }
+    let mut left_out = 0;
     let list: Vec<(String, String)> = parts
         .iter()
         .enumerate()
@@ -80,9 +121,16 @@ fn run(job: &Job) -> Result<OpResult> {
                     html.replace_range(start..at + 1, "");
                 }
             }
+            let (html, missed) = book_safe(&html, &images);
+            left_out += missed;
             (title, html)
         })
         .collect();
+    if left_out > 0 {
+        warnings.push(format!(
+            "{left_out} pictures left out: a book holds only local pictures"
+        ));
+    }
     let first = parts.first().and_then(|m| deft_tools_text::title(m));
     let title = p
         .opt_text("title")
