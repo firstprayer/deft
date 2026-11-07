@@ -16,7 +16,7 @@ pub enum Extracted {
 #[derive(Default)]
 pub struct Images {
     pub images: Vec<(usize, Extracted)>,
-    /// Images in encodings deft cannot unpack, such as JBIG2.
+    /// Images that could not be decoded.
     pub skipped: usize,
 }
 
@@ -255,11 +255,158 @@ fn with_soft_mask(doc: &Document, dict: &Dictionary, img: RgbImage) -> DynamicIm
     }
 }
 
+/// A JPEG packed inside other filters, such as [/FlateDecode /DCTDecode]:
+/// the JPEG bytes with the outer filters undone.
+fn wrapped_jpeg(stream: &Stream, chain: &[Vec<u8>]) -> Option<Vec<u8>> {
+    use std::io::Read;
+    let (last, outer) = chain.split_last()?;
+    if last != b"DCTDecode" || outer.iter().any(|f| f != b"FlateDecode") {
+        return None;
+    }
+    if stream.dict.has(b"DecodeParms") {
+        let parms = stream.dict.get(b"DecodeParms").ok()?;
+        let plain = match parms {
+            Object::Array(a) => a.iter().all(|p| matches!(p, Object::Null)),
+            _ => false,
+        };
+        if !plain {
+            return None;
+        }
+    }
+    let mut data = stream.content.clone();
+    for _ in outer {
+        let mut out = Vec::new();
+        flate2::read::ZlibDecoder::new(data.as_slice())
+            .read_to_end(&mut out)
+            .ok()?;
+        data = out;
+    }
+    data.starts_with(&[0xFF, 0xD8]).then_some(data)
+}
+
+/// Images in the scan encodings (CCITT fax, JBIG2, JPEG 2000), decoded with
+/// the renderer's own codecs. `pdf` holds the document with the same object
+/// numbers.
+fn decode_scan(
+    pdf: &hayro::hayro_syntax::Pdf,
+    doc: &Document,
+    id: ObjectId,
+) -> Option<DynamicImage> {
+    use hayro::hayro_syntax::object::ObjectIdentifier;
+    use hayro::hayro_syntax::object::stream::{ImageColorSpace, ImageDecodeParams};
+    let stream = doc.get_object(id).ok()?.as_stream().ok()?;
+    let d = &stream.dict;
+    let int = |k: &[u8]| {
+        d.get(k)
+            .ok()
+            .and_then(|o| num(deref(doc, o)))
+            .map(|n| n as u32)
+    };
+    let mask = d
+        .get(b"ImageMask")
+        .ok()
+        .and_then(|o| deref(doc, o).as_bool().ok())
+        .unwrap_or(false);
+    let space = match d.get(b"ColorSpace") {
+        Ok(o) => color_space(doc, o),
+        Err(_) => Some(Space::Gray),
+    };
+    let comps = match space {
+        Some(Space::Rgb) => 3,
+        Some(Space::Cmyk) => 4,
+        _ => 1,
+    };
+    let params = ImageDecodeParams {
+        is_indexed: matches!(space, Some(Space::Indexed(..))),
+        bpc: int(b"BitsPerComponent").map(|b| b as u8),
+        num_components: Some(comps),
+        target_dimension: None,
+        width: int(b"Width")?,
+        height: int(b"Height")?,
+    };
+    let found: hayro::hayro_syntax::object::Stream<'_> = pdf
+        .xref()
+        .get(ObjectIdentifier::new(id.0 as i32, id.1 as i32))?;
+    let decoded = found.decoded_image(&params).ok()?;
+    let (w, h, bpc, cs) = match &decoded.image_data {
+        Some(i) => (i.width, i.height, i.bits_per_component, i.color_space),
+        None => (params.width, params.height, params.bpc.unwrap_or(8), None),
+    };
+    let channels = match cs {
+        Some(ImageColorSpace::Rgb) => 3,
+        Some(ImageColorSpace::Cmyk) => 4,
+        Some(ImageColorSpace::Gray) => 1,
+        _ => comps as usize,
+    };
+    let data = decoded.data.as_ref();
+    let samples: Vec<u8> = match bpc {
+        8 => data.to_vec(),
+        1 if channels == 1 => {
+            let stride = (w as usize).div_ceil(8);
+            (0..h as usize)
+                .flat_map(|y| (0..w as usize).map(move |x| (y, x)))
+                .map(|(y, x)| {
+                    let byte = data.get(y * stride + x / 8).copied().unwrap_or(0xFF);
+                    if byte & (0x80 >> (x % 8)) != 0 {
+                        255
+                    } else {
+                        0
+                    }
+                })
+                .collect()
+        }
+        _ => return None,
+    };
+    if samples.len() < (w * h) as usize * channels {
+        return None;
+    }
+    // /Decode [1 0] inverts a one-channel image; a stencil mask paints its 0s.
+    let inverted = d
+        .get(b"Decode")
+        .ok()
+        .and_then(|o| deref(doc, o).as_array().ok())
+        .and_then(|a| a.first().and_then(|v| num(deref(doc, v))))
+        .is_some_and(|first| first > 0.5);
+    let samples = &samples[..(w * h) as usize * channels];
+    let img = match channels {
+        1 => {
+            let gray: Vec<u8> = if inverted && !mask {
+                samples.iter().map(|v| 255 - v).collect()
+            } else {
+                samples.to_vec()
+            };
+            DynamicImage::ImageLuma8(GrayImage::from_raw(w, h, gray)?)
+        }
+        3 => DynamicImage::ImageRgb8(RgbImage::from_raw(w, h, samples.to_vec())?),
+        4 => {
+            let rgb: Vec<u8> = samples
+                .chunks_exact(4)
+                .flat_map(|p| cmyk_to_rgb(p[0], p[1], p[2], p[3]))
+                .collect();
+            DynamicImage::ImageRgb8(RgbImage::from_raw(w, h, rgb)?)
+        }
+        _ => return None,
+    };
+    let alpha = decoded.image_data.as_ref().and_then(|i| i.alpha.clone());
+    Some(match alpha {
+        Some(a) if a.len() == (w * h) as usize => {
+            let mut out = img.to_rgba8();
+            for (p, a) in out.pixels_mut().zip(a) {
+                p.0[3] = a;
+            }
+            DynamicImage::ImageRgba8(out)
+        }
+        _ => img,
+    })
+}
+
 /// Images on the given pages (zero-based), each with its page.
 pub fn images(doc: &Document, indexes: &[usize]) -> Images {
     let pages = crate::page_ids(doc);
     let mut out = Images::default();
     let mut seen = HashSet::new();
+    // The renderer's parse of the document, made when a scan image needs it.
+    let mut renderer: Option<Option<hayro::hayro_syntax::Pdf>> = None;
     for &i in indexes {
         let Some(page) = pages.get(i) else {
             continue;
@@ -280,11 +427,24 @@ pub fn images(doc: &Document, indexes: &[usize]) -> Images {
             if chain.len() == 1 && last == Some(b"DCTDecode") {
                 out.images
                     .push((i, Extracted::Jpeg(stream.content.clone())));
+            } else if let Some(jpeg) = wrapped_jpeg(stream, &chain) {
+                out.images.push((i, Extracted::Jpeg(jpeg)));
             } else if matches!(
                 last,
                 Some(b"JBIG2Decode" | b"JPXDecode" | b"CCITTFaxDecode" | b"DCTDecode")
             ) {
-                out.skipped += 1;
+                let pdf = renderer.get_or_insert_with(|| {
+                    let mut copy = doc.clone();
+                    copy.encryption_state = None;
+                    copy.trailer.remove(b"Encrypt");
+                    let mut bytes = Vec::new();
+                    copy.save_to(&mut bytes).ok()?;
+                    hayro::hayro_syntax::Pdf::new(bytes).ok()
+                });
+                match pdf.as_ref().and_then(|pdf| decode_scan(pdf, doc, id)) {
+                    Some(img) => out.images.push((i, Extracted::Pixels(img))),
+                    None => out.skipped += 1,
+                }
             } else if let Some(img) = decode(doc, stream) {
                 out.images.push((i, Extracted::Pixels(img)));
             } else {
@@ -294,3 +454,7 @@ pub fn images(doc: &Document, indexes: &[usize]) -> Images {
     }
     out
 }
+
+#[cfg(test)]
+#[path = "extract_tests.rs"]
+mod tests;

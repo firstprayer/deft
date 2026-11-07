@@ -44,11 +44,11 @@ fn run(job: &Job) -> Result<OpResult> {
         .note(format!("{n} images"));
     if found.skipped > 0 {
         res = res.warn(format!(
-            "{} images use an encoding deft cannot unpack; try pdf to-images",
+            "{} images could not be decoded; pdf to-images renders whole pages",
             found.skipped
         ));
     }
-    if n == 0 {
+    if n == 0 && found.skipped == 0 {
         res = res.warn("no embedded images found");
     }
     Ok(res)
