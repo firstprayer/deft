@@ -1,8 +1,8 @@
-//! Helpers shared by the video and audio operations.
+//! Helpers shared by the video operations.
 
 use deft_core::prelude::*;
 use serde_json::Value as Json;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 pub const VIDEO: &[Format] = &[
     Format::Mp4,
@@ -10,14 +10,6 @@ pub const VIDEO: &[Format] = &[
     Format::Mov,
     Format::Mkv,
     Format::Avi,
-];
-pub const AUDIO: &[Format] = &[
-    Format::Mp3,
-    Format::Wav,
-    Format::M4a,
-    Format::Flac,
-    Format::Ogg,
-    Format::Opus,
 ];
 pub const FFMPEG: &[&str] = &["ffmpeg", "ffprobe"];
 
@@ -31,24 +23,6 @@ pub fn ffmpeg(job: &Job, id: &str, args: Vec<String>) -> Result<()> {
     all.extend(args);
     deft_engines::run(job.ctx, &path, &all)?;
     Ok(())
-}
-
-/// The end of an ffmpeg command that writes audio: encoder options, then the file.
-/// Cover art counts as a video stream, so `-vn` keeps it out of the output.
-pub fn audio_out(job: &Job, id: &str, format: Format, out: &Path) -> Result<Vec<String>> {
-    let mut args = strs(&["-vn"]);
-    if format == Format::Ogg {
-        let path = deft_engines::require(job.ctx, "ffmpeg", id)?;
-        let list = deft_engines::run(job.ctx, &path, &strs(&["-hide_banner", "-encoders"]))?;
-        args.extend(deft_engines::vorbis_args(&String::from_utf8_lossy(
-            &list.stdout,
-        )));
-    }
-    if format == Format::Mp3 {
-        args.extend(strs(&["-q:a", "2"]));
-    }
-    args.push(out.display().to_string());
-    Ok(args)
 }
 
 /// Stream and format metadata from ffprobe.
@@ -229,18 +203,6 @@ pub fn filter_video(job: &Job, id: &str, filter: &str) -> Result<OpResult> {
     args.extend(["-vf".to_string(), filter.to_string()]);
     args.extend(video_codec_args(format, None));
     args.push(out.display().to_string());
-    ffmpeg(job, id, args)?;
-    Ok(file_result(out, format))
-}
-
-/// Audio re-encoded through a filter, in the input's format unless `-o` says otherwise.
-pub fn filter_audio(job: &Job, id: &str, filter: &str) -> Result<OpResult> {
-    let format = job.target(job.input().require_format()?);
-    let out = temp_out(job, format);
-    let mut args = strs(&["-i"]);
-    args.push(input_path(job)?);
-    args.extend(["-af".to_string(), filter.to_string()]);
-    args.extend(audio_out(job, id, format, &out)?);
     ffmpeg(job, id, args)?;
     Ok(file_result(out, format))
 }

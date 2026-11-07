@@ -61,7 +61,7 @@ deft pdf fill form.pdf --data values.json --flatten -o filled.pdf
 
 ## Engines
 
-`video` and `audio` use ffmpeg, and so does reading HEIC and AVIF. OCR uses tesseract. `deft doctor` shows what is available.
+`video` uses ffmpeg, and so does reading HEIC and AVIF. OCR uses tesseract. `deft doctor` shows what is available.
 
 ## Documentation
 

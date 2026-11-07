@@ -196,19 +196,6 @@ pub fn run(ctx: &Ctx, program: &Path, args: &[String]) -> Result<RunOutput> {
     Ok(RunOutput { stdout, stderr })
 }
 
-/// ffmpeg options that make Ogg audio Vorbis. Left to itself, an ffmpeg built
-/// without libvorbis silently writes FLAC into the file. `encoders` is the
-/// output of `ffmpeg -encoders`.
-pub fn vorbis_args(encoders: &str) -> Vec<String> {
-    let args: &[&str] = if encoders.contains("libvorbis") {
-        &["-c:a", "libvorbis"]
-    } else {
-        // The built-in encoder is in every build, but only does stereo.
-        &["-c:a", "vorbis", "-strict", "experimental", "-ac", "2"]
-    };
-    args.iter().map(|s| s.to_string()).collect()
-}
-
 /// Last `lines` non-empty lines, joined.
 pub fn tail(text: &str, lines: usize) -> String {
     let v: Vec<&str> = text

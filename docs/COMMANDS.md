@@ -103,19 +103,6 @@ Merge, convert, compress, subtitles, GIF, frames (ffmpeg)
 | `deft video to-gif` | Animated GIF: --fps, --size, --from, --to-time | ffmpeg, ffprobe | `deft video to-gif clip.mp4 -o clip.gif` |
 | `deft video watermark` | Add text or a logo: --text, --image, --position | ffmpeg, ffprobe | `deft video watermark clip.mp4 --text Sample -o marked.mp4` |
 
-## audio
-
-Convert, trim, normalize, denoise, cut silence (ffmpeg)
-
-| Command | What it does | Needs | Example |
-|---|---|---|---|
-| `deft audio info` | Duration, codec, sample rate, channels | ffmpeg, ffprobe | `deft audio info tone.mp3` |
-| `deft audio convert` | Change format: --to mp3\|m4a\|wav\|flac\|ogg\|opus | ffmpeg, ffprobe | `deft audio convert tone.mp3 --to wav -o tone.wav` |
-| `deft audio denoise` | Reduce steady background noise such as hiss | ffmpeg, ffprobe | `deft audio denoise tone.mp3 --level light -o clean.mp3` |
-| `deft audio normalize` | Even out loudness (EBU R128) | ffmpeg, ffprobe | `deft audio normalize tone.mp3 -o level.mp3` |
-| `deft audio remove-silence` | Cut silent parts: --threshold -40 --min-silence 0.5 | ffmpeg, ffprobe | `deft audio remove-silence gaps.wav -o tight.wav` |
-| `deft audio split` | Cut out a part: --from 0:10 --to-time 0:25 | ffmpeg, ffprobe | `deft audio split tone.mp3 --from 0:00 --to-time 0:01 -o part.mp3` |
-
 ## doc
 
 Word/ODT/RTF: to text, Markdown, HTML, PDF; find and replace

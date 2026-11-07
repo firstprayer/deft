@@ -295,8 +295,6 @@ pub const WORD_FORMS: &[(&str, &str)] = &[
     ("shrink", "compress"),
     ("combine", "merge"),
     ("join", "merge"),
-    ("mp3", "audio"),
-    ("sound", "audio"),
     ("mp4", "video"),
     ("movie", "video"),
     ("clip", "video"),

@@ -18,11 +18,6 @@ speed up this video | video speed
 slow motion | video speed
 fix shaky footage | video stabilize
 make a slideshow from photos | video from-images
-reduce background noise in a recording | audio denoise
-make this recording louder | audio normalize
-make all my podcast episodes the same volume | audio normalize
-cut out the silent parts | audio remove-silence
-convert wav to mp3 | audio convert
 shrink this pdf | pdf compress
 my pdf is too big to email | pdf compress
 combine these pdfs into one | pdf merge

@@ -25,13 +25,13 @@ Deft follows semantic versioning. Before 1.0, a minor version may change command
 
 ### Removed
 
-- The `archive` and `subtitle` groups, and `audio waveform`.
+- The `archive`, `subtitle` and `audio` groups. An agent does each audio job with one ffmpeg line.
 - `html screenshot` and `html to-pdf --browser`. Deft no longer uses Chrome.
 - The `youtube` group, `deft engine install` and `update`, `--offline` and `--install-engines`. Deft no longer touches the network.
-- Commands an agent does in one ordinary line: `file hash`, `base64`, `split`, `join`, `rename` and `organize`; `video crop`, `resize`, `rotate`, `mute`, `fade`, `repeat`, `reverse`, `stack`, `thumbnail`, `extract-audio` and `extract-subtitles`; `audio chunk`, `compress`, `fade`, `merge`, `reverse`, `speed`, `strip` and `volume`; `image diff`, `invert` and `sharpen`; `pdf grayscale` and `repair`; `video split` (`ffmpeg -ss … -to …`); `data query`; `sheet transpose`; `audio tag`; `email info`.
+- Commands an agent does in one ordinary line: `file hash`, `base64`, `split`, `join`, `rename` and `organize`; `video crop`, `resize`, `rotate`, `mute`, `fade`, `repeat`, `reverse`, `stack`, `thumbnail`, `extract-audio` and `extract-subtitles`; `image diff`, `invert` and `sharpen`; `pdf grayscale` and `repair`; `video split` (`ffmpeg -ss … -to …`); `data query`; `sheet transpose`; `email info`.
 - `sheet query`, `filter`, `sort`, `select`, `group`, `dedupe` and `join`: an agent does these in one line with sqlite3, DuckDB or pandas. Deft no longer includes SQLite.
 - The `email` and `file` groups.
-- Commands whose output was not good enough: `pdf to-docx`, `to-md`, `to-sheet` and `to-pdfa`; `slides to-pdf`; `md to-pptx`; `audio mix`.
+- Commands whose output was not good enough: `pdf to-docx`, `to-md`, `to-sheet` and `to-pdfa`; `slides to-pdf`; `md to-pptx`.
 
 ### Fixed
 
@@ -40,7 +40,7 @@ Deft follows semantic versioning. Before 1.0, a minor version may change command
 - `pdf merge` keeps every form and bookmark. `extract-sheets` uses real glyph widths.
 - HEIC photos from phones come out whole and upright. `image strip` removes everything after a JPEG's end. `image info` finds GPS in every format. Display P3 colour survives.
 - `image compress` never grows a file and fails when it misses a target. `image trim --speck` ignores dust.
-- `video from-images`, `merge`, `watermark`, `add-subtitles` and `info` handle mixed sizes, silent clips and phone rotation. `audio convert`, `split` and `normalize` work with cover art.
+- `video from-images`, `merge`, `watermark`, `add-subtitles` and `info` handle mixed sizes, silent clips and phone rotation.
 - Word readers keep footnotes, text boxes and nested tables. EPUB keeps every chapter and refuses DRM. HTML keeps the headline and declared charset.
 - Text options keep their spaces. `-o` works on report commands.
 - Report commands write their result as JSON with `-o name.json` instead of ignoring `-o`.

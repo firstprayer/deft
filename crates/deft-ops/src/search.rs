@@ -33,6 +33,9 @@ const DOUBTFUL: f32 = 0.5;
 
 /// Words for a kind of file, which name no job.
 const FILE_WORDS: &[&str] = &[
+    "audio",
+    "recording",
+    "sound",
     "document",
     "documents",
     "file",
