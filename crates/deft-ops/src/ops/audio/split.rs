@@ -38,10 +38,8 @@ fn run(job: &Job) -> Result<OpResult> {
     args.push("-i".to_string());
     args.push(input_path(job)?);
     // Audio has no keyframes, so a copy cuts as exactly as re-encoding, with no loss.
-    let copies = matches!(
-        format,
-        Format::Mp3 | Format::M4a | Format::Ogg | Format::Flac
-    );
+    // Not FLAC: a copy keeps the old length in its header, and encoding it is lossless.
+    let copies = matches!(format, Format::Mp3 | Format::M4a | Format::Ogg);
     if copies && format == source {
         args.extend(strs(&["-vn", "-c:a", "copy"]));
         args.push(out.display().to_string());

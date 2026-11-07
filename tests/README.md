@@ -69,7 +69,7 @@ Needs Ghostscript, ffmpeg, Pillow, openpyxl, PyYAML, toml, lxml and
 BeautifulSoup. Commands that call tesseract need it
 too. Cases that need ffmpeg are skipped when it is missing.
 
-Every command needs at least one case on a real file: a case with `data`, or an eval case whose reference runs it. `e2e_coverage` fails without one. The other cases can use generated files.
+Every command needs at least one case on a real file: a file downloaded from outside (`url` or `file` in `evals/data`), not one we generated or derived. It can be a case with `data`, or an eval case whose reference runs it. `e2e_coverage` fails without one. The other cases can use generated files.
 
 ## 3. Agent eval
 
