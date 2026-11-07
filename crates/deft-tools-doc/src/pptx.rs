@@ -109,6 +109,15 @@ fn read_slide(pkg: &Package, part: &str, images: &mut Vec<Image>) -> Result<Slid
             slide.body.append(&mut paragraphs);
         }
     }
+    for frame in doc.descendants().filter(|n| name(n) == "relIds") {
+        if let Some(path) = frame
+            .attribute((R, "dm"))
+            .and_then(|id| targets.get(id))
+            .map(|t| join(part, t))
+        {
+            slide.body.extend(diagram_text(pkg, &path));
+        }
+    }
     for table in doc.descendants().filter(|n| name(n) == "tbl") {
         for row in table.children().filter(|c| c.tag_name().name() == "tr") {
             let cells: Vec<String> = row
@@ -169,6 +178,68 @@ fn read_slide(pkg: &Package, part: &str, images: &mut Vec<Image>) -> Result<Slid
         }
     }
     Ok(slide)
+}
+
+/// The text of a SmartArt diagram, from its data part, in the diagram's own
+/// order: each point under its parent, by position.
+fn diagram_text(pkg: &Package, path: &str) -> Vec<Vec<Span>> {
+    let Some(text) = pkg.text(path) else {
+        return vec![];
+    };
+    let Ok(doc) = Xml::parse(&text) else {
+        return vec![];
+    };
+    let mut points: Vec<(String, Node)> = Vec::new();
+    let mut root = None;
+    for pt in doc.descendants().filter(|n| name(n) == "pt") {
+        let id = pt.attribute("modelId").unwrap_or("").to_string();
+        match pt.attribute("type").unwrap_or("node") {
+            "doc" => root = Some(id),
+            "node" | "asst" => points.push((id, pt)),
+            _ => {}
+        }
+    }
+    let mut kids: HashMap<String, Vec<(u32, String)>> = HashMap::new();
+    for c in doc.descendants().filter(|n| name(n) == "cxn") {
+        if c.attribute("type").unwrap_or("parOf") != "parOf" {
+            continue;
+        }
+        let (Some(from), Some(to)) = (c.attribute("srcId"), c.attribute("destId")) else {
+            continue;
+        };
+        let order = c
+            .attribute("srcOrd")
+            .and_then(|o| o.parse().ok())
+            .unwrap_or(0);
+        kids.entry(from.to_string())
+            .or_default()
+            .push((order, to.to_string()));
+    }
+    let mut order: Vec<String> = Vec::new();
+    let mut stack: Vec<String> = root.into_iter().collect();
+    while let Some(id) = stack.pop() {
+        if order.contains(&id) {
+            continue;
+        }
+        order.push(id.clone());
+        if let Some(list) = kids.get_mut(&id) {
+            list.sort();
+            stack.extend(list.iter().rev().map(|(_, k)| k.clone()));
+        }
+    }
+    // Points no connection reaches keep their place in the file.
+    points.sort_by_key(|(id, _)| order.iter().position(|o| o == id).unwrap_or(usize::MAX));
+    points
+        .iter()
+        .flat_map(|(_, pt)| {
+            pt.children()
+                .filter(|c| name(c) == "t")
+                .flat_map(|t| t.children().filter(|c| name(c) == "p"))
+                .map(paragraph_spans)
+                .collect::<Vec<_>>()
+        })
+        .filter(|s| s.iter().any(|x| !x.text.trim().is_empty()))
+        .collect()
 }
 
 /// Every slide, and the pictures they use.

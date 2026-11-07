@@ -414,3 +414,68 @@ fn a_link_around_blocks_goes_on_its_heading() {
     assert!(md.contains("Find out how."), "{md}");
     assert!(!md.contains("[##"), "{md}");
 }
+
+/// A one-slide deck from raw parts, for structures `pptx::write` never makes.
+fn deck(slide: &str, slide_rels: &str, parts: &[(&str, &str)]) -> Vec<u8> {
+    use std::io::Write;
+    const P: &str = "xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"";
+    const RELS: &str = "xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"";
+    let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let options = zip::write::SimpleFileOptions::default();
+    let mut all = vec![
+        (
+            "ppt/presentation.xml".to_string(),
+            format!(
+                "<p:presentation {P}><p:sldIdLst><p:sldId id=\"256\" r:id=\"rId1\"/></p:sldIdLst></p:presentation>"
+            ),
+        ),
+        (
+            "ppt/_rels/presentation.xml.rels".to_string(),
+            format!(
+                "<Relationships {RELS}><Relationship Id=\"rId1\" Type=\"slide\" Target=\"slides/slide1.xml\"/></Relationships>"
+            ),
+        ),
+        (
+            "ppt/slides/slide1.xml".to_string(),
+            format!("<p:sld {P}><p:cSld><p:spTree>{slide}</p:spTree></p:cSld></p:sld>"),
+        ),
+        (
+            "ppt/slides/_rels/slide1.xml.rels".to_string(),
+            format!("<Relationships {RELS}>{slide_rels}</Relationships>"),
+        ),
+    ];
+    all.extend(parts.iter().map(|(n, x)| (n.to_string(), x.to_string())));
+    for (name, xml) in all {
+        zip.start_file(name, options).unwrap();
+        zip.write_all(xml.as_bytes()).unwrap();
+    }
+    zip.finish().unwrap().into_inner()
+}
+
+#[test]
+fn smartart_text_is_read_in_diagram_order() {
+    let frame = "<p:graphicFrame><a:graphic><a:graphicData><dgm:relIds xmlns:dgm=\"http://schemas.openxmlformats.org/drawingml/2006/diagram\" r:dm=\"rId2\"/></a:graphicData></a:graphic></p:graphicFrame>";
+    let rels = "<Relationship Id=\"rId2\" Type=\"diagramData\" Target=\"../diagrams/data1.xml\"/>";
+    let pt = |id: &str, text: &str| {
+        format!(
+            "<dgm:pt modelId=\"{id}\"><dgm:t><a:p><a:r><a:t>{text}</a:t></a:r></a:p></dgm:t></dgm:pt>"
+        )
+    };
+    // The file lists the second postulate first; the connections say otherwise.
+    let data = format!(
+        "<dgm:dataModel xmlns:dgm=\"http://schemas.openxmlformats.org/drawingml/2006/diagram\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><dgm:ptLst><dgm:pt modelId=\"0\" type=\"doc\"/>{}{}<dgm:pt modelId=\"9\" type=\"sibTrans\"><dgm:t><a:p><a:r><a:t>not text</a:t></a:r></a:p></dgm:t></dgm:pt></dgm:ptLst><dgm:cxnLst><dgm:cxn modelId=\"c1\" srcId=\"0\" destId=\"1\" srcOrd=\"0\"/><dgm:cxn modelId=\"c2\" srcId=\"0\" destId=\"2\" srcOrd=\"1\"/><dgm:cxn modelId=\"c3\" type=\"presOf\" srcId=\"2\" destId=\"0\" srcOrd=\"0\"/></dgm:cxnLst></dgm:dataModel>",
+        pt("2", "2- A line can be extended."),
+        pt("1", "1- A line can be drawn."),
+    );
+    let bytes = deck(frame, rels, &[("ppt/diagrams/data1.xml", &data)]);
+    let (slides, _) = pptx::read(&bytes).unwrap();
+    let text: Vec<String> = slides[0]
+        .body
+        .iter()
+        .map(|p| p.iter().map(|s| s.text.as_str()).collect())
+        .collect();
+    assert_eq!(
+        text,
+        ["1- A line can be drawn.", "2- A line can be extended."]
+    );
+}
