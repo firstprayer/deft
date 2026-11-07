@@ -2,7 +2,7 @@ use deft_core::prelude::*;
 
 pub static GROUP: Group = Group {
     name: "html",
-    summary: "HTML to Markdown, text, Word, PDF; screenshots",
+    summary: "HTML to Markdown, text, Word and PDF",
     aliases: &["htm", "webpage"],
     synonyms: &[
         ("markdown", "to-md"),
@@ -10,8 +10,6 @@ pub static GROUP: Group = Group {
         ("txt", "to-text"),
         ("pdf", "to-pdf"),
         ("docx", "to-docx"),
-        ("png", "screenshot"),
-        ("image", "screenshot"),
     ],
     order: 52,
 };

@@ -47,16 +47,20 @@ pub fn main_content(html: &str) -> String {
         if let Some(inner) = element(html, &lower, tag)
             && inner.len() > 200
         {
-            return without_chrome(inner);
+            // Inside an article, <header> holds its headline and byline.
+            return without(inner, &["nav", "aside", "form"]);
         }
     }
-    without_chrome(element(html, &lower, "body").unwrap_or(html))
+    without(
+        element(html, &lower, "body").unwrap_or(html),
+        &["nav", "aside", "footer", "header", "form"],
+    )
 }
 
-/// Remove navigation, headers, footers and sidebars.
-fn without_chrome(html: &str) -> String {
+/// Remove these elements, with everything inside them.
+fn without(html: &str, tags: &[&str]) -> String {
     let mut out = html.to_string();
-    for tag in ["nav", "aside", "footer", "header", "form"] {
+    for tag in tags {
         loop {
             let lower = out.to_ascii_lowercase();
             let Some(inner) = element(&out, &lower, tag) else {

@@ -40,12 +40,6 @@ pub const ENGINES: &[Engine] = &[
         manual: "brew install sqlite | apt install sqlite3 | winget install sqlite",
     },
     Engine {
-        name: "chrome",
-        purpose: "exact web page rendering (Chrome, Chromium or Edge)",
-        version_arg: "--version",
-        manual: "install Google Chrome or Chromium",
-    },
-    Engine {
         name: "tesseract",
         purpose: "reading text in images (OCR)",
         version_arg: "--version",
@@ -88,34 +82,7 @@ pub fn locate(ctx: &Ctx, name: &str) -> Option<PathBuf> {
     }
     let path = std::env::var_os("PATH")?;
     let dirs: Vec<PathBuf> = std::env::split_paths(&path).collect();
-    let on_path = |n: &str| dirs.iter().map(|d| d.join(exe(n))).find(|p| p.is_file());
-    if let Some(p) = on_path(name) {
-        return Some(p);
-    }
-    match name {
-        "chrome" => browser(&on_path),
-        _ => None,
-    }
-}
-
-fn browser(on_path: &dyn Fn(&str) -> Option<PathBuf>) -> Option<PathBuf> {
-    const NAMES: &[&str] = &[
-        "google-chrome",
-        "google-chrome-stable",
-        "chromium",
-        "chromium-browser",
-        "microsoft-edge",
-    ];
-    const APPS: &[&str] = &[
-        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-        "/Applications/Chromium.app/Contents/MacOS/Chromium",
-        "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-        "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-    ];
-    NAMES
-        .iter()
-        .find_map(|n| on_path(n))
-        .or_else(|| APPS.iter().map(PathBuf::from).find(|p| p.is_file()))
+    dirs.iter().map(|d| d.join(exe(name))).find(|p| p.is_file())
 }
 
 /// Find an engine or fail with ENGINE_MISSING.
@@ -133,11 +100,6 @@ pub fn require(ctx: &Ctx, name: &str, needed_by: &str) -> Result<PathBuf> {
 }
 
 pub fn version(path: &Path, version_arg: &str) -> Option<String> {
-    // On Windows a browser opens a window for --version and never exits.
-    let name = path.file_stem()?.to_string_lossy().to_lowercase();
-    if cfg!(windows) && (name.contains("chrome") || name == "msedge") {
-        return None;
-    }
     version_within(path, version_arg, VERSION_TIMEOUT)
 }
 
@@ -315,37 +277,4 @@ pub fn ocr_layer(
     ]);
     run(ctx, &program, &args).map_err(|e| tesseract_error(e, lang))?;
     Ok(base.with_extension("layer.pdf"))
-}
-
-/// Run a browser that writes `output`, with a time limit. A page can stop it
-/// for ever, for example with a script that opens a dialog nobody can answer.
-/// Chrome can also crash while shutting down, after the file is written, so
-/// the file decides whether the job worked, not the exit code.
-pub fn run_browser(ctx: &Ctx, program: &Path, args: &[String], output: &Path) -> Result<()> {
-    let mut limited = ctx.clone();
-    limited.timeout = ctx.timeout.or(Some(Duration::from_secs(60)));
-    match run(&limited, program, args) {
-        Err(e) if e.code == ErrorCode::EngineFailed => {
-            let written = std::fs::metadata(output).is_ok_and(|m| m.len() > 0);
-            if written { Ok(()) } else { Err(e) }
-        }
-        other => other.map(|_| ()),
-    }
-}
-
-/// Headless browser arguments. The network is blocked: these commands work on
-/// local files, and deft only touches the network in `network` operations.
-pub fn browser_args(profile: &Path) -> Vec<String> {
-    [
-        "--headless=new",
-        "--disable-gpu",
-        "--no-first-run",
-        "--no-default-browser-check",
-        "--hide-scrollbars",
-        "--host-resolver-rules=MAP * ~NOTFOUND",
-    ]
-    .iter()
-    .map(|s| s.to_string())
-    .chain([format!("--user-data-dir={}", profile.display())])
-    .collect()
 }

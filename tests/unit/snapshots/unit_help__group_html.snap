@@ -3,9 +3,8 @@ source: crates/deft-cli/../../tests/unit/help.rs
 expression: "help::group(g.name)"
 ---
 deft html - commands (input -> output)
-  screenshot  html -> png   Render a local page to an image with Chrome: --size 1280x800
-  to-docx     html -> docx  Convert the content to a Word document
-  to-md       html -> md    Convert to Markdown; scripts and styles are dropped
-  to-pdf      html -> pdf   Make a PDF; --browser keeps the CSS [beta]
-  to-text     html -> txt   Extract the readable text
+  to-docx  html -> docx  Convert the content to a Word document
+  to-md    html -> md    Convert to Markdown; scripts and styles are dropped
+  to-pdf   html -> pdf   Typeset as PDF, content not layout [beta]
+  to-text  html -> txt   Extract the readable text
 More: deft html <command> --help
