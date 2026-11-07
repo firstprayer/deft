@@ -150,8 +150,9 @@ impl Document {
         trimmed + "\n"
     }
 
+    /// Words as Word counts them; see `deft_core::text::count_words`.
     pub fn words(&self) -> usize {
-        self.text().split_whitespace().count()
+        deft_core::text::count_words(&self.text())
     }
 }
 
