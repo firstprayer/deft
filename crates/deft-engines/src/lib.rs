@@ -220,11 +220,162 @@ fn tesseract_args(image: &Path, output: &str, lang: &str) -> Vec<String> {
     ]
 }
 
-/// Explain the common failure: a language pack that is not installed.
+/// Language codes of the tesseract models (tessdata), plus `script/...`.
+const TESSERACT_LANGS: &[&str] = &[
+    "afr",
+    "amh",
+    "ara",
+    "asm",
+    "aze",
+    "aze_cyrl",
+    "bel",
+    "ben",
+    "bod",
+    "bos",
+    "bre",
+    "bul",
+    "cat",
+    "ceb",
+    "ces",
+    "chi_sim",
+    "chi_sim_vert",
+    "chi_tra",
+    "chi_tra_vert",
+    "chr",
+    "cos",
+    "cym",
+    "dan",
+    "deu",
+    "deu_latf",
+    "div",
+    "dzo",
+    "ell",
+    "eng",
+    "enm",
+    "epo",
+    "equ",
+    "est",
+    "eus",
+    "fao",
+    "fas",
+    "fil",
+    "fin",
+    "fra",
+    "frk",
+    "frm",
+    "fry",
+    "gla",
+    "gle",
+    "glg",
+    "grc",
+    "guj",
+    "hat",
+    "heb",
+    "hin",
+    "hrv",
+    "hun",
+    "hye",
+    "iku",
+    "ind",
+    "isl",
+    "ita",
+    "ita_old",
+    "jav",
+    "jpn",
+    "jpn_vert",
+    "kan",
+    "kat",
+    "kat_old",
+    "kaz",
+    "khm",
+    "kir",
+    "kmr",
+    "kor",
+    "kor_vert",
+    "lao",
+    "lat",
+    "lav",
+    "lit",
+    "ltz",
+    "mal",
+    "mar",
+    "mkd",
+    "mlt",
+    "mon",
+    "mri",
+    "msa",
+    "mya",
+    "nep",
+    "nld",
+    "nor",
+    "oci",
+    "ori",
+    "osd",
+    "pan",
+    "pol",
+    "por",
+    "pus",
+    "que",
+    "ron",
+    "rus",
+    "san",
+    "sin",
+    "slk",
+    "slv",
+    "snd",
+    "snum",
+    "spa",
+    "spa_old",
+    "sqi",
+    "srp",
+    "srp_latn",
+    "sun",
+    "swa",
+    "swe",
+    "syr",
+    "tam",
+    "tat",
+    "tel",
+    "tgk",
+    "tha",
+    "tir",
+    "ton",
+    "tur",
+    "uig",
+    "ukr",
+    "urd",
+    "uzb",
+    "uzb_cyrl",
+    "vie",
+    "yid",
+    "yor",
+];
+
+/// Check `--lang`: tesseract codes joined by `+`. A code tesseract does not
+/// have would otherwise reach it and come back as a missing language pack.
+pub fn check_tesseract_lang(lang: &str) -> std::result::Result<(), String> {
+    for code in lang.split('+') {
+        let script = code.strip_prefix("script/").is_some_and(|s| {
+            !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        });
+        if !script && !TESSERACT_LANGS.contains(&code) {
+            return Err(format!(
+                "{code:?} is not a tesseract language; use codes such as eng, deu, chi_sim, joined by +"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Explain the common failure: a language pack that is not installed, which
+/// is a missing part of the engine, not an engine error.
 fn tesseract_error(mut e: deft_core::error::DeftError, lang: &str) -> deft_core::error::DeftError {
     if e.message.contains("Failed loading language") || e.message.contains("Error opening data") {
+        e.code = ErrorCode::EngineMissing;
+        e.message = format!("tesseract has no language data for {lang}");
+        let pack = lang.replace('+', " tesseract-ocr-");
         e.hint = Some(format!(
-            "language data for {lang} is missing: brew install tesseract-lang | apt install tesseract-ocr-{lang}"
+            "install it: brew install tesseract-lang | apt install tesseract-ocr-{pack}"
         ));
     }
     e
@@ -256,6 +407,17 @@ pub fn ocr_layer(
         "textonly_pdf=1".to_string(),
         "pdf".to_string(),
     ]);
-    run(ctx, &program, &args).map_err(|e| tesseract_error(e, lang))?;
-    Ok(base.with_extension("layer.pdf"))
+    let out = run(ctx, &program, &args).map_err(|e| tesseract_error(e, lang))?;
+    let pdf = base.with_extension("layer.pdf");
+    // Without its pdf.ttf in the tessdata folder tesseract writes no PDF and
+    // still exits 0.
+    if std::fs::metadata(&pdf).map_or(true, |m| m.len() == 0) {
+        let why = tail(&out.stderr, 3);
+        return Err(err(
+            ErrorCode::EngineFailed,
+            format!("tesseract wrote no PDF layer: {why}"),
+        )
+        .hint("tesseract needs pdf.ttf in its tessdata folder (TESSDATA_PREFIX) to write PDF"));
+    }
+    Ok(pdf)
 }
