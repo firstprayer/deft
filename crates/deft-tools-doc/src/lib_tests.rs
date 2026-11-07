@@ -658,3 +658,76 @@ fn rtf_keeps_tables_lists_notes_links_and_pictures() {
     assert_eq!(doc.images[0].name, "image1.png");
     assert!(md.contains("After ![](image1.png)"), "{md}");
 }
+
+fn odt(content: &str, manifest: &str, parts: &[(&str, &[u8])]) -> Vec<u8> {
+    use std::io::Write;
+    let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let options = zip::write::SimpleFileOptions::default();
+    let ns = "xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" xmlns:draw=\"urn:oasis:names:tc:opendocument:xmlns:drawing:1.0\" xmlns:svg=\"urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\"";
+    let xml = format!(
+        "<office:document-content {ns}><office:body><office:text>{content}</office:text></office:body></office:document-content>"
+    );
+    let mut all: Vec<(&str, Vec<u8>)> = vec![
+        ("content.xml", xml.into_bytes()),
+        ("META-INF/manifest.xml", manifest.as_bytes().to_vec()),
+    ];
+    all.extend(parts.iter().map(|(n, b)| (*n, b.to_vec())));
+    for (name, data) in all {
+        zip.start_file(name, options).unwrap();
+        zip.write_all(&data).unwrap();
+    }
+    zip.finish().unwrap().into_inner()
+}
+
+#[test]
+fn odt_keeps_notes_fields_shapes_indexes_and_picture_links() {
+    let content = "<text:tracked-changes><text:changed-region><text:deletion><text:p>gone</text:p></text:deletion></text:changed-region></text:tracked-changes>\
+<text:h text:outline-level=\"1\">Apache Tika <office:annotation><text:p>a comment</text:p></office:annotation>Test</text:h>\
+<text:p>Rather<text:note text:id=\"n1\"><text:note-citation>1</text:note-citation><text:note-body><text:p>A simple footnote</text:p></text:note-body></text:note> difficult.</text:p>\
+<text:p><draw:rect><svg:title>Rect</svg:title><text:p>A rectangle</text:p></draw:rect></text:p>\
+<text:p>Project <text:bibliography-mark text:identifier=\"Solr\">[Solr]</text:bibliography-mark>, title: <text:bookmark-ref>Apache Tika Test</text:bookmark-ref>, by<text:s text:c=\"2\"/>me</text:p>\
+<text:p><draw:a xlink:href=\"https://tika.apache.org/\"><draw:frame><draw:image xlink:href=\"Pictures/p.png\"/><svg:title>Visit Tika</svg:title></draw:frame></draw:a></text:p>\
+<text:bibliography><text:bibliography-source><text:index-title-template>Template</text:index-title-template></text:bibliography-source><text:index-body><text:index-title><text:p>Bibliography</text:p></text:index-title><text:p>Solr: Various, 2009</text:p></text:index-body></text:bibliography>";
+    let bytes = odt(content, "<manifest/>", &[("Pictures/p.png", b"\x89PNG")]);
+    let doc = odf::read(&bytes).unwrap();
+    let md = markdown::render(&doc);
+    assert!(md.starts_with("# Apache Tika Test\n"), "{md}");
+    assert!(md.contains("Rather[^1] difficult."), "{md}");
+    assert!(md.contains("[^1]: A simple footnote"), "{md}");
+    assert!(md.contains("A rectangle") && !md.contains("Rect\n"), "{md}");
+    assert!(
+        md.contains("Project \\[Solr\\], title: Apache Tika Test, by  me"),
+        "{md}"
+    );
+    assert!(
+        md.contains("[![Visit Tika](p.png)](https://tika.apache.org/)"),
+        "{md}"
+    );
+    assert!(md.contains("Bibliography\n\nSolr: Various, 2009"), "{md}");
+    assert!(
+        !md.contains("gone") && !md.contains("comment") && !md.contains("Template"),
+        "{md}"
+    );
+    let locked = odt("<text:p>x</text:p>", "<manifest:encryption-data/>", &[]);
+    let e = odf::read(&locked).unwrap_err();
+    assert_eq!(e.code, deft_core::error::ErrorCode::InputEncrypted);
+}
+
+#[test]
+fn book_pictures_keep_their_titles_and_spaces() {
+    let book = epub::Book {
+        chapters: vec!["<p><img src=\"images/cover.png\" alt=\"Cover Image\" title=\"A/B\"/> <img src=\"../img/my%20pic.jpg\" alt=\"\"/></p>".into()],
+        ..Default::default()
+    };
+    let md = book.markdown().unwrap();
+    assert!(md.contains("![Cover Image](cover.png \"A/B\")"), "{md}");
+    assert!(md.contains("![](my%20pic.jpg)"), "{md}");
+    let doc = Document {
+        blocks: vec![Block::Paragraph(vec![Span {
+            image: Some("Object 1".into()),
+            ..Default::default()
+        }])],
+        ..Default::default()
+    };
+    assert_eq!(markdown::render(&doc), "![](Object%201)\n");
+}

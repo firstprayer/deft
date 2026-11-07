@@ -139,6 +139,33 @@ impl Document {
     }
 }
 
+/// Drop blank spans and spaces at both ends of a line of spans.
+pub(crate) fn trim_spans(spans: &mut Vec<Span>) {
+    while spans
+        .last()
+        .is_some_and(|s| s.image.is_none() && s.text.trim().is_empty())
+    {
+        spans.pop();
+    }
+    if let Some(last) = spans.last_mut()
+        && last.image.is_none()
+    {
+        last.text = last.text.trim_end().to_string();
+    }
+    while spans
+        .first()
+        .is_some_and(|s| s.image.is_none() && s.text.trim().is_empty())
+    {
+        spans.remove(0);
+    }
+    if let Some(first) = spans.first_mut()
+        && first.image.is_none()
+        && !first.note
+    {
+        first.text = first.text.trim_start().to_string();
+    }
+}
+
 pub(crate) fn bad(what: &str, e: impl std::fmt::Display) -> deft_core::error::DeftError {
     err(ErrorCode::InputCorrupt, format!("{what}: {e}"))
 }

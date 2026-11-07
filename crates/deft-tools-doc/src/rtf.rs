@@ -256,7 +256,7 @@ impl Reader {
         }
         self.end_table();
         let mut spans = para.spans;
-        trim(&mut spans);
+        crate::trim_spans(&mut spans);
         if spans.is_empty() {
             return;
         }
@@ -299,7 +299,7 @@ impl Reader {
         self.para.in_table = true;
         self.paragraph(s);
         let mut cell = std::mem::take(&mut self.cell);
-        trim(&mut cell);
+        crate::trim_spans(&mut cell);
         self.row.push(cell);
     }
 
@@ -356,32 +356,6 @@ impl Reader {
         };
         self.links.push(url.filter(|u| !u.is_empty()));
         self.links.len() - 1
-    }
-}
-
-fn trim(spans: &mut Vec<Span>) {
-    while spans
-        .last()
-        .is_some_and(|s| s.image.is_none() && s.text.trim().is_empty())
-    {
-        spans.pop();
-    }
-    if let Some(last) = spans.last_mut()
-        && last.image.is_none()
-    {
-        last.text = last.text.trim_end().to_string();
-    }
-    while spans
-        .first()
-        .is_some_and(|s| s.image.is_none() && s.text.trim().is_empty())
-    {
-        spans.remove(0);
-    }
-    if let Some(first) = spans.first_mut()
-        && first.image.is_none()
-        && !first.note
-    {
-        first.text = first.text.trim_start().to_string();
     }
 }
 
@@ -470,7 +444,7 @@ pub fn read(bytes: &[u8]) -> Document {
                 }
                 if closed.note && !parent.note {
                     let mut note = std::mem::take(&mut r.note);
-                    trim(&mut note);
+                    crate::trim_spans(&mut note);
                     r.notes.push(note);
                 }
             }
