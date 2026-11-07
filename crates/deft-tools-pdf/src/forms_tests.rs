@@ -152,3 +152,30 @@ fn a_dynamic_xfa_form_is_not_filled() {
     let e = fill(&mut doc, &values(&[("First Name", json!("Ada"))])).unwrap_err();
     assert_eq!(e.code, ErrorCode::InputUnsupported);
 }
+
+#[test]
+fn flattening_drops_the_field_objects() {
+    let mut doc = form();
+    fill(&mut doc, &values(&[("First Name", json!("Ada"))])).unwrap();
+    // A tagged form: the structure tree points at a widget.
+    let widget = fields(&doc)
+        .into_iter()
+        .find(|f| f.name == "First Name")
+        .unwrap()
+        .widgets[0];
+    let objr = dictionary! { "Type" => "OBJR", "Obj" => widget };
+    let elem = doc.add_object(dictionary! {
+        "Type" => "StructElem", "S" => "Form", "K" => vec![0.into(), Object::Dictionary(objr)],
+    });
+    let root = doc.add_object(dictionary! { "Type" => "StructTreeRoot", "K" => elem });
+    doc.catalog_mut().unwrap().set("StructTreeRoot", root);
+    flatten(&mut doc).unwrap();
+    let left = doc
+        .objects
+        .values()
+        .filter(|o| o.as_dict().is_ok_and(|d| d.has(b"FT") || d.has(b"T")))
+        .count();
+    assert_eq!(left, 0, "no field or widget stays in the file");
+    let k = doc.get_dictionary(elem).unwrap().get(b"K").unwrap();
+    assert_eq!(k.as_array().unwrap(), &vec![Object::Integer(0)]);
+}

@@ -936,6 +936,7 @@ fn placement(bbox: [f64; 4], matrix: [f64; 6], rect: [f64; 4]) -> [f64; 6] {
 /// can be edited. Links stay. Returns how many were flattened.
 pub fn flatten(doc: &mut Document) -> Result<usize> {
     let mut total = 0;
+    let mut removed = HashSet::new();
     for page in page_ids(doc) {
         let annots: Vec<Object> = doc
             .get_dictionary(page)
@@ -961,6 +962,9 @@ pub fn flatten(doc: &mut Document) -> Result<usize> {
             if matches!(subtype, b"Link" | b"Popup") {
                 keep.push(a.clone());
                 continue;
+            }
+            if let Ok(id) = a.as_reference() {
+                removed.insert(id);
             }
             let flags = dict
                 .get(b"F")
@@ -993,7 +997,84 @@ pub fn flatten(doc: &mut Document) -> Result<usize> {
     if let Ok(catalog) = doc.catalog_mut() {
         catalog.remove(b"AcroForm");
     }
+    // The fields and their values must not stay in the file, reachable from
+    // the structure tree or from nothing.
+    drop_object_refs(doc, &removed);
+    crate::prune(doc);
     Ok(total)
+}
+
+/// Remove the structure tree's references (/OBJR) to annotations that are
+/// gone. The marked content of what was baked into the page stays.
+fn drop_object_refs(doc: &mut Document, gone: &HashSet<ObjectId>) {
+    if gone.is_empty() {
+        return;
+    }
+    let Some(root) = doc
+        .catalog()
+        .ok()
+        .and_then(|c| c.get(b"StructTreeRoot").ok())
+        .and_then(|o| o.as_reference().ok())
+    else {
+        return;
+    };
+    let is_gone = |o: &Object, objects: &BTreeMap<ObjectId, Object>| {
+        let o = match o {
+            Object::Reference(id) => objects.get(id).unwrap_or(o),
+            _ => o,
+        };
+        o.as_dict().is_ok_and(|d| {
+            d.get(b"Type").and_then(Object::as_name).ok() == Some(b"OBJR")
+                && d.get(b"Obj")
+                    .and_then(Object::as_reference)
+                    .is_ok_and(|id| gone.contains(&id))
+        })
+    };
+    // Cut the references from every /K in an object, direct children included,
+    // and return the objects it refers to.
+    fn clean(
+        o: &mut Object,
+        objects: &BTreeMap<ObjectId, Object>,
+        is_gone: &dyn Fn(&Object, &BTreeMap<ObjectId, Object>) -> bool,
+        next: &mut Vec<ObjectId>,
+    ) {
+        match o {
+            Object::Reference(id) => next.push(*id),
+            Object::Array(a) => a.iter_mut().for_each(|x| clean(x, objects, is_gone, next)),
+            Object::Dictionary(d) => {
+                if let Ok(Object::Array(k)) = d.get_mut(b"K") {
+                    k.retain(|x| !is_gone(x, objects));
+                }
+                if d.get(b"K").is_ok_and(|k| is_gone(k, objects)) {
+                    d.remove(b"K");
+                }
+                for (key, v) in d.iter_mut() {
+                    // Up the tree, and into pages and content, is not this walk.
+                    if !matches!(
+                        key.as_slice(),
+                        b"P" | b"Pg" | b"Obj" | b"Stm" | b"ParentTree"
+                    ) {
+                        clean(v, objects, is_gone, next);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut stack = vec![root];
+    let mut seen = HashSet::new();
+    while let Some(id) = stack.pop() {
+        if !seen.insert(id) {
+            continue;
+        }
+        let Some(mut o) = doc.objects.remove(&id) else {
+            continue;
+        };
+        if o.as_dict().is_ok() {
+            clean(&mut o, &doc.objects, &is_gone, &mut stack);
+        }
+        doc.objects.insert(id, o);
+    }
 }
 
 #[cfg(test)]
