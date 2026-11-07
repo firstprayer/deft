@@ -5,6 +5,7 @@ use deft_core::error::{ErrorCode, Result, err};
 use lopdf::{Dictionary, Document, Object, ObjectId, Stream, dictionary};
 use std::collections::{HashMap, HashSet};
 
+mod catalog;
 pub mod compare;
 pub mod extract;
 pub mod forms;
@@ -401,10 +402,11 @@ fn detach_removed_pages(doc: &mut Document, kept: &[ObjectId]) -> Result<()> {
     outline::keep_pages(doc, &keep);
     forms::keep_fields_on(doc, kept);
     if let Ok(catalog) = doc.catalog_mut() {
-        for key in [&b"StructTreeRoot"[..], b"Dests", b"Names", b"OpenAction"] {
+        for key in [&b"StructTreeRoot"[..], b"Dests", b"OpenAction"] {
             catalog.remove(key);
         }
     }
+    catalog::keep_document_names(doc);
     let points_away = |doc: &Document, annot: &Dictionary| {
         outline::dest_page(doc, annot).is_some_and(|id| !keep.contains(&id))
     };
@@ -444,12 +446,19 @@ pub fn select(doc: &mut Document, indexes: &[usize]) -> Result<()> {
     }
     flatten_inheritance(doc);
     let ids = page_ids(doc);
+    let labels = catalog::page_labels(doc, ids.len());
     let picked: Vec<ObjectId> = indexes.iter().map(|&i| ids[i]).collect();
     let dropped = ids.iter().any(|id| !picked.contains(id));
     if dropped {
         detach_removed_pages(doc, &picked)?;
     }
-    set_page_tree(doc, &picked)
+    set_page_tree(doc, &picked)?;
+    // Each page keeps the label it had.
+    if let Some(labels) = labels {
+        let kept: Vec<_> = indexes.iter().map(|&i| labels[i].clone()).collect();
+        catalog::set_page_labels(doc, &kept);
+    }
+    Ok(())
 }
 
 /// Add `offset` to every object number. lopdf's renumbering takes seconds on
@@ -476,12 +485,13 @@ fn shift_ids(doc: &mut Document, offset: u32) {
     doc.max_id += offset;
 }
 
-/// Join documents in order. The first document's catalog is kept, and the forms
-/// and bookmarks of the others join it.
+/// Join documents in order. The first document's catalog is kept, and the forms,
+/// bookmarks, attachments, page labels and layers of the others join it.
 pub fn merge(mut docs: Vec<Document>) -> Result<Document> {
     let mut base = docs.remove(0);
     flatten_inheritance(&mut base);
     let mut all = page_ids(&base);
+    let mut labels = vec![(all.len(), catalog::page_labels(&base, all.len()))];
     for mut other in docs {
         // A protected input keeps the result protected. Older revisions derive
         // the key from the file ID, so the ID goes with the protection.
@@ -501,8 +511,11 @@ pub fn merge(mut docs: Vec<Document>) -> Result<Document> {
         outline::inline_named_dests(&mut other);
         shift_ids(&mut other, base.max_id);
         let pages = page_ids(&other);
+        labels.push((pages.len(), catalog::page_labels(&other, pages.len())));
         let bookmarks = other.catalog().ok().and_then(outline::root_of);
         let form = forms::acro_form(&other).cloned();
+        let attachments = catalog::attachments(&other);
+        let layers = catalog::layers(&other);
         let skip: HashSet<ObjectId> = other
             .objects
             .iter()
@@ -526,8 +539,15 @@ pub fn merge(mut docs: Vec<Document>) -> Result<Document> {
         if let Some(form) = form {
             forms::append_form(&mut base, &form);
         }
+        catalog::append_attachments(&mut base, attachments);
+        if let Some(layers) = layers {
+            catalog::append_layers(&mut base, layers);
+        }
     }
     set_page_tree(&mut base, &all)?;
+    if let Some(labels) = catalog::joined_labels(&labels) {
+        catalog::set_page_labels(&mut base, &labels);
+    }
     Ok(base)
 }
 
