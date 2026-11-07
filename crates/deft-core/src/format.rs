@@ -49,6 +49,7 @@ formats! {
     Mov => "mov", "video/quicktime", "mov";
     Mkv => "mkv", "video/x-matroska", "mkv";
     Avi => "avi", "video/x-msvideo", "avi";
+    Ogv => "ogv", "video/ogg", "ogv";
     Mp3 => "mp3", "audio/mpeg", "mp3";
     Wav => "wav", "audio/wav", "wav";
     M4a => "m4a" | "aac", "audio/mp4", "m4a";
@@ -124,7 +125,7 @@ impl Format {
     pub fn is_video(self) -> bool {
         matches!(
             self,
-            Format::Mp4 | Format::Webm | Format::Mov | Format::Mkv | Format::Avi
+            Format::Mp4 | Format::Webm | Format::Mov | Format::Mkv | Format::Avi | Format::Ogv
         )
     }
     pub fn is_audio(self) -> bool {
@@ -238,6 +239,9 @@ pub fn sniff(head: &[u8], path: Option<&Path>) -> Option<Format> {
         return Some(
             if find(&head[..head.len().min(64)], b"OpusHead").is_some() {
                 Format::Opus
+            } else if find(head, b"\x80theora").is_some() || by_ext == Some(Format::Ogv) {
+                // Ogg holding Theora is a video, not a sound.
+                Format::Ogv
             } else {
                 Format::Ogg
             },

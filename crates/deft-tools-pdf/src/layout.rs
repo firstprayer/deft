@@ -46,7 +46,12 @@ fn cells(line: &[Run]) -> Vec<Run> {
     for run in line {
         match out.last_mut() {
             Some(last) if run.x - (last.x + last.width) < last.size * 0.7 => {
-                last.text.push(' ');
+                // Some writers draw every letter on its own: touching pieces
+                // are one word, and only a visible gap is a space.
+                let touching = run.x - (last.x + last.width) < last.size * 0.12;
+                if !touching && !last.text.ends_with(' ') && !run.text.starts_with(' ') {
+                    last.text.push(' ');
+                }
                 last.text.push_str(&run.text);
                 last.width = run.x + run.width - last.x;
             }

@@ -10,6 +10,7 @@ pub const VIDEO: &[Format] = &[
     Format::Mov,
     Format::Mkv,
     Format::Avi,
+    Format::Ogv,
 ];
 pub const FFMPEG: &[&str] = &["ffmpeg", "ffprobe"];
 

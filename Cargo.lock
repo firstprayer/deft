@@ -957,6 +957,8 @@ dependencies = [
  "lopdf",
  "serde_json",
  "similar",
+ "zune-core",
+ "zune-jpeg",
 ]
 
 [[package]]

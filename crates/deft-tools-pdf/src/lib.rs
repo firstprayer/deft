@@ -1008,7 +1008,7 @@ pub fn recompress_images(doc: &mut Document, policy: ImagePolicy) -> usize {
         .filter(|(_, s)| s.dict.get(b"Subtype").and_then(Object::as_name).ok() == Some(b"Image"))
         .filter_map(|(id, s)| {
             let space = s.dict.get(b"ColorSpace").ok()?;
-            Some((id, s, extract::gray_or_rgb_channels(doc, space)?))
+            Some((id, s, extract::decodable_channels(doc, space)?))
         })
         .collect();
     let workers = std::thread::available_parallelism()
@@ -1040,6 +1040,47 @@ pub fn recompress_images(doc: &mut Document, policy: ImagePolicy) -> usize {
     n
 }
 
+/// A CMYK or YCCK JPEG as RGB, decoded the way the page renderer (hayro,
+/// after pdf.js) decodes it, so the picture keeps its colours.
+fn cmyk_jpeg(data: &[u8], w: u32, h: u32) -> Option<image::DynamicImage> {
+    use zune_core::bytestream::ZCursor;
+    use zune_core::colorspace::ColorSpace;
+    use zune_core::options::DecoderOptions;
+    let mut decoder = zune_jpeg::JpegDecoder::new(ZCursor::new(data));
+    decoder.decode_headers().ok()?;
+    let ycck = decoder.input_colorspace()? == ColorSpace::YCCK;
+    let out = if ycck {
+        ColorSpace::YCCK
+    } else {
+        ColorSpace::CMYK
+    };
+    decoder.set_options(DecoderOptions::default().jpeg_set_out_colorspace(out));
+    let mut pixels = decoder.decode().ok()?;
+    if pixels.len() != (w * h * 4) as usize {
+        return None;
+    }
+    if ycck {
+        // As pdf.js does: YCC to CMY, with K as stored.
+        for c in pixels.chunks_mut(4) {
+            let (y, cb, cr) = (c[0] as f32, c[1] as f32, c[2] as f32);
+            c[0] = (434.456 - y - 1.402 * cr) as u8;
+            c[1] = (119.541 - y + 0.344 * cb + 0.714 * cr) as u8;
+            c[2] = (481.816 - y - 1.772 * cb) as u8;
+        }
+    }
+    // Plain CMYK to RGB, as the renderer does without a colour profile.
+    let rgb: Vec<u8> = pixels
+        .chunks_exact(4)
+        .flat_map(|p| {
+            let k = 255 - p[3] as u32;
+            [0, 1, 2].map(|i| ((255 - p[i] as u32) * k / 255) as u8)
+        })
+        .collect();
+    Some(image::DynamicImage::ImageRgb8(image::RgbImage::from_raw(
+        w, h, rgb,
+    )?))
+}
+
 fn recompress_one(s: &Stream, comps: usize, policy: ImagePolicy, cap: u32) -> Option<Stream> {
     let d = &s.dict;
     let get_i = |k: &[u8]| d.get(k).ok().and_then(|o| o.as_i64().ok());
@@ -1057,7 +1098,9 @@ fn recompress_one(s: &Stream, comps: usize, policy: ImagePolicy, cap: u32) -> Op
     }
     let (w, h) = (get_i(b"Width")? as u32, get_i(b"Height")? as u32);
     let filters = s.filters().unwrap_or_default();
-    let img = if filters.len() == 1 && filters[0] == b"DCTDecode" {
+    let img = if filters.len() == 1 && filters[0] == b"DCTDecode" && comps == 4 {
+        cmyk_jpeg(&s.content, w, h)?
+    } else if filters.len() == 1 && filters[0] == b"DCTDecode" {
         let img = image::load_from_memory_with_format(&s.content, image::ImageFormat::Jpeg).ok()?;
         if img.width() != w || img.height() != h {
             return None;
@@ -1072,7 +1115,17 @@ fn recompress_one(s: &Stream, comps: usize, policy: ImagePolicy, cap: u32) -> Op
         if raw.len() != (w * h) as usize * comps {
             return None;
         }
-        if comps == 3 {
+        if comps == 4 {
+            // Plain CMYK to RGB; print PDFs keep their photos in CMYK.
+            let rgb: Vec<u8> = raw
+                .chunks_exact(4)
+                .flat_map(|p| {
+                    let k = 255 - p[3] as u32;
+                    [0, 1, 2].map(|i| ((255 - p[i] as u32) * k / 255) as u8)
+                })
+                .collect();
+            image::DynamicImage::ImageRgb8(image::RgbImage::from_raw(w, h, rgb)?)
+        } else if comps == 3 {
             image::DynamicImage::ImageRgb8(image::RgbImage::from_raw(w, h, raw)?)
         } else {
             image::DynamicImage::ImageLuma8(image::GrayImage::from_raw(w, h, raw)?)

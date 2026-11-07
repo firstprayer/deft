@@ -80,13 +80,13 @@ enum Space {
     Indexed(Vec<u8>, usize),
 }
 
-/// Channels of a gray or RGB colour space, including ICC profiles. `None` for
-/// anything else, such as CMYK and indexed colour.
-pub(crate) fn gray_or_rgb_channels(doc: &Document, o: &Object) -> Option<usize> {
+/// Channels of an image a compressor can decode: gray, RGB or CMYK.
+pub(crate) fn decodable_channels(doc: &Document, o: &Object) -> Option<usize> {
     match color_space(doc, o)? {
         Space::Gray => Some(1),
         Space::Rgb => Some(3),
-        Space::Cmyk | Space::Indexed(..) => None,
+        Space::Cmyk => Some(4),
+        Space::Indexed(..) => None,
     }
 }
 

@@ -86,10 +86,21 @@ fn two_columns_of_prose_are_not_a_table() {
 fn pieces_of_one_phrase_stay_one_cell() {
     let joined = cells(&line(
         700.0,
-        &[(50.0, "quick"), (75.0, "brown"), (300.0, "fox")],
+        &[(50.0, "quick"), (78.0, "brown"), (300.0, "fox")],
     ));
     assert_eq!(joined.len(), 2);
     assert_eq!(joined[0].text, "quick brown");
+}
+
+#[test]
+fn letters_drawn_one_by_one_make_one_word() {
+    // Odoo invoices draw each letter with its own operator.
+    let joined = cells(&line(
+        700.0,
+        &[(50.0, "T"), (55.0, "a"), (60.0, "x"), (68.0, "due")],
+    ));
+    assert_eq!(joined.len(), 1);
+    assert_eq!(joined[0].text, "Tax due");
 }
 
 #[test]
