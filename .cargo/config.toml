@@ -1,7 +1,3 @@
 [alias]
 xtask = "run --quiet --package xtask --"
 test-unit = "test --workspace --lib --bins --test unit_*"
-
-# sqrt, floor, pow and friends, which SQLite leaves out unless asked.
-[env]
-LIBSQLITE3_FLAGS = "-DSQLITE_ENABLE_MATH_FUNCTIONS"

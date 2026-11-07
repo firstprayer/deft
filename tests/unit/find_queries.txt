@@ -5,8 +5,6 @@ I wanna make my landscape video into a portrait video | video pad
 turn a horizontal video into a vertical one for tiktok | video pad
 add black bars to my video | video pad
 fit my video into instagram reels | video pad
-cut the first 10 seconds off a video | video split
-keep only the middle of this clip | video split
 join these clips together | video merge
 my video is too big to email | video compress
 make this video smaller | video compress

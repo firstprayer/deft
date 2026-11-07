@@ -10,11 +10,9 @@ use std::sync::LazyLock;
 
 mod ops;
 mod query;
-mod sql;
 
 pub use ops::*;
 pub use query::{Filter, parse_filter};
-pub use sql::{Database, SqlColumn, sql_columns};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Cell {

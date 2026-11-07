@@ -14,7 +14,6 @@ deft video - commands (input -> output)
   merge          video... -> mp4      Join videos; --transition fades
   pad            video -> video       Fit into a frame with bars: --size 1080x1920
   speed          video -> video       Speed up or slow down: --factor 2 or --factor 0.5
-  split          video -> video       Cut out a part: --from 0:10 --to-time 0:25
   stabilize      video -> video       Steady shaky footage, or --denoise grain
   strip          video -> video       Remove metadata; no re-encode
   to-gif         video -> gif         Animated GIF: --fps, --size, --from, --to-time

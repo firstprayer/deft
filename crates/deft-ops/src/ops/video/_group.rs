@@ -2,7 +2,7 @@ use deft_core::prelude::*;
 
 pub static GROUP: Group = Group {
     name: "video",
-    summary: "Trim, merge, convert, compress, subtitles, GIF, frames (ffmpeg)",
+    summary: "Merge, convert, compress, subtitles, GIF, frames (ffmpeg)",
     aliases: &["mp4", "movie"],
     synonyms: &[
         ("thumbnail", "frames"),

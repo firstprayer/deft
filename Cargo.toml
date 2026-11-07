@@ -53,7 +53,6 @@ serde_yaml = "=0.9.34"
 toml = { version = "=0.8.23", features = ["preserve_order"] }
 roxmltree = "=0.21.2"
 regex = "1.13.1"
-rusqlite = { version = "=0.38.0", features = ["bundled", "column_metadata", "functions", "hooks", "limits"] }
 encoding_rs = "=0.8.44"
 chardetng = "=1.0.0"
 md-5 = "=0.11.0"

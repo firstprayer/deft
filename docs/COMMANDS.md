@@ -83,7 +83,7 @@ Resize, crop, convert, compress, adjust, montage, OCR
 
 ## video
 
-Trim, merge, convert, compress, subtitles, GIF, frames (ffmpeg)
+Merge, convert, compress, subtitles, GIF, frames (ffmpeg)
 
 | Command | What it does | Needs | Example |
 |---|---|---|---|
@@ -98,7 +98,6 @@ Trim, merge, convert, compress, subtitles, GIF, frames (ffmpeg)
 | `deft video merge` | Join videos; --transition fades | ffmpeg, ffprobe | `deft video merge clip.mp4 clip2.mp4 -o joined.mp4` |
 | `deft video pad` | Fit into a frame with bars: --size 1080x1920 | ffmpeg, ffprobe | `deft video pad clip.mp4 --size 480x640 --background white -o tall.mp4` |
 | `deft video speed` | Speed up or slow down: --factor 2 or --factor 0.5 | ffmpeg, ffprobe | `deft video speed clip.mp4 --factor 2 -o fast.mp4` |
-| `deft video split` | Cut out a part: --from 0:10 --to-time 0:25 | ffmpeg, ffprobe | `deft video split clip.mp4 --from 0:01 --to-time 0:02 -o part.mp4` |
 | `deft video stabilize` | Steady shaky footage, or --denoise grain | ffmpeg, ffprobe | `deft video stabilize clip.mp4 --denoise -o steady.mp4` |
 | `deft video strip` | Remove metadata; no re-encode | ffmpeg, ffprobe | `deft video strip clip.mp4 -o clean.mp4` |
 | `deft video to-gif` | Animated GIF: --fps, --size, --from, --to-time | ffmpeg, ffprobe | `deft video to-gif clip.mp4 -o clip.gif` |
@@ -144,7 +143,7 @@ PowerPoint: extract text, Markdown outline
 
 ## sheet
 
-Excel/CSV/ODS tables: SQL query, pivot, merge, split, convert
+Excel/CSV/ODS tables: pivot, merge, split, convert
 
 | Command | What it does | Needs | Example |
 |---|---|---|---|
@@ -153,7 +152,6 @@ Excel/CSV/ODS tables: SQL query, pivot, merge, split, convert
 | `deft sheet extract` | Take a sheet or range: --sheet, --range A1:D20 |  | `deft sheet extract people.xlsx --range A1:B2 -o part.csv` |
 | `deft sheet merge` | Stack tables; a shared header is kept once |  | `deft sheet merge people.csv people2.csv -o all.csv` |
 | `deft sheet pivot` | Pivot table: --rows city --columns year --values sales |  | `deft sheet pivot sales.csv --rows city --columns year --values amount -o p.csv` |
-| `deft sheet query` | Run SQL over tables or a SQLite file: --sql 'select ...' |  | `deft sheet query people.csv --sql 'select name, age from people where age > 30 order by age desc' -o adults.csv` |
 | `deft sheet split` | Split up: --sheets, --columns city or --every 1000 |  | `deft sheet split book.xlsx --sheets -o parts/` |
 | `deft sheet stats` | Per-column counts, empties, min, max, mean, sum |  | `deft sheet stats people.csv` |
 | `deft sheet to-md` | Markdown table (first row is the header) |  | `deft sheet to-md people.csv -o people.md` |

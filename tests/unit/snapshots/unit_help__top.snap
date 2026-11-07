@@ -7,11 +7,11 @@ deft 0.1.0 - local file toolkit. Usage: deft <group> <command> [inputs] [-o outp
 Groups:
   pdf      Merge, split, compress, encrypt, forms, OCR, compare, convert
   image    Resize, crop, convert, compress, adjust, montage, OCR
-  video    Trim, merge, convert, compress, subtitles, GIF, frames (ffmpeg)
+  video    Merge, convert, compress, subtitles, GIF, frames (ffmpeg)
   audio    Convert, trim, normalize, denoise, cut silence (ffmpeg)
   doc      Word/ODT/RTF: to text, Markdown, HTML, PDF; find and replace
   slides   PowerPoint: extract text, Markdown outline
-  sheet    Excel/CSV/ODS tables: SQL query, pivot, merge, split, convert
+  sheet    Excel/CSV/ODS tables: pivot, merge, split, convert
   json     JSON: convert, format, merge, diff, validate
   toml     TOML: convert, format, merge, diff, validate
   xml      XML: convert, format, merge, diff, validate

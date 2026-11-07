@@ -28,8 +28,8 @@ Deft follows semantic versioning. Before 1.0, a minor version may change command
 - The `archive` and `subtitle` groups, and `audio waveform`.
 - `html screenshot` and `html to-pdf --browser`. Deft no longer uses Chrome.
 - The `youtube` group, `deft engine install` and `update`, `--offline` and `--install-engines`. Deft no longer touches the network.
-- Commands an agent does in one ordinary line: `file hash`, `base64`, `split`, `join`, `rename` and `organize`; `video crop`, `resize`, `rotate`, `mute`, `fade`, `repeat`, `reverse`, `stack`, `thumbnail`, `extract-audio` and `extract-subtitles`; `audio chunk`, `compress`, `fade`, `merge`, `reverse`, `speed`, `strip` and `volume`; `image diff`, `invert` and `sharpen`; `pdf grayscale` and `repair`; `data query`; `sheet transpose`; `audio tag`; `email info`.
-- `sheet filter`, `sort`, `select`, `group`, `dedupe` and `join`: `sheet query` does all of them in SQL.
+- Commands an agent does in one ordinary line: `file hash`, `base64`, `split`, `join`, `rename` and `organize`; `video crop`, `resize`, `rotate`, `mute`, `fade`, `repeat`, `reverse`, `stack`, `thumbnail`, `extract-audio` and `extract-subtitles`; `audio chunk`, `compress`, `fade`, `merge`, `reverse`, `speed`, `strip` and `volume`; `image diff`, `invert` and `sharpen`; `pdf grayscale` and `repair`; `video split` (`ffmpeg -ss … -to …`); `data query`; `sheet transpose`; `audio tag`; `email info`.
+- `sheet query`, `filter`, `sort`, `select`, `group`, `dedupe` and `join`: an agent does these in one line with sqlite3, DuckDB or pandas. Deft no longer includes SQLite.
 - The `email` and `file` groups.
 - Commands whose output was not good enough: `pdf to-docx`, `to-md`, `to-sheet` and `to-pdfa`; `slides to-pdf`; `md to-pptx`; `audio mix`.
 
@@ -42,9 +42,7 @@ Deft follows semantic versioning. Before 1.0, a minor version may change command
 - `image compress` never grows a file and fails when it misses a target. `image trim --speck` ignores dust.
 - `video from-images`, `merge`, `watermark`, `add-subtitles` and `info` handle mixed sizes, silent clips and phone rotation. `audio convert`, `split` and `normalize` work with cover art.
 - Word readers keep footnotes, text boxes and nested tables. EPUB keeps every chapter and refuses DRM. HTML keeps the headline and declared charset.
-- `sheet query` keeps leading zeros and exact numbers, reads every sheet, and treats empty cells as empty. It no longer needs sqlite3: SQLite is built in.
 - Text options keep their spaces. `-o` works on report commands.
-- `sheet query` runs on SQLite compiled into deft, so it no longer needs the `sqlite3` program. Numbers keep every digit, identifiers such as 007 stay text, empty cells are NULL, every sheet of a workbook is a table, repeated headers work and `--sheet` is new. A SQLite file is opened read-only.
 - Report commands write their result as JSON with `-o name.json` instead of ignoring `-o`.
 - Text options keep their spaces, so `doc replace --find ' '` works.
 - `sheet merge` lines columns up by header. `sheet extract --range` counts from A1 when a sheet starts later. Comma decimals in semicolon files are numbers, and ids such as 12E3 stay text.
