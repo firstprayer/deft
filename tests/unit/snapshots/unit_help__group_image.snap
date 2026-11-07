@@ -3,26 +3,26 @@ source: crates/deft-cli/../../tests/unit/help.rs
 expression: "help::group(g.name)"
 ---
 deft image - commands (input -> output)
-  info         image -> report      Format, dimensions, EXIF orientation, GPS
-  adjust       image -> image       Change --brightness, --contrast, --saturation, --gamma
-  blur         image -> image       Gaussian blur: --radius 5, or a --box region
-  compress     image -> image       Smaller file: --quality, --target-size 200KB
-  convert      image -> image       Change format: --to png|jpg|webp|avif|gif|tiff|bmp|ico
-  crop         image -> image       Cut a region: --box x,y,w,h or --aspect 16:9
-  favicon      image -> ico+png...  Website icon set: favicon.ico and PNG sizes
-  flip         image -> image       Mirror: --direction horizontal|vertical
-  frames       gif -> png...        Save each frame of an animated GIF as PNG
-  grayscale    image -> image       Remove colour
-  meta         image -> image       Read EXIF, or set --title --author --copyright --date
-  montage      image... -> image    Tile images into a grid: --cols 3 --size 300x300
-  ocr          image -> txt         Read the text in an image (tesseract)
-  pad          image -> image       Add a border or canvas: --border 20, --size 1080x1080
-  resize       image -> image       Scale: --size 800x, 1920x1080, 50%
-  rotate       image -> image       Turn clockwise by any angle (EXIF is applied first)
-  strip        image -> image       Remove EXIF, GPS and text metadata
-  to-gif       image... -> gif      Animate images into a GIF: --fps 2
-  to-pdf       image... -> pdf      One page per image
-  transparent  image -> image       Make a colour see-through: --color white --fuzz 10
-  trim         image -> image       Cut away plain borders; --speck 4 ignores stray dots
-  watermark    image -> image       Add text or a logo: --text, --image, --position
+  info         image -> report                  Format, dimensions, EXIF orientation, GPS
+  adjust       image -> image                   Change --brightness, --contrast, --saturation, --gamma
+  blur         image -> image                   Gaussian blur: --radius 5, or a --box region
+  compress     image -> image                   Smaller file: --quality, --target-size 200KB
+  convert      image -> image                   Change format: --to png|jpg|webp|avif|gif|tiff|bmp|ico
+  crop         image -> image                   Cut a region: --box x,y,w,h or --aspect 16:9
+  favicon      image -> ico+png...              Website icon set: favicon.ico and PNG sizes
+  flip         image -> image                   Mirror: --direction horizontal|vertical
+  frames       gif -> png...                    Save each frame of an animated GIF as PNG
+  grayscale    image -> image                   Remove colour
+  meta         image -> image                   Read EXIF, or set --title --author --copyright --date
+  montage      image... -> image                Tile images into a grid: --cols 3 --size 300x300
+  ocr          image -> txt                     Read the text in an image (tesseract)
+  pad          image -> image                   Add a border or canvas: --border 20, --size 1080x1080
+  resize       image -> image                   Scale: --size 800x, 1920x1080, 50%
+  rotate       image -> image                   Turn clockwise by any angle (EXIF is applied first)
+  strip        JPEG, PNG, WebP or GIF -> image  Remove EXIF, GPS and text metadata
+  to-gif       image... -> gif                  Animate images into a GIF: --fps 2
+  to-pdf       image... -> pdf                  One page per image
+  transparent  image -> image                   Make a colour see-through: --color white --fuzz 10
+  trim         image -> image                   Cut away plain borders; --speck 4 ignores stray dots
+  watermark    image -> image                   Add text or a logo: --text, --image, --position
 More: deft image <command> --help

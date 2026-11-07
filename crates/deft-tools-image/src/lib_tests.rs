@@ -189,3 +189,40 @@ fn an_unusable_profile_leaves_the_pixels_alone() {
     };
     assert!(encode(&img, Format::Bmp, opt).is_ok());
 }
+
+#[test]
+fn webp_orientation_behind_an_exif_prefix_is_read() {
+    // iPhone WebP files put the JPEG segment's `Exif\0\0` before the TIFF data.
+    let mut exif = b"Exif\0\0".to_vec();
+    exif.extend_from_slice(&crate::orientation_tiff(6));
+    assert_eq!(
+        crate::tiff_orientation(exif.strip_prefix(b"Exif\0\0").unwrap()),
+        Some(6)
+    );
+    let little = b"II\x2A\0\x08\0\0\0\x01\0\x12\x01\x03\0\x01\0\0\0\x08\0\0\0\0\0\0\0";
+    assert_eq!(crate::tiff_orientation(little), Some(8));
+}
+
+#[test]
+fn a_gif_keeps_its_frames_and_loses_its_comments() {
+    // Two 1x1 frames with a comment and an XMP application block between them.
+    let mut gif = b"GIF89a\x01\0\x01\0\x80\0\0\0\0\0\xff\xff\xff".to_vec();
+    gif.extend_from_slice(b"\x21\xff\x0bNETSCAPE2.0\x03\x01\0\0\0");
+    let frame = b"\x21\xf9\x04\0\x0a\0\0\0\x2c\0\0\0\0\x01\0\x01\0\0\x02\x02\x44\x01\0";
+    gif.extend_from_slice(frame);
+    gif.extend_from_slice(b"\x21\xfe\x09Ada Smith\0");
+    gif.extend_from_slice(b"\x21\xff\x0bXMP DataXMP\x05<x/>\0\0");
+    gif.extend_from_slice(frame);
+    gif.extend_from_slice(b"\x3bTRAILER");
+    let s = crate::strip_metadata(&gif, deft_core::format::Format::Gif, true).unwrap();
+    let out = &s.bytes;
+    assert!(!out.windows(9).any(|w| w == b"Ada Smith"));
+    assert!(!out.windows(3).any(|w| w == b"XMP"));
+    assert!(out.windows(11).any(|w| w == b"NETSCAPE2.0"));
+    assert_eq!(
+        out.windows(2).filter(|w| *w == [0x21, 0xf9]).count(),
+        2,
+        "both frames stay"
+    );
+    assert_eq!(s.trailing, 7);
+}

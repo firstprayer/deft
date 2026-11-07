@@ -835,6 +835,7 @@ pub fn strip_metadata(bytes: &[u8], format: Format, keep_icc: bool) -> Option<St
         Format::Jpeg => strip_jpeg(bytes, keep_icc),
         Format::Png => strip_png(bytes, keep_icc).map(|bytes| Stripped { bytes, trailing: 0 }),
         Format::Webp => webp::strip(bytes, keep_icc).map(|bytes| Stripped { bytes, trailing: 0 }),
+        Format::Gif => strip_gif(bytes),
         _ => None,
     }
 }
@@ -902,6 +903,39 @@ fn strip_jpeg(bytes: &[u8], keep_icc: bool) -> Option<Stripped> {
 }
 
 /// A TIFF stream containing only the EXIF orientation tag.
+/// The orientation tag in TIFF-structured EXIF data, either byte order.
+pub(crate) fn tiff_orientation(t: &[u8]) -> Option<u8> {
+    let big = match t.get(..2)? {
+        b"MM" => true,
+        b"II" => false,
+        _ => return None,
+    };
+    let u16_at = |i: usize| -> Option<u16> {
+        let b: [u8; 2] = t.get(i..i + 2)?.try_into().ok()?;
+        Some(if big {
+            u16::from_be_bytes(b)
+        } else {
+            u16::from_le_bytes(b)
+        })
+    };
+    let u32_at = |i: usize| -> Option<u32> {
+        let b: [u8; 4] = t.get(i..i + 4)?.try_into().ok()?;
+        Some(if big {
+            u32::from_be_bytes(b)
+        } else {
+            u32::from_le_bytes(b)
+        })
+    };
+    let ifd = u32_at(4)? as usize;
+    let entries = u16_at(ifd)? as usize;
+    (0..entries.min(1024))
+        .map(|k| ifd + 2 + k * 12)
+        .find(|&e| u16_at(e) == Some(0x0112))
+        .and_then(|e| u16_at(e + 8))
+        .filter(|v| (1..=8).contains(v))
+        .map(|v| v as u8)
+}
+
 pub(crate) fn orientation_tiff(orientation: u8) -> Vec<u8> {
     let mut tiff = Vec::new();
     tiff.extend_from_slice(b"MM\0\x2A\0\0\0\x08"); // big-endian TIFF header, IFD at 8
@@ -919,6 +953,68 @@ pub fn minimal_exif(orientation: u8) -> Vec<u8> {
     seg.extend_from_slice(b"Exif\0\0");
     seg.extend_from_slice(&tiff);
     seg
+}
+
+/// A GIF with its comments and application data removed, block by block, so
+/// every frame and the timing stay as they are. Only the loop count (the
+/// NETSCAPE2.0 or ANIMEXTS1.0 block) is kept. Anything after the trailer goes.
+fn strip_gif(bytes: &[u8]) -> Option<Stripped> {
+    if !(bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a")) {
+        return None;
+    }
+    let table = |flags: u8| {
+        if flags & 0x80 != 0 {
+            3usize << ((flags & 7) + 1)
+        } else {
+            0
+        }
+    };
+    // Sub-blocks from `i`, ending with a zero length; returns the index after them.
+    let sub_blocks = |mut i: usize| -> Option<usize> {
+        loop {
+            let len = *bytes.get(i)? as usize;
+            i += 1 + len;
+            if len == 0 {
+                return Some(i);
+            }
+        }
+    };
+    let start = 13 + table(*bytes.get(10)?);
+    let mut out = bytes.get(..start)?.to_vec();
+    let mut i = start;
+    loop {
+        match *bytes.get(i)? {
+            0x3B => {
+                out.push(0x3B);
+                return Some(Stripped {
+                    bytes: out,
+                    trailing: bytes.len() - i - 1,
+                });
+            }
+            0x2C => {
+                let flags = *bytes.get(i + 9)?;
+                let data = i + 10 + table(flags);
+                let end = sub_blocks(data + 1)?;
+                out.extend_from_slice(bytes.get(i..end)?);
+                i = end;
+            }
+            0x21 => {
+                let label = *bytes.get(i + 1)?;
+                let end = sub_blocks(i + 2)?;
+                let loop_count = label == 0xFF
+                    && matches!(
+                        bytes.get(i + 3..i + 14),
+                        Some(b"NETSCAPE2.0") | Some(b"ANIMEXTS1.0")
+                    );
+                // Graphic control (timing, transparency), plain text and the loop count stay.
+                if matches!(label, 0xF9 | 0x01) || loop_count {
+                    out.extend_from_slice(bytes.get(i..end)?);
+                }
+                i = end;
+            }
+            _ => return None,
+        }
+    }
 }
 
 fn strip_png(bytes: &[u8], keep_icc: bool) -> Option<Vec<u8>> {

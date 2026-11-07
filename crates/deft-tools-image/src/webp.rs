@@ -43,11 +43,21 @@ pub fn exif_chunk(bytes: &[u8]) -> Option<&[u8]> {
     chunks.iter().find(|(k, _)| *k == b"EXIF").map(|(_, b)| *b)
 }
 
-/// Drop the EXIF and XMP chunks, and the profile unless `keep_icc`. Orientation
-/// stays, in a chunk of its own, so the picture keeps displaying upright.
+/// The orientation in a WebP's EXIF chunk. Some writers put the JPEG
+/// segment's `Exif\0\0` before the TIFF data, which other readers miss.
+fn orientation(all: &[(&[u8], &[u8])]) -> Option<u8> {
+    let exif = all.iter().find(|(k, _)| *k == b"EXIF")?.1;
+    crate::tiff_orientation(exif.strip_prefix(b"Exif\0\0").unwrap_or(exif))
+}
+
+/// Keep only the chunks that make the picture: the image data, alpha,
+/// animation, the extended header and, unless dropped, the profile. Every
+/// other chunk goes, whatever it is called, since metadata chunks are not
+/// always spelled `EXIF` or `XMP `. Orientation stays, in a chunk of its own,
+/// so the picture keeps displaying upright.
 pub fn strip(bytes: &[u8], keep_icc: bool) -> Option<Vec<u8>> {
     let all = chunks(bytes)?;
-    let orientation = crate::exif_orientation(bytes);
+    let orientation = orientation(&all).unwrap_or_else(|| crate::exif_orientation(bytes));
     let tiff = crate::orientation_tiff(orientation);
     let mut header = all
         .iter()
@@ -62,10 +72,10 @@ pub fn strip(bytes: &[u8], keep_icc: bool) -> Option<Vec<u8>> {
     let mut kept: Vec<(&[u8], &[u8])> = Vec::new();
     for (kind, body) in &all {
         match *kind {
-            b"EXIF" | b"XMP " => {}
-            b"ICCP" if !keep_icc => {}
+            b"VP8 " | b"VP8L" | b"ALPH" | b"ANIM" | b"ANMF" => kept.push((kind, body)),
+            b"ICCP" if keep_icc => kept.push((kind, body)),
             b"VP8X" => kept.push((kind, header.as_deref()?)),
-            _ => kept.push((kind, body)),
+            _ => {}
         }
     }
     if orientation != 1 && header.is_some() {

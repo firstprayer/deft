@@ -14,6 +14,7 @@ Deft follows semantic versioning. Before 1.0, a minor version may change command
 
 ### Changed
 
+- `image strip` takes JPEG, PNG, WebP and GIF only, and never re-encodes: it keeps just the parts that make the picture, every GIF frame included. HEIC, AVIF and TIFF are refused, since re-encoding them changed the picture or lost pages.
 - `video stabilize` uses two passes where ffmpeg has vidstab, which removes far more shake.
 - YAML output quotes strings such as `yes`, `on` and dates, which older parsers misread.
 - Word readers keep footnotes, endnotes, text boxes, nested tables, content controls and list levels, and `doc replace` reaches notes.

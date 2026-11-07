@@ -1,15 +1,21 @@
-use super::_common::{IN, INOUT, encode, open, profile};
 use deft_core::prelude::*;
+
+/// Formats whose metadata can be cut out without touching the picture. Others,
+/// such as HEIC and TIFF, would need re-encoding, which changes the picture
+/// and can lose pages or frames, so strip does not take them.
+const CLEAN: &[Format] = &[Format::Jpeg, Format::Png, Format::Webp, Format::Gif];
 
 pub static OP: Op = Op {
     id: "image.strip",
     summary: "Remove EXIF, GPS and text metadata",
     details: &[
-        "JPEG, PNG and WebP stay pixel-identical. Orientation is kept so images stay upright.",
-        "Anything appended after a JPEG, such as a motion photo's video, is removed.",
+        "JPEG, PNG, WebP and GIF only; the picture, every frame and the orientation stay as they are.",
+        "Only the chunks that make the picture are kept, so metadata goes whatever it is called.",
+        "Anything appended after the image, such as a motion photo's video, is removed.",
+        "HEIC, AVIF and TIFF are refused: convert them to JPEG or PNG first.",
     ],
-    input: Input::each(IN, "image"),
-    output: Output::one(INOUT, "image"),
+    input: Input::each(CLEAN, "JPEG, PNG, WebP or GIF"),
+    output: Output::one(CLEAN, "image"),
     params: &[param(
         "drop-icc",
         Kind::Flag,
@@ -32,34 +38,19 @@ fn run(job: &Job) -> Result<OpResult> {
     let before = bytes.len() as u64;
     let keep_icc = !job.params.flag("drop-icc");
     let mut warnings = Vec::new();
-    let (data, format) = match deft_tools_image::strip_metadata(bytes, format, keep_icc) {
-        Some(s) => {
-            if s.trailing > 0 {
-                warnings.push(format!(
-                    "removed {} appended after the image",
-                    format_bytes(s.trailing as u64)
-                ));
-            }
-            (s.bytes, format)
-        }
-        None => {
-            // Other formats: re-encoding drops metadata.
-            let (img, f) = open(job)?;
-            let f = if deft_tools_image::WRITABLE.contains(&f) {
-                f
-            } else {
-                Format::Png
-            };
-            let icc = profile(job).filter(|_| keep_icc);
-            let opt = deft_tools_image::Encode {
-                icc: icc.as_deref(),
-                ..Default::default()
-            };
-            let (data, notes) = encode(job, &img, f, opt)?;
-            warnings.extend(notes);
-            (data, f)
-        }
-    };
+    let s = deft_tools_image::strip_metadata(bytes, format, keep_icc).ok_or_else(|| {
+        err(
+            ErrorCode::InputCorrupt,
+            format!("{}: could not read the {format} structure", input.display),
+        )
+    })?;
+    if s.trailing > 0 {
+        warnings.push(format!(
+            "removed {} appended after the image",
+            format_bytes(s.trailing as u64)
+        ));
+    }
+    let data = s.bytes;
     let after = data.len() as u64;
     let mut res = OpResult::one(Produced::bytes(data, format))
         .fact("bytes_before", before)
