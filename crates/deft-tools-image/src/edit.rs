@@ -31,10 +31,10 @@ pub fn adjust(
     let mut out = img.to_rgba8();
     let contrast = (100.0 + contrast) / 100.0;
     let saturation = (100.0 + saturation) / 100.0;
-    let lift = brightness / 100.0 * 255.0;
+    let gain = 1.0 + brightness / 100.0;
     let table: Vec<f32> = (0..=255)
         .map(|v| {
-            let mut x = v as f32 + lift;
+            let mut x = v as f32 * gain;
             x = (x - 127.5) * contrast + 127.5;
             x = x.clamp(0.0, 255.0);
             255.0 * (x / 255.0).powf(1.0 / gamma)
@@ -138,17 +138,13 @@ pub fn montage(images: &[DynamicImage], grid: Grid) -> Result<DynamicImage> {
     let mut out = RgbaImage::from_pixel(w, h, Rgba(grid.background));
     for (n, img) in images.iter().enumerate() {
         let (c, r) = (n as u32 % cols, n as u32 / cols);
-        let fitted = if img.width() > tw || img.height() > th || grid.tile.is_some() {
-            let spec = deft_core::value::SizeSpec {
-                width: Some(tw),
-                height: Some(th),
-                percent: None,
-                source: String::new(),
-            };
-            crate::resize(img, &spec, crate::Fit::Contain, true)?
-        } else {
-            img.clone()
+        let spec = deft_core::value::SizeSpec {
+            width: Some(tw),
+            height: Some(th),
+            percent: None,
+            source: String::new(),
         };
+        let fitted = crate::resize(img, &spec, crate::Fit::Contain, true)?;
         let x = grid.gap + c * (tw + grid.gap) + (tw - fitted.width().min(tw)) / 2;
         let y = grid.gap + r * (th + grid.gap) + (th - fitted.height().min(th)) / 2;
         overlay(&mut out, &fitted.to_rgba8(), x as i64, y as i64, 1.0);

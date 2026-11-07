@@ -13,7 +13,7 @@ pub static OP: Op = Op {
     input: Input::each(IN, "image"),
     output: Output::one(INOUT, "image"),
     params: &[
-        param("brightness", PERCENT, "Percent, -100 to 100").default("0"),
+        param("brightness", PERCENT, "Scale by percent, -100 to 100").default("0"),
         param("contrast", PERCENT, "Percent, -100 to 100").default("0"),
         param("saturation", PERCENT, "Percent, -100 to 100").default("0"),
         param(
