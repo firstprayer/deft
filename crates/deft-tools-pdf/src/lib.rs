@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet};
 mod catalog;
 pub mod compare;
 pub mod extract;
+mod fonts;
 pub mod forms;
 pub mod layout;
 pub mod meta;
@@ -1438,6 +1439,7 @@ impl Renderer {
         let mut copy = doc.clone();
         copy.encryption_state = None;
         copy.trailer.remove(b"Encrypt");
+        fonts::add_text_maps(&mut copy);
         let mut out = Vec::new();
         copy.save_to(&mut out)
             .map_err(|e| err(ErrorCode::Internal, format!("reading PDF: {e}")))?;

@@ -950,6 +950,7 @@ version = "0.1.0"
 dependencies = [
  "deft-core",
  "deft-tools-image",
+ "encoding_rs",
  "flate2",
  "getrandom 0.3.4",
  "hayro 0.8.0",
@@ -957,6 +958,7 @@ dependencies = [
  "lopdf",
  "serde_json",
  "similar",
+ "unicode-normalization",
  "zune-core",
  "zune-jpeg",
 ]

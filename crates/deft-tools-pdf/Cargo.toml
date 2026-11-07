@@ -18,3 +18,5 @@ deft-tools-image.workspace = true
 similar.workspace = true
 getrandom.workspace = true
 serde_json.workspace = true
+encoding_rs.workspace = true
+unicode-normalization.workspace = true
