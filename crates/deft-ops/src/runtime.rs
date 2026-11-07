@@ -326,8 +326,8 @@ fn plan_target(
     let o = req.output.as_deref();
     let is_dir_arg = |o: &str| o.ends_with('/') || o.ends_with('\\') || Path::new(o).is_dir();
     Ok(match op.output.arity {
-        OutputArity::Report => Target::None,
-        OutputArity::One => match o {
+        OutputArity::Report if o.is_none() => Target::None,
+        OutputArity::One | OutputArity::Report => match o {
             Some("-") if many_jobs => {
                 return Err(err(
                     ErrorCode::BadOption,
@@ -446,12 +446,22 @@ fn requested_format(op: &Op, output: Option<&str>) -> Result<Option<Format>> {
     else {
         return Ok(None);
     };
-    if op.output.arity != OutputArity::One || op.output.formats.is_empty() {
+    let report = op.output.arity == OutputArity::Report;
+    if !report && (op.output.arity != OutputArity::One || op.output.formats.is_empty()) {
         return Ok(None);
     }
     let Some(f) = Format::from_path(Path::new(o)) else {
         return Ok(None);
     };
+    if report && f != Format::Json {
+        return Err(err(
+            ErrorCode::BadOption,
+            format!("-o {o}: deft {} writes its result as json", op.path()),
+        ));
+    }
+    if report {
+        return Ok(None);
+    }
     if !op.output.formats.contains(&f) {
         let can: Vec<&str> = op.output.formats.iter().map(|f| f.ext()).collect();
         return Err(err(
@@ -601,6 +611,13 @@ fn deliver(
     req: &Request,
     stdout: &mut Option<Vec<u8>>,
 ) -> Result<(OpResult, Vec<OutputInfo>)> {
+    // A report has no output of its own; -o asks for its facts as a file.
+    if op.output.arity == OutputArity::Report && !matches!(target, Target::None) {
+        let mut json = serde_json::to_vec_pretty(&res.facts)
+            .map_err(|e| err(ErrorCode::Internal, e.to_string()))?;
+        json.push(b'\n');
+        res.outputs = vec![Produced::bytes(json, Format::Json)];
+    }
     let outputs = std::mem::take(&mut res.outputs);
     let stem = inputs
         .first()
@@ -851,6 +868,10 @@ pub fn convert(req: Request, to: Option<String>, ctx: &Ctx) -> Result<Report> {
                 );
             }
             let stem = input.stem();
+            let to_dir = req
+                .output
+                .as_deref()
+                .is_some_and(|o| o.ends_with('/') || Path::new(o).is_dir());
             let dest = match req.output.as_deref() {
                 Some("-") => None,
                 Some(o) if o.ends_with('/') || Path::new(o).is_dir() => {
@@ -891,7 +912,7 @@ pub fn convert(req: Request, to: Option<String>, ctx: &Ctx) -> Result<Report> {
             // Run each step on a temp file.
             let mut current = input.local_path(ctx)?;
             let mut current_format = from;
-            for (op, step_to) in &chain {
+            for (step, (op, step_to)) in chain.iter().enumerate() {
                 let mut params = Params::default();
                 if op.param("to").is_some() {
                     params.set("to", Value::Text(step_to.ext().to_string()));
@@ -905,8 +926,35 @@ pub fn convert(req: Request, to: Option<String>, ctx: &Ctx) -> Result<Report> {
                 };
                 let mut res = (op.run)(&job)?;
                 warnings.append(&mut res.warnings);
+                let last = step + 1 == chain.len();
                 let produced: Produced = match res.outputs.len() {
                     1 => res.outputs.remove(0),
+                    n if last && to_dir => {
+                        let dir = dest
+                            .as_ref()
+                            .and_then(|d| d.parent())
+                            .unwrap_or(Path::new(""));
+                        std::fs::create_dir_all(dir)?;
+                        let mut infos = Vec::new();
+                        for (i, p) in res.outputs.into_iter().enumerate() {
+                            let name = p
+                                .name
+                                .clone()
+                                .unwrap_or_else(|| format!("{stem}-{:03}.{}", i + 1, target.ext()));
+                            let path = dir.join(sanitize(&name));
+                            check_writable(&path, std::slice::from_ref(&input), &req)?;
+                            let (format, facts) = (p.format, p.facts);
+                            let bytes = place(p.data, &path, true)?;
+                            infos.push(OutputInfo {
+                                path: path.display().to_string(),
+                                format,
+                                bytes,
+                                facts,
+                            });
+                        }
+                        debug_assert_eq!(infos.len(), n);
+                        return Ok((infos, ids, warnings));
+                    }
                     0 => {
                         return Err(err(
                             ErrorCode::Internal,

@@ -168,7 +168,7 @@ pub fn command(op: &Op, path: &str) -> String {
         InputArity::All { .. } => format!("<{}>...", op.input.label),
     };
     let out_hint = match op.output.arity {
-        OutputArity::Report => String::new(),
+        OutputArity::Report => " [-o <json>]".into(),
         OutputArity::Many | OutputArity::Dir => " [-o <dir>]".into(),
         OutputArity::One => format!(" [-o <{}|dir>]", op.output.label),
     };
