@@ -20,12 +20,12 @@ pub struct Images {
     pub skipped: usize,
 }
 
-fn resources<'a>(doc: &'a Document, holder: &'a Dictionary) -> Option<&'a Dictionary> {
+pub(crate) fn resources<'a>(doc: &'a Document, holder: &'a Dictionary) -> Option<&'a Dictionary> {
     deref(doc, holder.get(b"Resources").ok()?).as_dict().ok()
 }
 
 /// Image objects used by a resource dictionary, looking inside form XObjects.
-fn images_of(
+pub(crate) fn images_of(
     doc: &Document,
     res: &Dictionary,
     seen: &mut HashSet<ObjectId>,

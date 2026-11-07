@@ -374,3 +374,29 @@ fn images_with_a_soft_mask_are_recompressed_and_keep_it() {
     );
     assert!(width < 400);
 }
+
+#[test]
+fn info_counts_the_pictures_pages_show_and_only_real_forms() {
+    let (mut doc, image) = icc_image_pdf();
+    let mask = doc.add_object(Stream::new(
+        dictionary! { "Subtype" => "Image", "Width" => 1, "Height" => 1 },
+        vec![0],
+    ));
+    doc.get_object_mut(image)
+        .unwrap()
+        .as_stream_mut()
+        .unwrap()
+        .dict
+        .set("SMask", mask);
+    // An image no page uses.
+    doc.add_object(Stream::new(dictionary! { "Subtype" => "Image" }, vec![]));
+    let page = page_ids(&doc)[0];
+    let res = dictionary! { "XObject" => dictionary! { "Im1" => image } };
+    doc.get_dictionary_mut(page).unwrap().set("Resources", res);
+    doc.catalog_mut()
+        .unwrap()
+        .set("AcroForm", dictionary! { "Fields" => Vec::<Object>::new() });
+    let i = info(&doc);
+    assert_eq!(i.images, 1);
+    assert!(!i.forms, "an empty form is no form");
+}

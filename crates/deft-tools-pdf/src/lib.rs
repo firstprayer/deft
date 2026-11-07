@@ -607,19 +607,24 @@ pub fn info(doc: &Document) -> Info {
             .and_then(|o| text_string(doc, o))
             .filter(|s| !s.trim().is_empty())
     };
-    let mut images = 0;
-    let mut fonts = 0;
-    for obj in doc.objects.values() {
-        match obj {
-            Object::Stream(s)
-                if s.dict.get(b"Subtype").and_then(Object::as_name).ok() == Some(b"Image") =>
-            {
-                images += 1
-            }
-            Object::Dictionary(d) if d.has_type(b"Font") => fonts += 1,
-            _ => {}
+    // The pictures the pages show, as pdf extract-images saves them: soft
+    // masks and stencil masks of a picture are part of it, and images no
+    // page uses are left out.
+    let mut seen = HashSet::new();
+    let mut used = Vec::new();
+    for &page in &ids {
+        if let Ok(dict) = doc.get_dictionary(page)
+            && let Some(res) = extract::resources(doc, dict)
+        {
+            extract::images_of(doc, res, &mut seen, &mut used);
         }
     }
+    let images = used.len();
+    let fonts = doc
+        .objects
+        .values()
+        .filter(|o| o.as_dict().is_ok_and(|d| d.has_type(b"Font")))
+        .count();
     Info {
         pages: ids.len(),
         version: doc.version.clone(),
@@ -631,7 +636,8 @@ pub fn info(doc: &Document) -> Info {
         paper: paper_name(width, height),
         images,
         fonts,
-        forms: doc.catalog().ok().is_some_and(|c| c.has(b"AcroForm")),
+        // An empty /AcroForm is common in books and scans; only fields count.
+        forms: !forms::fields(doc).is_empty(),
     }
 }
 
