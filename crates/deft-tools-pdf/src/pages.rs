@@ -89,7 +89,46 @@ pub fn resize_page(doc: &mut Document, page: ObjectId, w: f64, h: f64) -> Result
     let (dx, dy) = ((w - cw * s) / 2.0 - x0 * s, (h - ch * s) / 2.0 - y0 * s);
     let pre = format!("q {s:.5} 0 0 {s:.5} {dx:.3} {dy:.3} cm\n").into_bytes();
     wrap_contents(doc, page, pre, b"Q\n".to_vec())?;
+    move_annotations(doc, page, s, dx, dy);
     set_box(doc, page, [0.0, 0.0, w, h])
+}
+
+/// Scale and shift a list of x, y pairs.
+fn moved(doc: &Document, list: &Object, s: f64, dx: f64, dy: f64) -> Option<Object> {
+    let values = deref(doc, list).as_array().ok()?;
+    let mut out = Vec::with_capacity(values.len());
+    for (i, value) in values.iter().enumerate() {
+        let v = crate::num(deref(doc, value))?;
+        let shift = if i % 2 == 0 { dx } else { dy };
+        out.push(Object::Real((v * s + shift) as f32));
+    }
+    Some(Object::Array(out))
+}
+
+/// Annotations are placed in page space, so they follow the content themselves.
+/// A widget's appearance scales with its rectangle.
+fn move_annotations(doc: &mut Document, page: ObjectId, s: f64, dx: f64, dy: f64) {
+    let annots: Vec<ObjectId> = doc
+        .get_dictionary(page)
+        .ok()
+        .and_then(|d| d.get(b"Annots").ok())
+        .and_then(|o| deref(doc, o).as_array().ok())
+        .map(|a| a.iter().filter_map(|o| o.as_reference().ok()).collect())
+        .unwrap_or_default();
+    for id in annots {
+        let Ok(annot) = doc.get_dictionary(id) else {
+            continue;
+        };
+        let changes: Vec<(&[u8], Object)> = [&b"Rect"[..], b"QuadPoints", b"L", b"Vertices"]
+            .into_iter()
+            .filter_map(|key| Some((key, moved(doc, annot.get(key).ok()?, s, dx, dy)?)))
+            .collect();
+        if let Ok(annot) = doc.get_dictionary_mut(id) {
+            for (key, value) in changes {
+                annot.set(key.to_vec(), value);
+            }
+        }
+    }
 }
 
 fn wrap_contents(doc: &mut Document, page: ObjectId, pre: Vec<u8>, post: Vec<u8>) -> Result<()> {
@@ -243,8 +282,8 @@ pub fn redacted_image(
     Ok(img)
 }
 
-/// Replace a page's content with one full-page image, dropping its old
-/// resources, annotations and rotation.
+/// Replace a page's content with one full-page image. Only what the picture
+/// needs stays on the page: annotations, thumbnails and private data all go.
 pub fn replace_with_image(
     doc: &mut Document,
     page: ObjectId,
