@@ -11,5 +11,7 @@ deft-core.workspace = true
 zip.workspace = true
 roxmltree.workspace = true
 htmd.workspace = true
+html5ever.workspace = true
+markup5ever_rcdom.workspace = true
 pulldown-cmark.workspace = true
 regex.workspace = true

@@ -1,7 +1,9 @@
 //! HTML to Markdown and to plain text.
 
-use crate::bad;
+use crate::{bad, dom};
 use deft_core::error::Result;
+use htmd::element_handler::HandlerResult;
+use markup5ever_rcdom::{Handle, NodeData};
 
 const SKIP: &[&str] = &[
     "script", "style", "noscript", "template", "svg", "iframe", "head",
@@ -11,9 +13,111 @@ const SKIP: &[&str] = &[
 pub fn to_markdown(html: &str) -> Result<String> {
     let converter = htmd::HtmlToMarkdown::builder()
         .skip_tags(SKIP.to_vec())
+        .add_handler(vec!["pre"], pre)
+        .add_handler(vec!["a"], link)
         .build();
-    let text = converter.convert(html).map_err(|e| bad("html", e))?;
-    Ok(tidy(&text))
+    let tree = converter.html_to_tree(html).map_err(|e| bad("html", e))?;
+    mark_bangs(&tree);
+    let text = converter.tree_to_markdown(&tree);
+    Ok(tidy(&text).replace(BANG, "\\!"))
+}
+
+/// Stands for a "!" just before a link until the Markdown is written, where it
+/// must be escaped or the link becomes a picture.
+const BANG: char = '\u{E000}';
+
+fn mark_bangs(node: &Handle) {
+    let kids = dom::children(node);
+    for (i, c) in kids.iter().enumerate() {
+        if let NodeData::Text { contents } = &c.data
+            && contents.borrow().ends_with('!')
+            && kids.get(i + 1).is_some_and(|n| dom::is(n, &["a"]))
+        {
+            let mut t = contents.borrow_mut();
+            let keep = t.len() - 1;
+            let mut fixed = t[..keep].to_string();
+            fixed.push(BANG);
+            *t = fixed.into();
+        }
+        mark_bangs(c);
+    }
+}
+
+/// Preformatted text is code: its content is kept as it is, in a fence.
+fn pre(_: &dyn htmd::element_handler::Handlers, e: htmd::Element) -> Option<HandlerResult> {
+    let code = dom::text(e.node);
+    let code = code.trim_end_matches(['\n', ' ', '\t']);
+    let language = std::iter::once(e.node.clone())
+        .chain(dom::children(e.node))
+        .filter_map(|n| dom::attr(&n, "class"))
+        .flat_map(|c| {
+            c.split_whitespace()
+                .filter_map(|w| w.strip_prefix("language-").or(w.strip_prefix("lang-")))
+                .map(String::from)
+                .collect::<Vec<_>>()
+        })
+        .next()
+        .unwrap_or_default();
+    let longest = code.split(|c| c != '`').map(str::len).max().unwrap_or(0);
+    let fence = "`".repeat(longest.max(2) + 1);
+    Some(format!("\n\n{fence}{language}\n{code}\n{fence}\n\n").into())
+}
+
+const BLOCKS: &[&str] = &[
+    "address",
+    "article",
+    "aside",
+    "blockquote",
+    "div",
+    "dl",
+    "figure",
+    "footer",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "header",
+    "hr",
+    "li",
+    "ol",
+    "p",
+    "pre",
+    "section",
+    "table",
+    "ul",
+];
+
+/// A link around blocks, such as a card holding a heading and a paragraph,
+/// cannot stay one Markdown link: the link goes on its first block instead.
+fn link(handlers: &dyn htmd::element_handler::Handlers, e: htmd::Element) -> Option<HandlerResult> {
+    let href = dom::attr(e.node, "href").unwrap_or_default();
+    let has_blocks = dom::descendants(e.node).iter().any(|d| dom::is(d, BLOCKS));
+    if !has_blocks || href.is_empty() {
+        return handlers.fallback(e);
+    }
+    let content = handlers.walk_children(e.node).content;
+    let mut parts: Vec<String> = content
+        .split("\n\n")
+        .map(|p| p.trim_matches('\n').to_string())
+        .filter(|p| !p.trim().is_empty())
+        .collect();
+    let href = href
+        .replace('(', "%28")
+        .replace(')', "%29")
+        .replace(' ', "%20");
+    if let Some(first) = parts.first_mut() {
+        let level = first.len() - first.trim_start_matches('#').len();
+        let (marks, text) = first.split_at(level);
+        let text = text.trim();
+        let plain_line = !text.contains('\n') && !text.contains("](");
+        if plain_line && (level == 0 || text.len() < first.len()) {
+            let space = if level > 0 { " " } else { "" };
+            *first = format!("{marks}{space}[{text}]({href})");
+        }
+    }
+    Some(format!("\n\n{}\n\n", parts.join("\n\n")).into())
 }
 
 /// The inside of the first `<tag ...>...</tag>`, matching nested ones.
@@ -78,10 +182,27 @@ fn without(html: &str, tags: &[&str]) -> String {
     out
 }
 
+/// One blank line at most between blocks, no spaces at the ends of lines.
+/// Code keeps its blank lines, and a line break keeps its two spaces.
 fn tidy(text: &str) -> String {
     let mut out = String::new();
     let mut blank = 0;
-    for line in text.lines() {
+    let mut fence: Option<String> = None;
+    let lines: Vec<&str> = text.lines().collect();
+    for (i, line) in lines.iter().enumerate() {
+        let opener = line.trim_start();
+        let ticks = opener.len() - opener.trim_start_matches('`').len();
+        if ticks >= 3 {
+            match &fence {
+                Some(f) if opener.trim_end() == f => fence = None,
+                None => fence = Some("`".repeat(ticks)),
+                _ => {}
+            }
+        } else if fence.is_some() {
+            out.push_str(line.trim_end());
+            out.push('\n');
+            continue;
+        }
         if line.trim().is_empty() {
             blank += 1;
             if blank > 1 {
@@ -91,6 +212,10 @@ fn tidy(text: &str) -> String {
             blank = 0;
         }
         out.push_str(line.trim_end());
+        let continues = lines.get(i + 1).is_some_and(|n| !n.trim().is_empty());
+        if line.ends_with("  ") && !line.trim().is_empty() && continues {
+            out.push_str("  ");
+        }
         out.push('\n');
     }
     out.trim().to_string() + "\n"

@@ -66,6 +66,9 @@ qrcode = { version = "=0.14.1", default-features = false, features = ["svg"] }
 rqrr = "=0.11.0"
 barcoders = "=2.0.0"
 htmd = "=0.5.5"
+# The parser and tree htmd is built on, at its versions.
+html5ever = "=0.38.0"
+markup5ever_rcdom = "=0.38.0"
 similar = "=2.7.0"
 boon = "=0.6.1"
 getrandom = "=0.3.4"

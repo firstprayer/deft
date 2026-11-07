@@ -370,3 +370,47 @@ fn nested_lists_stay_nested() {
         .collect();
     assert_eq!(got, [(0, "one"), (1, "inner"), (2, "deep"), (0, "two")]);
 }
+
+#[test]
+fn preformatted_text_stays_code() {
+    let page = "<p>Intro</p><pre class=\"screen\">&lt;p&gt;She had &lt;i&gt;flair&lt;/i&gt;.&lt;/p&gt;\n\n  two</pre>";
+    let md = html::to_markdown(page).unwrap();
+    assert!(
+        md.contains("```\n<p>She had <i>flair</i>.</p>\n\n  two\n```"),
+        "{md}"
+    );
+    let text = html::to_text(page).unwrap();
+    assert!(text.contains("<p>She had <i>flair</i>.</p>"), "{text}");
+    let fenced =
+        html::to_markdown("<pre><code class=\"language-rust\">a ``` b</code></pre>").unwrap();
+    assert!(fenced.starts_with("````rust\na ``` b\n````"), "{fenced}");
+}
+
+#[test]
+fn line_breaks_stay_breaks() {
+    let md = html::to_markdown("<p>Section MO<br/>Theorem A<br/>Theorem B</p>").unwrap();
+    assert_eq!(md, "Section MO  \nTheorem A  \nTheorem B\n");
+    let text = html::to_text("<p>one<br>two</p>").unwrap();
+    assert_eq!(text, "one\ntwo\n");
+}
+
+#[test]
+fn a_bang_before_a_link_is_not_a_picture() {
+    let md = html::to_markdown("<p><em>coupole</em>!<a href=\"#note-26\">*</a></p>").unwrap();
+    assert_eq!(md, "*coupole*\\![\\*](#note-26)\n");
+    let blocks = markdown::parse(&md);
+    let Block::Paragraph(spans) = &blocks[0] else {
+        panic!("{blocks:?}")
+    };
+    assert!(spans.iter().all(|s| s.image.is_none()), "{spans:?}");
+    assert!(spans.iter().any(|s| s.text == "!"), "{spans:?}");
+}
+
+#[test]
+fn a_link_around_blocks_goes_on_its_heading() {
+    let page = "<ul><li><a href=\"/voting\"><div><h2>Voting</h2></div><div><p>Find out how.</p></div></a></li></ul>";
+    let md = html::to_markdown(page).unwrap();
+    assert!(md.contains("## [Voting](/voting)"), "{md}");
+    assert!(md.contains("Find out how."), "{md}");
+    assert!(!md.contains("[##"), "{md}");
+}
