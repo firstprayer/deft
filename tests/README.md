@@ -66,7 +66,7 @@ Other e2e files:
   with `cargo xtask review`.
 
 Needs Ghostscript, ffmpeg, Pillow, openpyxl, PyYAML, toml, lxml and
-BeautifulSoup. Commands that call tesseract, sqlite3, bsdtar or Chrome need those
+BeautifulSoup. Commands that call tesseract, bsdtar or Chrome need those
 too. Cases that need ffmpeg are skipped when it is missing.
 
 ## 3. Agent eval

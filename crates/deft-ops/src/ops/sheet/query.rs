@@ -1,6 +1,7 @@
-use super::_common::{OUT, TO, write};
+use super::_common::{OUT, SHEET, TO, sheet_index, write};
 use deft_core::prelude::*;
-use deft_tools_sheet::Table;
+use deft_tools_sheet::Database;
+use std::collections::HashSet;
 
 const FORMATS: &[Format] = &[
     Format::Csv,
@@ -15,16 +16,23 @@ pub static OP: Op = Op {
     id: "sheet.query",
     summary: "Run SQL over tables or a SQLite file: --sql 'select ...'",
     details: &[
-        "Each file becomes a table named after it. A SQLite file keeps its own tables.",
-        "Columns with numbers compare as numbers. List tables: select name from sqlite_master.",
+        "Each file is a table named after it; a workbook's sheets are also tables by sheet name.",
+        "--sheet picks the sheet the file name means. A SQLite file keeps its own tables.",
+        "Numbers compare as numbers and keep every digit; ids such as 007 stay text. x regexp '^A' works.",
+        "Empty cells are NULL. A repeated header gets _2. List tables: select name from sqlite_master.",
     ],
     input: Input::all(FORMATS, 1, "sheet|sqlite"),
     output: Output::one(OUT, "sheet"),
-    params: &[param("sql", Kind::Text, "SELECT statement").required(), TO],
-    engines: &["sqlite3"],
+    params: &[
+        param("sql", Kind::Text, "SELECT statement").required(),
+        SHEET,
+        TO,
+    ],
     examples: &[
-        "deft sheet query sales.csv --sql 'select city, sum(amount) t from sales group by city' -o t.csv",
+        "deft sheet query people.csv --sql 'select name, age from people where age > 30 order by age desc' -o adults.csv",
         "deft sheet query people.csv cities.csv --sql 'select * from people join cities using (name)' -o j.csv",
+        "deft sheet query sales.csv --sql 'select city, sum(amount) t from sales group by city' -o t.csv",
+        "deft sheet query sales.csv --sql 'select distinct city from sales' -o unique.csv",
     ],
     tags: &[
         "sql",
@@ -33,6 +41,10 @@ pub static OP: Op = Op {
         "select from csv",
         "db to csv",
         "export table",
+        "filter rows",
+        "sort rows",
+        "join tables",
+        "remove duplicates",
     ],
     result: &["rows", "columns"],
     suffix: Some("query"),
@@ -52,79 +64,102 @@ fn table_name(stem: &str) -> String {
     s
 }
 
-fn quoted(name: &str) -> String {
-    format!("\"{}\"", name.replace('"', "\"\""))
+/// Take a table name, adding _2, _3 until it is free. SQLite ignores case.
+fn claim(used: &mut HashSet<String>, base: String) -> String {
+    let (mut name, mut n) = (base.clone(), 1);
+    while !used.insert(name.to_lowercase()) {
+        n += 1;
+        name = format!("{base}_{n}");
+    }
+    name
 }
 
-/// `create table` and `.import` commands for one table.
-fn load_commands(job: &Job, t: &Table, name: &str) -> Result<Vec<String>> {
-    let csv = job.ctx.temp_path(&format!("{name}.csv"));
-    std::fs::write(&csv, deft_tools_sheet::write_csv(t)?)?;
-    let columns: Vec<String> = deft_tools_sheet::headers(t)
-        .iter()
-        .enumerate()
-        .map(|(i, h)| {
-            let name = if h.is_empty() {
-                format!("column{}", i + 1)
-            } else {
-                h.clone()
-            };
-            format!("{} NUMERIC", quoted(&name))
-        })
-        .collect();
-    Ok(vec![
-        format!("create table {}({});", quoted(name), columns.join(", ")),
-        format!(".import --csv --skip 1 '{}' {name}", csv.display()),
-    ])
+/// Load one input: a table named after the file, and one per further sheet.
+fn load(
+    job: &Job,
+    db: &mut Database,
+    input: &InputFile,
+    used: &mut HashSet<String>,
+    warnings: &mut Vec<String>,
+) -> Result<()> {
+    let sheets = super::_common::tables(input)?;
+    let workbook = matches!(input.format, Some(Format::Xlsx | Format::Xls | Format::Ods));
+    let main = match job.params.opt_text("sheet") {
+        Some(w) if workbook => sheet_index(&sheets, &w)?,
+        _ => 0,
+    };
+    let base = table_name(&input.stem());
+    let name = claim(used, base.clone());
+    if name != base {
+        warnings.push(format!(
+            "two inputs are called {base}: {} is table {name}",
+            input.display
+        ));
+    }
+    let mut add = |db: &mut Database, sheet, name: &str| -> Result<()> {
+        let mixed = db.add(sheet, name)?;
+        if !mixed.is_empty() {
+            warnings.push(format!(
+                "{name}: {} kept as text to save spellings such as 007, so it compares as text; \
+                 use cast(column as real) for numbers",
+                mixed.join(", ")
+            ));
+        }
+        Ok(())
+    };
+    add(db, &sheets[main], &name)?;
+    if workbook {
+        let alias = table_name(&sheets[main].name);
+        if used.insert(alias.to_lowercase()) {
+            db.alias(&alias, &name)?;
+        }
+        for (i, sheet) in sheets.iter().enumerate() {
+            if i != main {
+                let name = claim(used, table_name(&sheet.name));
+                add(db, sheet, &name)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn run(job: &Job) -> Result<OpResult> {
     let p = job.params;
-    // The sqlite3 shell treats these as its own commands, such as .shell.
-    if p.text("sql").trim_start().starts_with('.') {
+    let sql = p.text("sql");
+    if sql.trim_start().starts_with('.') {
         return Err(bad_value("sql", "give a SQL statement, not a dot command"));
     }
-    let program = deft_engines::require(job.ctx, "sqlite3", OP.id)?;
-    let mut args = vec![
-        "-batch".to_string(),
-        "-csv".to_string(),
-        "-header".to_string(),
-    ];
-    let database = job.inputs.iter().find(|i| i.format == Some(Format::Sqlite));
-    match database {
-        Some(db) => {
-            args.push("-readonly".to_string());
-            args.push(db.local_path(job.ctx)?.display().to_string());
-        }
-        None => args.push(":memory:".to_string()),
-    }
-    if database.is_some() && job.inputs.len() > 1 {
+    let file = job.inputs.iter().find(|i| i.format == Some(Format::Sqlite));
+    if file.is_some() && job.inputs.len() > 1 {
         return Err(err(
             ErrorCode::BadOption,
             "give one SQLite file, or any number of tables",
         ));
     }
-    if database.is_none() {
-        for input in &job.inputs {
-            let mut tables = super::_common::tables(input)?;
-            let t = tables.remove(0);
-            for command in load_commands(job, &t, &table_name(&input.stem()))? {
-                args.extend(["-cmd".to_string(), command]);
+    let mut warnings = Vec::new();
+    let db = match file {
+        Some(f) => Database::open_read_only(&f.local_path(job.ctx)?)?,
+        None => {
+            let mut db = Database::in_memory()?;
+            let mut used = HashSet::new();
+            for input in &job.inputs {
+                load(job, &mut db, input, &mut used, &mut warnings)?;
             }
+            db
         }
-    }
-    args.push(p.text("sql"));
-    let out = deft_engines::run(job.ctx, &program, &args).map_err(|mut e| {
-        e.code = ErrorCode::BadValue;
-        e
-    })?;
-    let table = deft_tools_sheet::read_csv(&out.stdout, "query")?;
+    };
+    let table = db.query(&sql, job.ctx.timeout)?;
     let format = p
         .opt_text("to")
         .and_then(|t| Format::from_name(&t))
         .unwrap_or_else(|| job.target(Format::Csv));
-    Ok(OpResult::one(write(&table, format)?)
-        .fact("rows", table.rows.len().saturating_sub(1))
+    let rows = table.rows.len().saturating_sub(1);
+    let mut res = OpResult::one(write(&table, format)?)
+        .fact("rows", rows)
         .fact("columns", table.columns())
-        .note(format!("{} rows", table.rows.len().saturating_sub(1))))
+        .note(format!("{rows} rows"));
+    for w in warnings {
+        res = res.warn(w);
+    }
+    Ok(res)
 }

@@ -166,7 +166,7 @@ Excel/CSV/ODS tables: SQL query, pivot, merge, split, convert
 | `deft sheet extract` | Take a sheet or range: --sheet, --range A1:D20 |  | `deft sheet extract people.xlsx --range A1:B2 -o part.csv` |
 | `deft sheet merge` | Stack tables; a shared header is kept once |  | `deft sheet merge people.csv people2.csv -o all.csv` |
 | `deft sheet pivot` | Pivot table: --rows city --columns year --values sales |  | `deft sheet pivot sales.csv --rows city --columns year --values amount -o p.csv` |
-| `deft sheet query` | Run SQL over tables or a SQLite file: --sql 'select ...' | sqlite3 | `deft sheet query sales.csv --sql 'select city, sum(amount) t from sales group by city' -o t.csv` |
+| `deft sheet query` | Run SQL over tables or a SQLite file: --sql 'select ...' |  | `deft sheet query people.csv --sql 'select name, age from people where age > 30 order by age desc' -o adults.csv` |
 | `deft sheet split` | Split up: --sheets, --columns city or --every 1000 |  | `deft sheet split book.xlsx --sheets -o parts/` |
 | `deft sheet stats` | Per-column counts, empties, min, max, mean, sum |  | `deft sheet stats people.csv` |
 | `deft sheet to-md` | Markdown table (first row is the header) |  | `deft sheet to-md people.csv -o people.md` |

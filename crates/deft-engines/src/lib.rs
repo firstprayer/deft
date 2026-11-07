@@ -34,12 +34,6 @@ pub const ENGINES: &[Engine] = &[
         manual: "brew install ffmpeg | apt install ffmpeg | winget install ffmpeg",
     },
     Engine {
-        name: "sqlite3",
-        purpose: "SQL over tables and SQLite files",
-        version_arg: "--version",
-        manual: "brew install sqlite | apt install sqlite3 | winget install sqlite",
-    },
-    Engine {
         name: "chrome",
         purpose: "exact web page rendering (Chrome, Chromium or Edge)",
         version_arg: "--version",

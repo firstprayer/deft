@@ -61,7 +61,7 @@ deft pdf fill form.pdf --data values.json --flatten -o filled.pdf
 
 ## Engines
 
-`video` and `audio` use ffmpeg, and so does reading HEIC and AVIF. A few commands call other installed programs: tesseract for OCR, sqlite3 for `sheet query`, bsdtar for RAR, and Chrome for `html screenshot` and `html to-pdf --browser`. `deft doctor` shows what is available.
+`video` and `audio` use ffmpeg, and so does reading HEIC and AVIF. A few commands call other installed programs: tesseract for OCR, bsdtar for RAR, and Chrome for `html screenshot` and `html to-pdf --browser`. `deft doctor` shows what is available.
 
 ## Documentation
 

@@ -4,13 +4,17 @@
 use calamine::{Data, Reader, open_workbook_auto_from_rs};
 use deft_core::error::{ErrorCode, Result, err};
 use deft_core::format::Format;
+use regex::Regex;
 use std::io::Cursor;
+use std::sync::LazyLock;
 
 mod ops;
 mod query;
+mod sql;
 
 pub use ops::*;
 pub use query::{Filter, parse_filter};
+pub use sql::{Database, SqlColumn, sql_columns};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Cell {
@@ -49,6 +53,9 @@ impl std::fmt::Display for Cell {
 pub struct Table {
     pub name: String,
     pub rows: Vec<Vec<Cell>>,
+    /// Row and column of the first cell, counted from 0. A sheet need not
+    /// start at A1, and readers drop the empty rows and columns before it.
+    pub origin: (usize, usize),
 }
 
 impl Table {
@@ -105,20 +112,48 @@ pub fn read_workbook(bytes: &[u8]) -> Result<Vec<Table>> {
             .worksheet_range(&name)
             .map_err(|e| err(ErrorCode::InputCorrupt, format!("sheet {name}: {e}")))?;
         let rows = range.rows().map(|r| r.iter().map(cell).collect()).collect();
-        out.push(Table { name, rows });
+        let origin = range
+            .start()
+            .map_or((0, 0), |(r, c)| (r as usize, c as usize));
+        out.push(Table { name, rows, origin });
     }
     Ok(out)
 }
 
-fn parse_scalar(s: &str) -> Cell {
+/// A number written the European way, such as 3,50 or 1.234,56.
+fn comma_decimal(s: &str) -> Option<f64> {
+    static FORM: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"^-?(0|[1-9][0-9]*|[1-9][0-9]{0,2}(\.[0-9]{3})+),[0-9]+$").expect("valid")
+    });
+    FORM.is_match(s)
+        .then(|| s.replace('.', "").replace(',', ".").parse().ok())
+        .flatten()
+}
+
+/// Text that only looks like a number: an identifier such as 12E3, or a whole
+/// number with more digits than a floating-point number can hold.
+fn number_in_name_only(s: &str, n: f64) -> bool {
+    let digits = s.strip_prefix('-').unwrap_or(s);
+    let whole = digits.bytes().all(|b| b.is_ascii_digit());
+    let bare_exponent = digits
+        .split_once(['e', 'E'])
+        .is_some_and(|(m, e)| !m.contains('.') && e.bytes().all(|b| b.is_ascii_digit()));
+    bare_exponent || (whole && format!("{n:.0}") != s)
+}
+
+pub(crate) fn parse_scalar(s: &str, decimal_comma: bool) -> Cell {
     if s.is_empty() {
         return Cell::Empty;
     }
+    if decimal_comma && let Some(n) = comma_decimal(s) {
+        return Cell::Decimal(n, s.to_string());
+    }
     // Keep identifiers such as 007 or +1234 as text.
-    let leading_zero = s.len() > 1 && s.starts_with('0') && !s.starts_with("0.");
+    let digits = s.strip_prefix('-').unwrap_or(s);
+    let leading_zero = digits.len() > 1 && digits.starts_with('0') && !digits.starts_with("0.");
     let plain = !leading_zero && !s.starts_with('+');
     match s.parse::<f64>() {
-        Ok(n) if plain && n.is_finite() => {
+        Ok(n) if plain && n.is_finite() && !number_in_name_only(s, n) => {
             let cell = Cell::Number(n);
             if cell.to_string() == s {
                 cell
@@ -130,14 +165,50 @@ fn parse_scalar(s: &str) -> Cell {
     }
 }
 
+/// The delimiter of a CSV file: whichever is most common in its first line,
+/// not counting quoted text. Ties go to the comma.
+fn detect_delimiter(bytes: &[u8]) -> u8 {
+    const CANDIDATES: [u8; 4] = [b',', b'\t', b';', b'|'];
+    let mut counts = [0usize; 4];
+    let mut quoted = false;
+    for b in bytes {
+        match b {
+            b'"' => quoted = !quoted,
+            b'\n' if !quoted => break,
+            b if !quoted => {
+                if let Some(i) = CANDIDATES.iter().position(|d| d == b) {
+                    counts[i] += 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    let best = counts.iter().copied().max().unwrap_or(0);
+    let at = counts.iter().position(|c| *c == best).unwrap_or(0);
+    CANDIDATES[at]
+}
+
+/// UTF-16 text with a byte order mark, which is what Excel calls Unicode Text.
+fn decode_utf16(bytes: &[u8]) -> Option<String> {
+    let (body, read): (_, fn([u8; 2]) -> u16) = match bytes {
+        [0xFF, 0xFE, rest @ ..] => (rest, u16::from_le_bytes),
+        [0xFE, 0xFF, rest @ ..] => (rest, u16::from_be_bytes),
+        _ => return None,
+    };
+    let units = body.chunks_exact(2).map(|c| read([c[0], c[1]]));
+    Some(
+        char::decode_utf16(units)
+            .map(|c| c.unwrap_or('\u{FFFD}'))
+            .collect(),
+    )
+}
+
 /// Read CSV; the delimiter is detected from the first line.
 pub fn read_csv(bytes: &[u8], name: &str) -> Result<Table> {
-    let head = bytes.split(|b| *b == b'\n').next().unwrap_or_default();
-    let delimiter = [b',', b'\t', b';', b'|']
-        .into_iter()
-        .max_by_key(|d| head.iter().filter(|b| *b == d).count())
-        .unwrap_or(b',');
+    let decoded = decode_utf16(bytes);
+    let bytes = decoded.as_deref().map_or(bytes, str::as_bytes);
     let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes);
+    let delimiter = detect_delimiter(bytes);
     let mut r = csv::ReaderBuilder::new()
         .has_headers(false)
         .flexible(true)
@@ -145,12 +216,21 @@ pub fn read_csv(bytes: &[u8], name: &str) -> Result<Table> {
         .from_reader(bytes);
     let mut rows = Vec::new();
     for rec in r.records() {
-        let rec = rec.map_err(|e| err(ErrorCode::InputCorrupt, format!("csv: {e}")))?;
-        rows.push(rec.iter().map(parse_scalar).collect());
+        let rec = rec.map_err(|e| match e.kind() {
+            csv::ErrorKind::Utf8 { .. } => err(ErrorCode::InputCorrupt, "csv: not UTF-8 text")
+                .hint("convert it first: deft file encoding <file> -o utf8.csv"),
+            _ => err(ErrorCode::InputCorrupt, format!("csv: {e}")),
+        })?;
+        rows.push(
+            rec.iter()
+                .map(|s| parse_scalar(s, delimiter == b';'))
+                .collect(),
+        );
     }
     Ok(Table {
         name: name.into(),
         rows,
+        ..Table::default()
     })
 }
 
@@ -168,7 +248,8 @@ pub fn read_json(bytes: &[u8], name: &str) -> Result<Table> {
     let to_cell = |v: &Value| match v {
         Value::Null => Cell::Empty,
         Value::Bool(b) => Cell::Bool(*b),
-        Value::Number(n) => Cell::Number(n.as_f64().unwrap_or(0.0)),
+        Value::Number(n) if n.is_f64() => Cell::Number(n.as_f64().unwrap_or(0.0)),
+        Value::Number(n) => parse_scalar(&n.to_string(), false),
         Value::String(s) => Cell::Text(s.clone()),
         other => Cell::Text(other.to_string()),
     };
@@ -203,6 +284,7 @@ pub fn read_json(bytes: &[u8], name: &str) -> Result<Table> {
     Ok(Table {
         name: name.into(),
         rows,
+        ..Table::default()
     })
 }
 
@@ -231,21 +313,34 @@ pub fn write_csv(t: &Table) -> Result<Vec<u8>> {
         .map_err(|e| err(ErrorCode::Internal, e.to_string()))
 }
 
+/// One name per column: an empty header becomes column3, and a repeated one
+/// gets _2, ignoring case. A key may only appear once in JSON or in SQL.
+pub(crate) fn unique_names(head: &[String], columns: usize) -> Vec<String> {
+    let mut used = std::collections::HashSet::new();
+    (0..columns)
+        .map(|i| {
+            let base = match head.get(i) {
+                Some(h) if !h.is_empty() => h.clone(),
+                _ => format!("column{}", i + 1),
+            };
+            let (mut name, mut n) = (base.clone(), 1);
+            while !used.insert(name.to_lowercase()) {
+                n += 1;
+                name = format!("{base}_{n}");
+            }
+            name
+        })
+        .collect()
+}
+
 /// JSON array of objects keyed by the first row.
 pub fn write_json(t: &Table) -> Result<Vec<u8>> {
     use serde_json::{Map, Value, json};
     let Some((head, body)) = t.rows.split_first() else {
         return Ok(b"[]\n".to_vec());
     };
-    let keys: Vec<String> = head
-        .iter()
-        .enumerate()
-        .map(|(i, c)| {
-            Some(c.to_string())
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| format!("column{}", i + 1))
-        })
-        .collect();
+    let names: Vec<String> = head.iter().map(|c| c.to_string()).collect();
+    let keys = unique_names(&names, names.len());
     let rows: Vec<Value> = body
         .iter()
         .map(|r| {
@@ -360,41 +455,87 @@ pub fn parse_range(s: &str) -> Option<(usize, usize, usize, usize)> {
     Some((r1.min(r2), c1.min(c2), r1.max(r2), c1.max(c2)))
 }
 
+/// The cells of a range, which counts from A1 wherever the data starts.
 pub fn slice(t: &Table, range: (usize, usize, usize, usize)) -> Table {
     let (r1, c1, r2, c2) = range;
-    // A range past the data, like A1:ZZ11, means "up to the last column".
-    let c2 = c2.min(t.columns().saturating_sub(1)).max(c1);
-    let rows = t
-        .rows
-        .iter()
-        .skip(r1)
-        .take(r2 + 1 - r1)
-        .map(|row| {
-            (c1..=c2)
-                .map(|c| row.get(c).cloned().unwrap_or(Cell::Empty))
-                .collect()
-        })
+    let (top, left) = t.origin;
+    // A range past the data, like A1:ZZ11, means "up to the last cell".
+    let c2 = c2.min((left + t.columns()).saturating_sub(1)).max(c1);
+    let r2 = r2.min((top + t.rows.len()).saturating_sub(1));
+    let cell = |r: usize, c: usize| {
+        let row = r.checked_sub(top).and_then(|r| t.rows.get(r));
+        let found = row.and_then(|row| c.checked_sub(left).and_then(|c| row.get(c)));
+        found.cloned().unwrap_or(Cell::Empty)
+    };
+    let rows = (r1..=r2)
+        .map(|r| (c1..=c2).map(|c| cell(r, c)).collect())
         .collect();
     Table {
         name: t.name.clone(),
         rows,
+        ..Table::default()
     }
 }
 
-/// Append tables; when all share the same first row, it is kept once.
-pub fn concat(tables: &[Table]) -> Table {
-    let same_header = tables
-        .windows(2)
-        .all(|w| w[0].rows.first() == w[1].rows.first());
-    let mut rows = Vec::new();
-    for (i, t) in tables.iter().enumerate() {
-        let skip = usize::from(i > 0 && same_header);
-        rows.extend(t.rows.iter().skip(skip).cloned());
+/// Stack tables. Columns line up by header name and new ones go on the right,
+/// so files may order their columns differently. Tables that share no header
+/// with the first are stacked as they are; the second value says so.
+pub fn concat(tables: &[Table]) -> (Table, bool) {
+    let name = tables.first().map(|t| t.name.clone()).unwrap_or_default();
+    let names = |t: &Table| -> Vec<String> { crate::headers(t) };
+    let mut head = tables.first().map(&names).unwrap_or_default();
+    let shares = |t: &Table| names(t).iter().any(|h| !h.is_empty() && head.contains(h));
+    if !tables.iter().skip(1).all(shares) {
+        let rows = tables.iter().flat_map(|t| t.rows.iter().cloned()).collect();
+        let table = Table {
+            name,
+            rows,
+            ..Table::default()
+        };
+        return (table, true);
     }
-    Table {
-        name: tables.first().map(|t| t.name.clone()).unwrap_or_default(),
+    let mut rows = tables
+        .first()
+        .map(|t| t.rows.iter().skip(1).cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    for t in tables.iter().skip(1) {
+        // Where each column of this table goes; a repeated name takes the next match.
+        let mut taken = vec![false; head.len()];
+        let mut places = Vec::new();
+        for h in names(t) {
+            let at = (0..head.len()).find(|&i| head[i] == h && !taken[i]);
+            let at = at.unwrap_or_else(|| {
+                head.push(h.clone());
+                taken.push(false);
+                head.len() - 1
+            });
+            taken[at] = true;
+            places.push(at);
+        }
+        for row in t.rows.iter().skip(1) {
+            let mut out = vec![Cell::Empty; head.len()];
+            for (cell, &at) in row.iter().zip(&places) {
+                out[at] = cell.clone();
+            }
+            rows.push(out);
+        }
+    }
+    let width = head.len();
+    rows.iter_mut().for_each(|r| {
+        if r.len() < width {
+            r.resize(width, Cell::Empty);
+        }
+    });
+    rows.insert(
+        0,
+        head.into_iter().map(|h| parse_scalar(&h, false)).collect(),
+    );
+    let table = Table {
+        name,
         rows,
-    }
+        ..Table::default()
+    };
+    (table, false)
 }
 
 #[cfg(test)]
