@@ -34,12 +34,18 @@ pub fn ffmpeg(job: &Job, id: &str, args: Vec<String>) -> Result<()> {
 }
 
 /// The end of an ffmpeg command that writes audio: encoder options, then the file.
+/// Cover art counts as a video stream, so `-vn` keeps it out of the output.
 pub fn audio_out(job: &Job, id: &str, format: Format, out: &Path) -> Result<Vec<String>> {
-    let mut args = Vec::new();
+    let mut args = strs(&["-vn"]);
     if format == Format::Ogg {
         let path = deft_engines::require(job.ctx, "ffmpeg", id)?;
         let list = deft_engines::run(job.ctx, &path, &strs(&["-hide_banner", "-encoders"]))?;
-        args = deft_engines::vorbis_args(&String::from_utf8_lossy(&list.stdout));
+        args.extend(deft_engines::vorbis_args(&String::from_utf8_lossy(
+            &list.stdout,
+        )));
+    }
+    if format == Format::Mp3 {
+        args.extend(strs(&["-q:a", "2"]));
     }
     args.push(out.display().to_string());
     Ok(args)
@@ -146,6 +152,18 @@ pub fn end_args(p: &Params) -> Result<Vec<String>> {
     Ok(vec!["-t".to_string(), format!("{}", end - start)])
 }
 
+/// Refuse a `--from` at or past the end, which ffmpeg turns into an empty or
+/// wrong file without an error.
+pub fn check_from(p: &Params, length: f64) -> Result<()> {
+    match p.opt_seconds("from") {
+        Some(from) if length > 0.0 && from >= length => Err(bad_value(
+            "from",
+            format!("{from}s is past the end ({})", format_duration(length)),
+        )),
+        _ => Ok(()),
+    }
+}
+
 /// ffmpeg scale expression for a size spec, keeping dimensions even.
 pub fn scale_filter(s: &SizeSpec) -> String {
     if let Some(p) = s.percent {
@@ -166,15 +184,19 @@ pub fn scale_filter(s: &SizeSpec) -> String {
 pub fn video_size(info: &Json) -> Option<(u32, u32)> {
     let v = stream(info, "video")?;
     let (w, h) = (v["width"].as_u64()? as u32, v["height"].as_u64()? as u32);
-    let rotation = v["side_data_list"]
-        .as_array()
-        .and_then(|l| l.iter().find_map(|d| d["rotation"].as_f64()))
-        .unwrap_or(0.0);
-    Some(if (rotation.abs() as i64) % 180 == 90 {
+    Some(if (rotation(info).abs() as i64) % 180 == 90 {
         (h, w)
     } else {
         (w, h)
     })
+}
+
+/// Degrees a player turns the first video stream, from its rotation metadata.
+pub fn rotation(info: &Json) -> f64 {
+    stream(info, "video")
+        .and_then(|v| v["side_data_list"].as_array())
+        .and_then(|l| l.iter().find_map(|d| d["rotation"].as_f64()))
+        .unwrap_or(0.0)
 }
 
 /// The `atempo` chain for a speed factor. One stage only spans 0.5 to 2.
@@ -217,8 +239,7 @@ pub fn filter_audio(job: &Job, id: &str, filter: &str) -> Result<OpResult> {
     let out = temp_out(job, format);
     let mut args = strs(&["-i"]);
     args.push(input_path(job)?);
-    args.extend(strs(&["-vn", "-af"]));
-    args.push(filter.to_string());
+    args.extend(["-af".to_string(), filter.to_string()]);
     args.extend(audio_out(job, id, format, &out)?);
     ffmpeg(job, id, args)?;
     Ok(file_result(out, format))
@@ -266,57 +287,4 @@ pub fn segments(
 
 pub fn file_result(path: PathBuf, format: Format) -> OpResult {
     OpResult::one(Produced::file(path, Some(format)))
-}
-
-/// Concatenate inputs with the concat filter, normalising video size.
-pub fn concat_args(job: &Job, id: &str, video: bool) -> Result<Vec<String>> {
-    let mut args = Vec::new();
-    let mut size = None;
-    let mut all_audio = true;
-    for i in &job.inputs {
-        args.extend([
-            "-i".to_string(),
-            i.local_path(job.ctx)?.display().to_string(),
-        ]);
-        let info = probe(job, i, id)?;
-        all_audio &= stream(&info, "audio").is_some();
-        if size.is_none()
-            && let Some(v) = stream(&info, "video")
-        {
-            size = Some((
-                v["width"].as_i64().unwrap_or(1280),
-                v["height"].as_i64().unwrap_or(720),
-            ));
-        }
-    }
-    let n = job.inputs.len();
-    let mut filter = String::new();
-    let mut joined = String::new();
-    let (w, h) = size.unwrap_or((1280, 720));
-    for i in 0..n {
-        if video {
-            filter.push_str(&format!("[{i}:v]scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,setsar=1[v{i}];"));
-            joined.push_str(&format!("[v{i}]"));
-        }
-        if all_audio {
-            joined.push_str(&format!("[{i}:a]"));
-        }
-    }
-    let v = u8::from(video);
-    let a = u8::from(all_audio);
-    filter.push_str(&format!("{joined}concat=n={n}:v={v}:a={a}"));
-    if video {
-        filter.push_str("[v]");
-    }
-    if all_audio {
-        filter.push_str("[a]");
-    }
-    args.extend(["-filter_complex".to_string(), filter]);
-    if video {
-        args.extend(strs(&["-map", "[v]"]));
-    }
-    if all_audio {
-        args.extend(strs(&["-map", "[a]"]));
-    }
-    Ok(args)
 }

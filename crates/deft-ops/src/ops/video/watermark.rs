@@ -1,5 +1,6 @@
 use super::_common::{
-    FFMPEG, VIDEO, ffmpeg, file_result, input_path, probe, stream, strs, temp_out, video_codec_args,
+    FFMPEG, VIDEO, ffmpeg, file_result, input_path, probe, strs, temp_out, video_codec_args,
+    video_size,
 };
 use deft_core::format::sniff;
 use deft_core::prelude::*;
@@ -62,12 +63,8 @@ fn run(job: &Job) -> Result<OpResult> {
     let p = job.params;
     let format = job.target(job.input().require_format()?);
     let info = probe(job, job.input(), OP.id)?;
-    let v = stream(&info, "video")
-        .ok_or_else(|| err(ErrorCode::InputUnsupported, "no video stream"))?;
-    let (w, h) = (
-        v["width"].as_u64().unwrap_or(1280) as u32,
-        v["height"].as_u64().unwrap_or(720) as u32,
-    );
+    let (w, h) =
+        video_size(&info).ok_or_else(|| err(ErrorCode::InputUnsupported, "no video stream"))?;
     let mark = match (p.opt_text("text"), p.opt_path("image")) {
         (Some(_), Some(_)) => {
             return Err(err(ErrorCode::BadOption, "use --text or --image, not both"));
