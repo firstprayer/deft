@@ -35,7 +35,7 @@ fn media_type(name: &str) -> Option<&'static str> {
 
 fn run(job: &Job) -> Result<OpResult> {
     let doc = load(job.input())?;
-    let md = deft_tools_doc::markdown::render(&doc);
+    let md = deft_tools_doc::markdown::render_for_layout(&doc);
     let mut html =
         deft_tools_text::to_html(&md, !job.params.flag("fragment"), doc.title.as_deref());
     let mut skipped = 0;
@@ -46,11 +46,15 @@ fn run(job: &Job) -> Result<OpResult> {
         };
         let data = deft_tools_file::base64_encode(&image.bytes);
         html = html.replace(
-            &format!("src=\"{}\"", image.name),
+            &format!(
+                "src=\"{}\"",
+                deft_tools_doc::markdown::link_name(&image.name)
+            ),
             &format!("src=\"data:{kind};base64,{data}\""),
         );
     }
     let mut res = OpResult::one(Produced::bytes(html.into_bytes(), Format::Html));
+    res.warnings = doc.warnings;
     if skipped > 0 {
         res = res.warn(format!(
             "{skipped} pictures are in a format browsers cannot show"

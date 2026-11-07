@@ -207,6 +207,13 @@ fn expand_inputs(op: &Op, req: &Request) -> Result<Vec<InputFile>> {
                 match format {
                     Some(f) if allowed.contains(&f) => {}
                     Some(f) => {
+                        if f == Format::Xls
+                            && let Some(kind) = std::fs::read(&path)
+                                .ok()
+                                .and_then(|b| deft_core::format::ole_content(&b))
+                        {
+                            return Err(old_office(&path, kind, op));
+                        }
                         return Err(err(
                             ErrorCode::InputMismatch,
                             format!(
@@ -246,6 +253,33 @@ fn expand_inputs(op: &Op, req: &Request) -> Result<Vec<InputFile>> {
         )),
         _ => Ok(out),
     }
+}
+
+/// Refuse an old or password-protected Office file with what to do about it.
+fn old_office(path: &Path, kind: &str, op: &Op) -> DeftError {
+    let (code, what, hint) = match kind {
+        "encrypted" => (
+            ErrorCode::InputEncrypted,
+            "the document is password-protected",
+            "remove the password in Office (File > Info > Protect), save, and try again",
+        ),
+        "word" => (
+            ErrorCode::InputMismatch,
+            "this is an old Word .doc file",
+            "deft reads Word .docx; save the file as .docx first",
+        ),
+        _ => (
+            ErrorCode::InputMismatch,
+            "this is an old PowerPoint .ppt file",
+            "deft reads .pptx; save the file as .pptx first",
+        ),
+    };
+    let expected = if code == ErrorCode::InputMismatch {
+        format!(", expected {}", op.input.label)
+    } else {
+        String::new()
+    };
+    err(code, format!("{}: {what}{expected}", path.display())).hint(hint)
 }
 
 fn conversion_hint(found: Format, op: &Op) -> String {
@@ -352,7 +386,7 @@ fn plan_target(
                 match expected {
                     // Known name up front, so OUTPUT_EXISTS can be checked before running.
                     Some(f) if first.is_some_and(|i| i.url.is_none()) => {
-                        let name = default_name(op, &stem, f, first.and_then(|i| i.format));
+                        let name = default_name(op, &stem, f, first);
                         Target::File(dir.join(name))
                     }
                     _ => Target::Dir(dir),
@@ -394,11 +428,23 @@ fn plan_target(
     })
 }
 
-fn default_name(op: &Op, stem: &str, out: Format, input: Option<Format>) -> String {
+fn default_name(op: &Op, stem: &str, out: Format, input: Option<&InputFile>) -> String {
+    let format = input.and_then(|i| i.format);
     // A conversion keeps the stem; a same-format edit adds a suffix so the
     // input is never overwritten.
-    if op.suffix.is_some() || input == Some(out) {
-        format!("{stem}.{}.{}", op.suffix.unwrap_or(op.command()), out.ext())
+    if op.suffix.is_some() || format == Some(out) {
+        // A variant deft has no name for, such as a macro-enabled .docm or a
+        // .dotx template, keeps its extension: the file is still one.
+        let own = input
+            .and_then(|i| i.path.as_deref())
+            .and_then(|p| p.extension())
+            .and_then(|e| e.to_str())
+            .filter(|e| format == Some(out) && Format::from_name(e).is_none());
+        format!(
+            "{stem}.{}.{}",
+            op.suffix.unwrap_or(op.command()),
+            own.unwrap_or(out.ext())
+        )
     } else {
         format!("{stem}.{}", out.ext())
     }
@@ -534,6 +580,16 @@ pub fn execute(op: &'static Op, mut req: Request, ctx: &Ctx) -> Result<Report> {
     }
 
     let params = &req.params;
+    let out_dirs: Vec<Option<PathBuf>> = planned
+        .iter()
+        .map(|t| match t {
+            Target::File(p) | Target::Single(p) => {
+                Some(p.parent().map(Path::to_path_buf).unwrap_or_default())
+            }
+            Target::Dir(d) => Some(d.clone()),
+            Target::None | Target::Stdout => None,
+        })
+        .collect();
     let results: Vec<Slot> = jobs.iter().map(|_| Mutex::new(None)).collect();
     let queue: Mutex<Vec<(usize, Vec<InputFile>)>> =
         Mutex::new(jobs.into_iter().enumerate().rev().collect());
@@ -549,6 +605,7 @@ pub fn execute(op: &'static Op, mut req: Request, ctx: &Ctx) -> Result<Report> {
                         params,
                         ctx,
                         out_format,
+                        out_dir: out_dirs[index].clone(),
                     };
                     let outcome =
                         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (op.run)(&job)))
@@ -690,12 +747,7 @@ fn deliver(
                         // An explicit -o dir/ keeps the original file name.
                         format!("{stem}.{ext}")
                     } else {
-                        default_name(
-                            op,
-                            &stem,
-                            p.format.unwrap_or(Format::Txt),
-                            inputs.first().and_then(|i| i.format),
-                        )
+                        default_name(op, &stem, p.format.unwrap_or(Format::Txt), inputs.first())
                     }
                 });
                 let dest = d.join(sanitize(&name));
@@ -951,6 +1003,7 @@ pub fn convert(req: Request, to: Option<String>, ctx: &Ctx) -> Result<Report> {
                     params: &params,
                     ctx,
                     out_format: Some(*step_to),
+                    out_dir: None,
                 };
                 let mut res = (op.run)(&job)?;
                 warnings.append(&mut res.warnings);
@@ -1055,4 +1108,43 @@ pub fn convert(req: Request, to: Option<String>, ctx: &Ctx) -> Result<Report> {
         stdout: stdout_bytes,
         chain: chain_ids,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn edits_keep_an_extension_deft_has_no_name_for() {
+        let reg = registry();
+        let op = reg.ops.iter().find(|o| o.id == "doc.replace").unwrap();
+        let file = |name: &str| InputFile::file(PathBuf::from(name), Some(Format::Docx));
+        let name = |f: &InputFile| default_name(op, &f.stem(), Format::Docx, Some(f));
+        assert_eq!(name(&file("a.docm")), "a.replaced.docm");
+        assert_eq!(name(&file("t.dotx")), "t.replaced.dotx");
+        assert_eq!(name(&file("a.docx")), "a.replaced.docx");
+        // Content that is not what its extension says gets the right one.
+        assert_eq!(name(&file("a.zip")), "a.replaced.docx");
+    }
+
+    #[test]
+    fn old_and_locked_office_files_say_so() {
+        let reg = registry();
+        let op = reg.ops.iter().find(|o| o.id == "doc.to-text").unwrap();
+        let ole = |stream: &str| {
+            let mut b = vec![0xD0, 0xCF, 0x11, 0xE0, 0, 0];
+            b.extend(stream.encode_utf16().flat_map(u16::to_le_bytes));
+            b
+        };
+        let kind = |s: &str| deft_core::format::ole_content(&ole(s));
+        assert_eq!(kind("EncryptedPackage"), Some("encrypted"));
+        assert_eq!(kind("WordDocument"), Some("word"));
+        assert_eq!(kind("Workbook"), None);
+        let e = old_office(Path::new("a.docx"), "encrypted", op);
+        assert_eq!(e.code, ErrorCode::InputEncrypted);
+        assert_eq!(e.message, "a.docx: the document is password-protected");
+        let e = old_office(Path::new("a.doc"), "word", op);
+        assert_eq!(e.code, ErrorCode::InputMismatch);
+        assert!(e.message.contains("old Word .doc"), "{}", e.message);
+    }
 }

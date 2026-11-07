@@ -15,7 +15,7 @@ pub static OP: Op = Op {
 
 fn run(job: &Job) -> Result<OpResult> {
     let b = load(job.input())?;
-    let words = b.markdown()?.split_whitespace().count();
+    let words = deft_core::text::count_words(&b.markdown()?);
     let note = format!("{} chapters", b.chapters.len());
     Ok(OpResult::report(
         facts![

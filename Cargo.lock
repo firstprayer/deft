@@ -909,7 +909,10 @@ name = "deft-tools-doc"
 version = "0.1.0"
 dependencies = [
  "deft-core",
+ "encoding_rs",
  "htmd",
+ "html5ever",
+ "markup5ever_rcdom",
  "pulldown-cmark",
  "regex",
  "roxmltree 0.21.2",

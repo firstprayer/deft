@@ -146,9 +146,9 @@ impl Book {
             }
         }
         // Images sit in folders inside the book; keep only their file names.
-        let re = regex::Regex::new(r"!\[([^\]]*)\]\((?:[^)/]*/)*([^)/]+)\)")
+        let re = regex::Regex::new(r#"!\[([^\]]*)\]\((?:[^)/\s]*/)*([^)/\s]+)((?:\s+"[^"]*")?)\)"#)
             .map_err(|e| bad("regex", e))?;
-        let out = re.replace_all(&out, "![$1]($2)");
+        let out = re.replace_all(&out, "![$1]($2$3)");
         // Links between chapters lead nowhere once the book is one file.
         let inner = regex::Regex::new(r"(^|[^!])\[([^\]]*)\]\([^):\s]*\.x?html?(?:#[^)\s]*)?\)")
             .map_err(|e| bad("regex", e))?;
@@ -163,7 +163,7 @@ fn xml_text(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
-/// What `write` needs. Chapters are (title, XHTML body).
+/// What `write` needs. Chapters are (title, XHTML body); see `xhtml::for_book`.
 pub struct NewBook<'a> {
     pub title: &'a str,
     pub author: Option<&'a str>,
@@ -188,13 +188,9 @@ fn media_type(name: &str) -> &'static str {
     }
 }
 
-/// Close void tags from raw HTML, which XHTML readers otherwise refuse.
-fn closed_void_tags(html: &str) -> Result<String> {
-    let re = regex::Regex::new(
-        r"(?i)<(area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)\b([^>]*?)/?>",
-    )
-    .map_err(|e| bad("regex", e))?;
-    Ok(re.replace_all(html, "<$1$2/>").to_string())
+/// The file name of chapter `i`, counted from 0, inside the book.
+pub fn chapter_name(i: usize) -> String {
+    format!("chapter-{:03}.xhtml", i + 1)
 }
 
 /// Write an EPUB 3 file, stable from one run to the next.
@@ -204,7 +200,7 @@ pub fn write(book: &NewBook) -> Result<Vec<u8>> {
     let mut nav = String::new();
     let mut files: Vec<(String, Vec<u8>)> = Vec::new();
     for (i, (title, body)) in book.chapters.iter().enumerate() {
-        let name = format!("chapter-{:03}.xhtml", i + 1);
+        let name = chapter_name(i);
         manifest.push_str(&format!(
             "<item id=\"c{i}\" href=\"{name}\" media-type=\"application/xhtml+xml\"/>\n"
         ));
@@ -217,7 +213,7 @@ pub fn write(book: &NewBook) -> Result<Vec<u8>> {
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE html>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xml:lang=\"{lang}\"><head><title>{t}</title></head><body>\n{body}</body></html>\n",
             lang = xml_text(book.language),
             t = xml_text(title),
-            body = closed_void_tags(body)?,
+            body = body,
         );
         files.push((format!("OEBPS/{name}"), page.into_bytes()));
     }

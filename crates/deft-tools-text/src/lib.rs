@@ -16,6 +16,8 @@ use typst::{Library, World};
 use typst_kit::fonts::FontStore;
 use typst_layout::PagedDocument;
 
+mod table;
+
 fn options() -> Options {
     Options::ENABLE_TABLES
         | Options::ENABLE_STRIKETHROUGH
@@ -49,10 +51,207 @@ const CSS: &str = "body{max-width:46rem;margin:2rem auto;padding:0 1rem;font:16p
 pre{background:#f6f8fa;padding:.8rem;overflow:auto;border-radius:6px}code{font:.9em ui-monospace,Menlo,Consolas,monospace}\
 table{border-collapse:collapse}th,td{border:1px solid #d0d7de;padding:.3rem .6rem}blockquote{margin:0;padding:0 1rem;color:#59636e;border-left:.25rem solid #d0d7de}img{max-width:100%}";
 
-/// Render Markdown to HTML. `standalone` wraps it in a full page.
-pub fn to_html(md: &str, standalone: bool, page_title: Option<&str>) -> String {
+/// The anchor of every heading, in order, as `md toc` and GitHub make them.
+pub fn heading_ids(md: &str) -> Vec<String> {
+    let mut anchors = deft_core::text::Anchors::default();
+    let mut out = Vec::new();
+    let mut text: Option<String> = None;
+    for ev in Parser::new_ext(md, options()) {
+        match ev {
+            Event::Start(Tag::Heading { .. }) => text = Some(String::new()),
+            Event::End(TagEnd::Heading(_)) => {
+                out.push(anchors.next(&text.take().unwrap_or_default()));
+            }
+            Event::Text(t) | Event::Code(t) => {
+                if let Some(h) = text.as_mut() {
+                    h.push_str(&t);
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Every element HTML defines. Inline raw HTML with another name, such as
+/// the `<T>` of `Cell<T>`, is text a writer forgot to quote.
+const HTML_TAGS: &[&str] = &[
+    "a",
+    "abbr",
+    "address",
+    "area",
+    "article",
+    "aside",
+    "audio",
+    "b",
+    "base",
+    "bdi",
+    "bdo",
+    "big",
+    "blockquote",
+    "body",
+    "br",
+    "button",
+    "canvas",
+    "caption",
+    "center",
+    "cite",
+    "code",
+    "col",
+    "colgroup",
+    "data",
+    "datalist",
+    "dd",
+    "del",
+    "details",
+    "dfn",
+    "dialog",
+    "div",
+    "dl",
+    "dt",
+    "em",
+    "embed",
+    "fieldset",
+    "figcaption",
+    "figure",
+    "font",
+    "footer",
+    "form",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "head",
+    "header",
+    "hgroup",
+    "hr",
+    "html",
+    "i",
+    "iframe",
+    "img",
+    "input",
+    "ins",
+    "kbd",
+    "label",
+    "legend",
+    "li",
+    "link",
+    "main",
+    "map",
+    "mark",
+    "math",
+    "menu",
+    "meta",
+    "meter",
+    "nav",
+    "noscript",
+    "object",
+    "ol",
+    "optgroup",
+    "option",
+    "output",
+    "p",
+    "param",
+    "picture",
+    "pre",
+    "progress",
+    "q",
+    "rp",
+    "rt",
+    "ruby",
+    "s",
+    "samp",
+    "script",
+    "search",
+    "section",
+    "select",
+    "slot",
+    "small",
+    "source",
+    "span",
+    "strike",
+    "strong",
+    "style",
+    "sub",
+    "summary",
+    "sup",
+    "svg",
+    "table",
+    "tbody",
+    "td",
+    "template",
+    "textarea",
+    "tfoot",
+    "th",
+    "thead",
+    "time",
+    "title",
+    "tr",
+    "track",
+    "tt",
+    "u",
+    "ul",
+    "var",
+    "video",
+    "wbr",
+];
+
+/// Whether inline raw HTML is a real tag, or a comment or declaration.
+fn is_markup(html: &str) -> bool {
+    let rest = html.trim_start_matches('<').trim_start_matches('/');
+    if rest.starts_with(['!', '?']) {
+        return true;
+    }
+    let name: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '-')
+        .collect::<String>()
+        .to_ascii_lowercase();
+    HTML_TAGS.contains(&name.as_str()) || name.contains('-')
+}
+
+/// Markdown events with an id on every heading, taken from `ids` in order,
+/// and inline tags HTML does not have turned back into text.
+fn html_events<'a>(md: &'a str, ids: &[String]) -> Vec<Event<'a>> {
+    let mut out = Vec::new();
+    let mut ids = ids.iter();
+    for ev in Parser::new_ext(md, options()) {
+        match ev {
+            Event::Start(Tag::Heading {
+                level,
+                id: None,
+                classes,
+                attrs,
+            }) => out.push(Event::Start(Tag::Heading {
+                level,
+                id: ids.next().map(|i| i.clone().into()),
+                classes,
+                attrs,
+            })),
+            Event::Start(Tag::Heading { .. }) => {
+                ids.next();
+                out.push(ev);
+            }
+            Event::InlineHtml(h) if !is_markup(&h) => out.push(Event::Text(h)),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// HTML for Markdown, without a page around it, with these heading ids.
+pub fn html_fragment(md: &str, ids: &[String]) -> String {
     let mut body = String::new();
-    pulldown_cmark::html::push_html(&mut body, Parser::new_ext(md, options()));
+    pulldown_cmark::html::push_html(&mut body, html_events(md, ids).into_iter());
+    body
+}
+
+/// Render Markdown to HTML. `standalone` wraps it in a full page. Headings
+/// get the anchors `md toc` links to.
+pub fn to_html(md: &str, standalone: bool, page_title: Option<&str>) -> String {
+    let body = html_fragment(md, &heading_ids(md));
     if !standalone {
         return body;
     }
@@ -138,15 +337,266 @@ struct Translation {
     warnings: Vec<String>,
 }
 
-fn translate(md: &str, base: Option<&Path>) -> Translation {
+/// Whether Typst can draw these picture bytes.
+fn drawable(bytes: &[u8]) -> Option<&'static str> {
+    let head = &bytes[..bytes.len().min(512)];
+    let text = String::from_utf8_lossy(head).to_ascii_lowercase();
+    Some(if head.starts_with(b"\x89PNG") {
+        "png"
+    } else if head.starts_with(&[0xFF, 0xD8]) {
+        "jpg"
+    } else if head.starts_with(b"GIF8") {
+        "gif"
+    } else if head.starts_with(b"RIFF") && head.get(8..12) == Some(b"WEBP") {
+        "webp"
+    } else if text.trim_start().starts_with("<svg") || text.contains("<svg") {
+        "svg"
+    } else {
+        return None;
+    })
+}
+
+/// The measures of the cells of every pipe table, in order: (columns,
+/// (column, measure) for each cell).
+type TableMeasures = Vec<(usize, Vec<(usize, table::Measure)>)>;
+
+fn pipe_measures(md: &str) -> TableMeasures {
+    let mut out: TableMeasures = Vec::new();
+    let mut cell: Option<String> = None;
+    let mut col = 0;
+    for ev in Parser::new_ext(md, options()) {
+        match ev {
+            Event::Start(Tag::Table(a)) => out.push((a.len(), vec![])),
+            Event::Start(Tag::TableHead | Tag::TableRow) => col = 0,
+            Event::Start(Tag::TableCell) => cell = Some(String::new()),
+            Event::End(TagEnd::TableCell) => {
+                if let (Some(text), Some(t)) = (cell.take(), out.last_mut()) {
+                    t.1.push((col, table::measure(&text)));
+                }
+                col += 1;
+            }
+            Event::Text(t) | Event::Code(t) => {
+                if let Some(c) = cell.as_mut() {
+                    c.push_str(&t);
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+struct Translator<'a> {
+    base: Option<&'a Path>,
+    files: HashMap<String, Vec<u8>>,
+    warnings: Vec<String>,
+    /// Text width and font size, for table columns.
+    width: f64,
+    font: f64,
+}
+
+impl Translator<'_> {
+    fn warn(&mut self, w: String) {
+        if !self.warnings.contains(&w) {
+            self.warnings.push(w);
+        }
+    }
+
+    /// Markup for a picture, or text saying why there is none.
+    fn image(&mut self, url: &str, alt: &str) -> String {
+        if url.starts_with("http://") || url.starts_with("https://") {
+            self.warn(format!("remote image not embedded: {url}"));
+            return format!("#link({})[{}];", lit(url), esc(url));
+        }
+        let located = |name: &str| {
+            self.base
+                .map(|b| b.join(name))
+                .unwrap_or_else(|| Path::new(name).to_path_buf())
+        };
+        let path = located(url);
+        // Markdown writes a space in a file name as %20.
+        let path = if path.exists() {
+            path
+        } else {
+            located(&percent_decode(url))
+        };
+        let Ok(bytes) = std::fs::read(&path) else {
+            self.warn(format!("image not found: {url}"));
+            return esc(&format!("[image: {url}]"));
+        };
+        let Some(ext) = drawable(&bytes) else {
+            let kind = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("this")
+                .to_ascii_uppercase();
+            self.warn(format!(
+                "{kind} pictures cannot be drawn in a PDF and were left out"
+            ));
+            let label = if alt.is_empty() { url } else { alt };
+            return esc(&format!("[picture: {label}]"));
+        };
+        let name = format!("img-{}.{ext}", self.files.len() + 1);
+        self.files.insert(name.clone(), bytes);
+        // No width: the natural size, shrunk to fit the column.
+        format!("#box(image({}));", lit(&name))
+    }
+
+    fn inline(&mut self, content: &[table::Inline], cap: f64) -> String {
+        let mut out = String::new();
+        for i in content {
+            match i {
+                table::Inline::Break => out.push_str(" \\\n"),
+                table::Inline::Image { src, alt } => {
+                    let m = self.image(src, alt);
+                    out.push_str(&m);
+                }
+                table::Inline::Text {
+                    text,
+                    bold,
+                    italic,
+                    code,
+                    strike,
+                    link,
+                } => {
+                    let text = table::break_long_words(&breakable(text), cap);
+                    let mut m = if *code {
+                        format!("#raw({});", lit(&text))
+                    } else {
+                        esc(&text)
+                    };
+                    for (on, f) in [(*bold, "strong"), (*italic, "emph"), (*strike, "strike")] {
+                        if on {
+                            m = format!("#{f}[{m}];");
+                        }
+                    }
+                    if let Some(l) = link.as_deref().filter(|l| !l.starts_with('#')) {
+                        m = format!("#link({})[{m}];", lit(l));
+                    }
+                    out.push_str(&m);
+                }
+            }
+        }
+        out
+    }
+
+    /// A table written as HTML, with its merged cells.
+    fn html_table(&mut self, rows: Vec<Vec<table::HtmlCell>>) -> String {
+        let grid = rows
+            .into_iter()
+            .map(|r| r.into_iter().map(|c| (c.colspan, c.rowspan, c)).collect())
+            .collect();
+        let (cells, n) = table::place(grid);
+        let measures: Vec<(usize, table::Measure)> = cells
+            .iter()
+            .filter(|p| p.colspan == 1)
+            .map(|p| (p.x, table::measure(&p.cell.text())))
+            .collect();
+        let cols = table::columns(n, &measures, self.width, self.font);
+        let mut out = format!("#table(columns: {},\n", cols.spec);
+        for p in &cells {
+            let cap: f64 = cols.caps[p.x..p.x + p.colspan].iter().sum();
+            let body = self.inline(&p.cell.content, cap);
+            let body = if p.cell.header {
+                format!("#strong[{body}];")
+            } else {
+                body
+            };
+            out.push_str(&format!(
+                "table.cell(x: {}, y: {}, colspan: {}, rowspan: {})[{body}],\n",
+                p.x, p.y, p.colspan, p.rowspan
+            ));
+        }
+        out.push_str(")\n\n");
+        out
+    }
+}
+
+/// Whether the first letter with a direction reads right to left, or
+/// `None` when the text has no such letter.
+fn first_strong_is_rtl(text: &str) -> Option<bool> {
+    text.chars().find_map(|c| {
+        let rtl = matches!(c as u32,
+            0x0590..=0x08FF | 0xFB1D..=0xFDFF | 0xFE70..=0xFEFF | 0x10800..=0x10FFF | 0x1E800..=0x1EFFF);
+        if rtl {
+            Some(true)
+        } else if c.is_alphabetic() {
+            Some(false)
+        } else {
+            None
+        }
+    })
+}
+
+/// Typst paper widths in points.
+fn paper_width(paper: &str) -> f64 {
+    match paper {
+        "us-letter" | "us-legal" => 612.0,
+        "a3" => 841.89,
+        "a5" => 419.53,
+        _ => 595.28,
+    }
+}
+
+fn translate(md: &str, base: Option<&Path>, style: &PdfStyle) -> Translation {
+    let mut t = Translator {
+        base,
+        files: HashMap::new(),
+        warnings: Vec::new(),
+        width: paper_width(&style.paper) - 2.0 * style.margin,
+        font: style.font_size,
+    };
+    let measures = pipe_measures(md);
+    let mut tables = 0;
+    let mut caps: Vec<f64> = Vec::new();
+    let mut cell: Option<usize> = None;
+    let mut col = 0;
+    let mut html_block: Option<String> = None;
     let mut out = String::new();
-    let mut files = HashMap::new();
-    let mut warnings = Vec::new();
     let mut code: Option<(String, String)> = None; // (language, text)
-    let mut image_alt: Option<String> = None;
+    let mut image_alt: Option<(String, String)> = None; // (url, alt)
     let mut aligns: Vec<Alignment> = Vec::new();
     let mut in_head = false;
+    // Each top-level block takes the direction of its first strong letter,
+    // as a browser does for dir="auto": Arabic and Hebrew read right to left.
+    let mut depth = 0usize;
+    let mut block_start = 0;
+    let mut direction: Option<bool> = None;
     for ev in Parser::new_ext(md, options()) {
+        let opens_block = matches!(
+            ev,
+            Event::Start(
+                Tag::Paragraph
+                    | Tag::Heading { .. }
+                    | Tag::BlockQuote(_)
+                    | Tag::List(_)
+                    | Tag::Table(_)
+                    | Tag::FootnoteDefinition(_)
+            )
+        );
+        let closes_block = matches!(
+            ev,
+            Event::End(
+                TagEnd::Paragraph
+                    | TagEnd::Heading(_)
+                    | TagEnd::BlockQuote(_)
+                    | TagEnd::List(_)
+                    | TagEnd::Table
+                    | TagEnd::FootnoteDefinition
+            )
+        );
+        if opens_block && code.is_none() && image_alt.is_none() && html_block.is_none() {
+            if depth == 0 {
+                block_start = out.len();
+                direction = None;
+            }
+            depth += 1;
+        }
+        if direction.is_none()
+            && let Event::Text(t) = &ev
+        {
+            direction = first_strong_is_rtl(t);
+        }
         if let Some((_, text)) = code.as_mut() {
             match ev {
                 Event::Text(t) => text.push_str(&t),
@@ -166,14 +616,37 @@ fn translate(md: &str, base: Option<&Path>) -> Translation {
             }
             continue;
         }
-        if let Some(alt) = image_alt.as_mut() {
+        if let Some((_, alt)) = image_alt.as_mut() {
             match ev {
                 Event::Text(t) | Event::Code(t) => alt.push_str(&t),
-                Event::End(TagEnd::Image) => image_alt = None,
+                Event::End(TagEnd::Image) => {
+                    let (url, alt) = image_alt.take().expect("in image");
+                    let m = t.image(&url, &alt);
+                    out.push_str(&m);
+                }
                 _ => {}
             }
             continue;
         }
+        if let Some(block) = html_block.as_mut() {
+            match ev {
+                Event::Html(h) => block.push_str(&h),
+                Event::End(TagEnd::HtmlBlock) => {
+                    let block = html_block.take().expect("in html");
+                    if block.trim() == "<!-- page break -->" {
+                        out.push_str("#pagebreak(weak: true)\n");
+                    } else if let Some(rows) = table::html_table(&block) {
+                        let m = t.html_table(rows);
+                        out.push_str(&m);
+                    } else {
+                        t.warn("raw HTML is skipped in PDF output".to_string());
+                    }
+                }
+                _ => {}
+            }
+            continue;
+        }
+        let cap = cell.and_then(|c| caps.get(c).copied()).unwrap_or(f64::MAX);
         match ev {
             Event::Start(tag) => match tag {
                 Tag::Heading { level, .. } => {
@@ -188,6 +661,7 @@ fn translate(md: &str, base: Option<&Path>) -> Translation {
                     out.push_str(&format!("#heading(level: {n})["));
                 }
                 Tag::Paragraph => {}
+                Tag::HtmlBlock => html_block = Some(String::new()),
                 Tag::BlockQuote(_) => out.push_str("#quote(block: true)["),
                 Tag::CodeBlock(kind) => {
                     let lang = match kind {
@@ -205,48 +679,15 @@ fn translate(md: &str, base: Option<&Path>) -> Translation {
                 Tag::Strong => out.push_str("#strong["),
                 Tag::Strikethrough => out.push_str("#strike["),
                 Tag::Link { dest_url, .. } => {
-                    if dest_url.starts_with('#') {
+                    // A link to nowhere, or to a place in the text, keeps its text.
+                    if dest_url.is_empty() || dest_url.starts_with('#') {
                         out.push_str("#[");
                     } else {
                         out.push_str(&format!("#link({})[", lit(&dest_url)));
                     }
                 }
                 Tag::Image { dest_url, .. } => {
-                    image_alt = Some(String::new());
-                    let url = dest_url.to_string();
-                    if url.starts_with("http://") || url.starts_with("https://") {
-                        warnings.push(format!("remote image not embedded: {url}"));
-                        out.push_str(&format!("#link({})[{}];", lit(&url), esc(&url)));
-                        continue;
-                    }
-                    let located = |name: &str| {
-                        base.map(|b| b.join(name))
-                            .unwrap_or_else(|| Path::new(name).to_path_buf())
-                    };
-                    let path = located(&url);
-                    // Markdown writes a space in a file name as %20.
-                    let path = if path.exists() {
-                        path
-                    } else {
-                        located(&percent_decode(&url))
-                    };
-                    match std::fs::read(&path) {
-                        Ok(bytes) => {
-                            let ext = path
-                                .extension()
-                                .and_then(|e| e.to_str())
-                                .unwrap_or("png")
-                                .to_ascii_lowercase();
-                            let name = format!("img-{}.{ext}", files.len() + 1);
-                            files.insert(name.clone(), bytes);
-                            // No width: the natural size, shrunk to fit the column.
-                            out.push_str(&format!("#box(image({}));", lit(&name)));
-                        }
-                        Err(_) => {
-                            warnings.push(format!("image not found: {url}"));
-                            out.push_str(&esc(&format!("[image: {url}]")));
-                        }
-                    }
+                    image_alt = Some((dest_url.to_string(), String::new()));
                 }
                 Tag::Table(a) => {
                     let cols: Vec<&str> = a
@@ -257,19 +698,27 @@ fn translate(md: &str, base: Option<&Path>) -> Translation {
                             _ => "left",
                         })
                         .collect();
+                    let (n, cells) = measures.get(tables).cloned().unwrap_or((a.len(), vec![]));
+                    tables += 1;
+                    let layout = table::columns(n, &cells, t.width, t.font);
+                    caps = layout.caps;
                     out.push_str(&format!(
                         "#table(columns: {}, align: ({},),\n",
-                        a.len(),
+                        layout.spec,
                         cols.join(", ")
                     ));
                     aligns = a;
                 }
                 Tag::TableHead => {
                     in_head = true;
+                    col = 0;
                     out.push_str("table.header(");
                 }
-                Tag::TableRow => {}
-                Tag::TableCell => out.push('['),
+                Tag::TableRow => col = 0,
+                Tag::TableCell => {
+                    cell = Some(col);
+                    out.push('[');
+                }
                 Tag::FootnoteDefinition(label) => {
                     out.push_str(&format!("#super[{}] ", esc(&label)))
                 }
@@ -288,17 +737,27 @@ fn translate(md: &str, base: Option<&Path>) -> Translation {
                 TagEnd::Table => {
                     out.push_str(")\n\n");
                     aligns.clear();
+                    caps.clear();
                 }
                 TagEnd::TableHead => {
                     in_head = false;
                     out.push_str("),\n");
                 }
                 TagEnd::TableRow => out.push('\n'),
-                TagEnd::TableCell => out.push_str(if in_head { "]," } else { "], " }),
+                TagEnd::TableCell => {
+                    cell = None;
+                    col += 1;
+                    out.push_str(if in_head { "]," } else { "], " });
+                }
                 _ => {}
             },
-            Event::Text(t) => out.push_str(&esc(&breakable(&t))),
-            Event::Code(t) => out.push_str(&format!("#raw({});", lit(&t))),
+            Event::Text(text) => {
+                out.push_str(&esc(&table::break_long_words(&breakable(&text), cap)))
+            }
+            Event::Code(text) => out.push_str(&format!(
+                "#raw({});",
+                lit(&table::break_long_words(&text, cap))
+            )),
             Event::SoftBreak => out.push(' '),
             Event::HardBreak => out.push_str(" \\\n"),
             Event::Rule => out.push_str("#line(length: 100%, stroke: 0.5pt + luma(180))\n\n"),
@@ -308,17 +767,22 @@ fn translate(md: &str, base: Option<&Path>) -> Translation {
                 out.push_str("#pagebreak(weak: true)\n");
             }
             Event::Html(_) | Event::InlineHtml(_) => {
-                if !warnings.iter().any(|w: &String| w.starts_with("raw HTML")) {
-                    warnings.push("raw HTML is skipped in PDF output".to_string());
-                }
+                t.warn("raw HTML is skipped in PDF output".to_string());
             }
             _ => {}
+        }
+        if closes_block {
+            depth = depth.saturating_sub(1);
+            if depth == 0 && direction == Some(true) {
+                let body = out.split_off(block_start);
+                out.push_str(&format!("#[#set text(dir: rtl)\n{body}]\n\n"));
+            }
         }
     }
     Translation {
         markup: out,
-        files,
-        warnings,
+        files: t.files,
+        warnings: t.warnings,
     }
 }
 
@@ -465,7 +929,7 @@ fn compile(
 
 /// Render Markdown to PDF. `base` resolves relative image paths.
 pub fn to_pdf(md: &str, base: Option<&Path>, style: &PdfStyle) -> Result<PdfOutput> {
-    let t = translate(md, base);
+    let t = translate(md, base, style);
     let doc_title = title(md)
         .map(|s| format!("#set document(title: {})\n", lit(&s)))
         .unwrap_or_default();

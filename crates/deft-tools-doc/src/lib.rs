@@ -4,12 +4,14 @@
 use deft_core::error::{ErrorCode, err};
 
 pub mod docx;
+mod dom;
 pub mod epub;
 pub mod html;
 pub mod markdown;
 pub mod odf;
 pub mod pptx;
 pub mod rtf;
+pub mod xhtml;
 mod zipped;
 
 /// Inline text with its style.
@@ -52,14 +54,27 @@ pub enum Block {
     /// Items, each a list of blocks.
     List {
         ordered: bool,
+        /// The number of the first item, for an ordered list.
+        start: u64,
         items: Vec<Vec<Block>>,
     },
     Quote(Vec<Block>),
     Code(String),
-    /// Rows of cells; the first row is the header.
-    Table(Vec<Vec<Vec<Span>>>),
+    /// Rows of cells; the first row is the header. Every row has a cell for
+    /// each grid column; merged cells are listed beside the rows.
+    Table(Vec<Vec<Vec<Span>>>, Vec<Merge>),
     Rule,
     PageBreak,
+}
+
+/// A merged cell: the cell at `row`, `col` covers `rows` by `cols` cells of
+/// the grid. The cells it covers are empty.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Merge {
+    pub row: usize,
+    pub col: usize,
+    pub rows: usize,
+    pub cols: usize,
 }
 
 /// An embedded picture.
@@ -75,6 +90,11 @@ pub struct Document {
     pub author: Option<String>,
     pub blocks: Vec<Block>,
     pub images: Vec<Image>,
+    /// What the reader could not keep, for the user to hear about.
+    pub warnings: Vec<String>,
+    /// PNG versions of SVG pictures, by picture name, drawn at twice their
+    /// size, for writers whose readers need one.
+    pub fallbacks: std::collections::HashMap<String, Vec<u8>>,
 }
 
 fn spans_text(spans: &[Span], out: &mut String) {
@@ -100,7 +120,7 @@ fn blocks_text(blocks: &[Block], out: &mut String) {
                 out.push_str(c);
                 out.push('\n');
             }
-            Block::Table(rows) => {
+            Block::Table(rows, _) => {
                 for row in rows {
                     let cells: Vec<String> = row
                         .iter()
@@ -130,8 +150,36 @@ impl Document {
         trimmed + "\n"
     }
 
+    /// Words as Word counts them; see `deft_core::text::count_words`.
     pub fn words(&self) -> usize {
-        self.text().split_whitespace().count()
+        deft_core::text::count_words(&self.text())
+    }
+}
+
+/// Drop blank spans and spaces at both ends of a line of spans.
+pub(crate) fn trim_spans(spans: &mut Vec<Span>) {
+    while spans
+        .last()
+        .is_some_and(|s| s.image.is_none() && s.text.trim().is_empty())
+    {
+        spans.pop();
+    }
+    if let Some(last) = spans.last_mut()
+        && last.image.is_none()
+    {
+        last.text = last.text.trim_end().to_string();
+    }
+    while spans
+        .first()
+        .is_some_and(|s| s.image.is_none() && s.text.trim().is_empty())
+    {
+        spans.remove(0);
+    }
+    if let Some(first) = spans.first_mut()
+        && first.image.is_none()
+        && !first.note
+    {
+        first.text = first.text.trim_start().to_string();
     }
 }
 

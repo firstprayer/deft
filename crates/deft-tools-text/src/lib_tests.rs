@@ -54,3 +54,59 @@ fn long_text_gets_places_to_break() {
     let plain = "short words stay as they are";
     assert_eq!(breakable(plain), plain);
 }
+
+#[test]
+fn headings_get_the_anchors_toc_links_to() {
+    let md = "# Table of Contents\n\n[top](#table-of-contents) and Cell<T> where T: Ord, <em>kept</em>\n\n## Table of Contents\n";
+    let html = to_html(md, false, None);
+    assert!(html.contains("<h1 id=\"table-of-contents\">"), "{html}");
+    assert!(html.contains("<h2 id=\"table-of-contents-1\">"), "{html}");
+    assert!(html.contains("Cell&lt;T&gt; where"), "{html}");
+    assert!(html.contains("<em>kept</em>"), "{html}");
+    assert_eq!(
+        heading_ids(md),
+        ["table-of-contents", "table-of-contents-1"]
+    );
+}
+
+#[test]
+fn pdf_survives_empty_links_and_unknown_pictures() {
+    let dir = std::env::temp_dir().join(format!("deft-text-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("pic.emf"), b"\x01\x00\x00\x00 EMF").unwrap();
+    let md = "[nowhere]() and ![a chart](pic.emf)\n\n<table><tr><th colspan=\"3\">Title over all</th></tr><tr><td rowspan=\"2\">a</td><td>b</td><td>:face_with_spiral_eyes:</td></tr><tr><td>c</td><td>d</td></tr></table>\n";
+    let out = to_pdf(md, Some(&dir), &PdfStyle::default()).unwrap();
+    assert!(out.bytes.starts_with(b"%PDF"));
+    assert!(
+        out.warnings
+            .iter()
+            .any(|w| w.contains("EMF pictures cannot be drawn")),
+        "{:?}",
+        out.warnings
+    );
+    assert!(
+        !out.warnings.iter().any(|w| w.contains("raw HTML")),
+        "{:?}",
+        out.warnings
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn right_to_left_blocks_are_set_right_to_left() {
+    let md = "Hello [world](https://a.example)\n\nإسبانيا ([الإسبانية](https://a.example): *España*)\n\n- שלום\n- עולם\n\n123 שלום\n";
+    let t = translate(md, None, &PdfStyle::default());
+    let blocks: Vec<&str> = t
+        .markup
+        .split("\n\n")
+        .filter(|b| !b.trim().is_empty())
+        .collect();
+    assert!(!blocks[0].contains("dir: rtl"), "{}", t.markup);
+    assert_eq!(
+        t.markup.matches("#[#set text(dir: rtl)").count(),
+        3,
+        "{}",
+        t.markup
+    );
+    assert!(to_pdf(md, None, &PdfStyle::default()).is_ok());
+}

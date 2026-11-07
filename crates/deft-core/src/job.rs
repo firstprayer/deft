@@ -244,6 +244,9 @@ pub struct Job<'a> {
     /// Output format requested through `-o name.ext`, when the operation can
     /// write that format.
     pub out_format: Option<Format>,
+    /// The folder the output goes to, when it is a file or folder. Links in
+    /// the output to files written beside it are relative to this.
+    pub out_dir: Option<PathBuf>,
 }
 
 impl Job<'_> {

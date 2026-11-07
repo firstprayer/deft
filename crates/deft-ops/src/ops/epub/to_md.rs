@@ -1,5 +1,5 @@
 use super::_common::{IN, load};
-use crate::generated::md::_common::save_images;
+use crate::generated::md::_common::{folder_link, relink_images, save_images};
 use deft_core::prelude::*;
 
 pub static OP: Op = Op {
@@ -25,11 +25,7 @@ fn run(job: &Job) -> Result<OpResult> {
     let mut md = b.markdown()?;
     let dir = job.params.opt_path("images");
     if let Some(d) = &dir {
-        for image in &b.images {
-            // Links keep the book's URL form, so a space is still %20.
-            let link = image.name.replace(' ', "%20");
-            md = md.replace(&format!("]({link})"), &format!("]({}/{link})", d.display()));
-        }
+        md = relink_images(&md, &b.images, &folder_link(job, d));
     }
     let warning = save_images(&b.images, dir)?;
     let mut res = OpResult::one(Produced::bytes(md.into_bytes(), Format::Md))

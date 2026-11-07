@@ -1,6 +1,6 @@
 //! Blocks to Markdown text, and Markdown text to blocks.
 
-use crate::{Block, Document, Span};
+use crate::{Block, Document, Merge, Span};
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
 fn escape(text: &str) -> String {
@@ -14,11 +14,43 @@ fn escape(text: &str) -> String {
     out
 }
 
+/// A file name as a Markdown link target: spaces and brackets would end it.
+pub fn link_name(name: &str) -> String {
+    name.replace(' ', "%20")
+        .replace('(', "%28")
+        .replace(')', "%29")
+}
+
+/// Neighbours with the same style as one span, so that emphasis marks do
+/// not meet in the middle of a word.
+fn joined(spans: &[Span]) -> Vec<Span> {
+    let mut out: Vec<Span> = Vec::new();
+    for s in spans {
+        let plain = |x: &Span| x.image.is_none() && !x.note;
+        match out.last_mut() {
+            Some(last)
+                if plain(last)
+                    && plain(s)
+                    && (last.bold, last.italic, last.code, last.strike, &last.link)
+                        == (s.bold, s.italic, s.code, s.strike, &s.link) =>
+            {
+                last.text.push_str(&s.text)
+            }
+            _ => out.push(s.clone()),
+        }
+    }
+    out
+}
+
 fn inline(spans: &[Span]) -> String {
     let mut out = String::new();
-    for s in spans {
+    for s in &joined(spans) {
         if let Some(name) = &s.image {
-            out.push_str(&format!("![{}]({name})", escape(&s.text)));
+            let picture = format!("![{}]({})", escape(&s.text), link_name(name));
+            match &s.link {
+                Some(link) => out.push_str(&format!("[{picture}]({link})")),
+                None => out.push_str(&picture),
+            }
             continue;
         }
         if s.note {
@@ -78,7 +110,7 @@ fn table(rows: &[Vec<Vec<Span>>], out: &mut String) {
 }
 
 /// `in_item` keeps a nested list against its item, which keeps the list tight.
-fn write(blocks: &[Block], prefix: &str, in_item: bool, out: &mut String) {
+fn write(blocks: &[Block], prefix: &str, in_item: bool, html: bool, out: &mut String) {
     for (i, b) in blocks.iter().enumerate() {
         if i > 0 && !(in_item && matches!(b, Block::List { .. })) {
             out.push_str(prefix.trim_end());
@@ -100,16 +132,25 @@ fn write(blocks: &[Block], prefix: &str, in_item: bool, out: &mut String) {
                     out.push('\n');
                 }
             }
-            Block::List { ordered, items } => {
+            Block::List {
+                ordered,
+                start,
+                items,
+            } => {
+                // Markdown joins two lists of the same kind into one.
+                if i > 0 && matches!(blocks[i - 1], Block::List { .. }) {
+                    out.push_str(prefix);
+                    out.push_str("<!-- -->\n\n");
+                }
                 for (n, item) in items.iter().enumerate() {
                     let marker = if *ordered {
-                        format!("{}. ", n + 1)
+                        format!("{}. ", *start + n as u64)
                     } else {
                         "- ".to_string()
                     };
                     let pad = " ".repeat(marker.len());
                     let mut body = String::new();
-                    write(item, "", true, &mut body);
+                    write(item, "", true, html, &mut body);
                     for (l, line) in body.lines().enumerate() {
                         out.push_str(prefix);
                         out.push_str(if l == 0 { &marker } else { &pad });
@@ -118,7 +159,7 @@ fn write(blocks: &[Block], prefix: &str, in_item: bool, out: &mut String) {
                     }
                 }
             }
-            Block::Quote(inner) => write(inner, &format!("{prefix}> "), false, out),
+            Block::Quote(inner) => write(inner, &format!("{prefix}> "), false, html, out),
             Block::Code(code) => {
                 out.push_str(&format!("{prefix}```\n"));
                 for line in code.lines() {
@@ -128,7 +169,14 @@ fn write(blocks: &[Block], prefix: &str, in_item: bool, out: &mut String) {
                 }
                 out.push_str(&format!("{prefix}```\n"));
             }
-            Block::Table(rows) => table(rows, out),
+            Block::Table(rows, merges) if html && !merges.is_empty() => {
+                for line in html_table(rows, merges).lines() {
+                    out.push_str(prefix);
+                    out.push_str(line);
+                    out.push('\n');
+                }
+            }
+            Block::Table(rows, _) => table(rows, out),
             Block::Rule => out.push_str("---\n"),
             Block::PageBreak => out.push_str("<!-- page break -->\n"),
         }
@@ -138,7 +186,85 @@ fn write(blocks: &[Block], prefix: &str, in_item: bool, out: &mut String) {
 /// Render a document as Markdown.
 pub fn render(doc: &Document) -> String {
     let mut out = String::new();
-    write(&doc.blocks, "", false, &mut out);
+    write(&doc.blocks, "", false, false, &mut out);
+    out
+}
+
+/// Markdown for a page or a PDF: a table with merged cells is written as
+/// HTML, which can say so. Plain Markdown pads such a table instead.
+pub fn render_for_layout(doc: &Document) -> String {
+    let mut out = String::new();
+    write(&doc.blocks, "", false, true, &mut out);
+    out
+}
+
+fn html_escape(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+fn html_inline(spans: &[Span]) -> String {
+    let mut out = String::new();
+    for s in spans {
+        if let Some(name) = &s.image {
+            out.push_str(&format!(
+                "<img src=\"{}\" alt=\"{}\">",
+                html_escape(&link_name(name)),
+                html_escape(&s.text)
+            ));
+            continue;
+        }
+        let mut body = html_escape(&s.text).replace('\n', "<br>");
+        for (on, tag) in [
+            (s.code, "code"),
+            (s.strike, "del"),
+            (s.italic, "em"),
+            (s.bold, "strong"),
+        ] {
+            if on {
+                body = format!("<{tag}>{body}</{tag}>");
+            }
+        }
+        if let Some(link) = &s.link {
+            body = format!("<a href=\"{}\">{body}</a>", html_escape(link));
+        }
+        out.push_str(&body);
+    }
+    out
+}
+
+/// A table as HTML on one line per row, with no blank line, so that
+/// Markdown keeps it as one HTML block.
+fn html_table(rows: &[Vec<Vec<Span>>], merges: &[Merge]) -> String {
+    let mut out = String::from("<table>\n");
+    for (r, row) in rows.iter().enumerate() {
+        out.push_str("<tr>");
+        for (c, cell) in row.iter().enumerate() {
+            let covered = merges.iter().any(|m| {
+                (m.row..m.row + m.rows).contains(&r)
+                    && (m.col..m.col + m.cols).contains(&c)
+                    && (m.row, m.col) != (r, c)
+            });
+            if covered {
+                continue;
+            }
+            let tag = if r == 0 { "th" } else { "td" };
+            let mut attrs = String::new();
+            if let Some(m) = merges.iter().find(|m| (m.row, m.col) == (r, c)) {
+                if m.cols > 1 {
+                    attrs.push_str(&format!(" colspan=\"{}\"", m.cols));
+                }
+                if m.rows > 1 {
+                    attrs.push_str(&format!(" rowspan=\"{}\"", m.rows));
+                }
+            }
+            out.push_str(&format!("<{tag}{attrs}>{}</{tag}>", html_inline(cell)));
+        }
+        out.push_str("</tr>\n");
+    }
+    out.push_str("</table>\n");
     out
 }
 
@@ -165,7 +291,7 @@ fn span(text: &str, style: &Style, code: bool) -> Span {
 enum Frame {
     Top(Vec<Block>),
     Quote(Vec<Block>),
-    List(bool, Vec<Vec<Block>>),
+    List(Option<u64>, Vec<Vec<Block>>),
     Item(Vec<Block>),
     Note(String, Vec<Block>),
 }
@@ -186,7 +312,10 @@ pub struct Heading {
 /// The headings of a file, found by parsing, so that fences, underlined
 /// headings and front matter are all read as a renderer reads them.
 pub fn headings(md: &str) -> Vec<Heading> {
-    let options = Options::ENABLE_TABLES | Options::ENABLE_YAML_STYLE_METADATA_BLOCKS;
+    // The parser's own metadata option also takes a "---" rule followed by
+    // text anywhere in the file for front matter, and skips what follows.
+    let md = &without_front_matter(md);
+    let options = Options::ENABLE_TABLES;
     let line_of = |at: usize| md[..at].matches('\n').count();
     let mut out: Vec<Heading> = Vec::new();
     let mut open = false;
@@ -219,6 +348,31 @@ pub fn headings(md: &str) -> Vec<Heading> {
         }
     }
     out
+}
+
+/// The text with a YAML front matter block at its very start blanked out,
+/// line for line, so line numbers stay the same.
+pub fn without_front_matter(md: &str) -> String {
+    let mut lines = md.split_inclusive('\n');
+    let Some(first) = lines.next().filter(|l| l.trim_end() == "---") else {
+        return md.to_string();
+    };
+    let mut end = None;
+    let mut at = first.len();
+    for line in lines {
+        at += line.len();
+        if matches!(line.trim_end(), "---" | "...") {
+            end = Some(at);
+            break;
+        }
+    }
+    match end {
+        Some(end) => {
+            let head: String = md[..end].chars().filter(|c| *c == '\n').collect();
+            head + &md[end..]
+        }
+        None => md.to_string(),
+    }
 }
 
 /// Parse Markdown into blocks. Image paths are kept as written in `Span::image`.
@@ -277,11 +431,18 @@ pub fn parse(md: &str) -> Vec<Block> {
             Event::Start(Tag::List(first)) => {
                 // A tight item's text has no paragraph event to flush it.
                 flush(&mut stack, &mut spans);
-                stack.push(Frame::List(first.is_some(), vec![]));
+                stack.push(Frame::List(first, vec![]));
             }
             Event::End(TagEnd::List(_)) => {
-                if let Some(Frame::List(ordered, items)) = stack.pop() {
-                    push(&mut stack, Block::List { ordered, items });
+                if let Some(Frame::List(first, items)) = stack.pop() {
+                    push(
+                        &mut stack,
+                        Block::List {
+                            ordered: first.is_some(),
+                            start: first.unwrap_or(1),
+                            items,
+                        },
+                    );
                 }
             }
             Event::Start(Tag::Item) => stack.push(Frame::Item(vec![])),
@@ -320,7 +481,7 @@ pub fn parse(md: &str) -> Vec<Block> {
             Event::Start(Tag::Table(_)) => table = Some(vec![]),
             Event::End(TagEnd::Table) => {
                 if let Some(rows) = table.take() {
-                    push(&mut stack, Block::Table(rows));
+                    push(&mut stack, Block::Table(rows, vec![]));
                 }
             }
             Event::Start(Tag::TableHead | Tag::TableRow) => {

@@ -1,7 +1,7 @@
 //! Word documents: a reader for the common structures and a small writer.
 
 use crate::zipped::{Package, join};
-use crate::{Block, Document, Image, Span, bad};
+use crate::{Block, Document, Image, Merge, Span, bad};
 use deft_core::error::Result;
 use roxmltree::{Document as Xml, Node};
 use std::collections::HashMap;
@@ -41,21 +41,35 @@ fn paragraphs_in<'a, 'i>(node: Node<'a, 'i>) -> Vec<Node<'a, 'i>> {
 }
 
 /// Add a list item `level` lists deep, under the last item of the list above.
-fn add_item(list: &mut Vec<Block>, level: usize, ordered: bool, item: Vec<Block>) {
+/// `number` is the item's number, when the list is ordered; a number that
+/// does not follow on starts a new list.
+pub(crate) fn add_item(
+    list: &mut Vec<Block>,
+    level: usize,
+    ordered: bool,
+    number: Option<u64>,
+    item: Vec<Block>,
+) {
     if level > 0
         && let Some(Block::List { items, .. }) = list.last_mut()
         && let Some(parent) = items.last_mut()
     {
-        return add_item(parent, level - 1, ordered, item);
+        return add_item(parent, level - 1, ordered, number, item);
     }
-    if let Some(Block::List { ordered: o, items }) = list.last_mut()
+    if let Some(Block::List {
+        ordered: o,
+        start,
+        items,
+    }) = list.last_mut()
         && *o == ordered
+        && number.is_none_or(|n| n == *start + items.len() as u64)
     {
         items.push(item);
         return;
     }
     list.push(Block::List {
         ordered,
+        start: number.unwrap_or(1),
         items: vec![item],
     });
 }
@@ -87,12 +101,15 @@ struct Reader<'a> {
     pkg: &'a Package,
     rels: HashMap<String, (String, bool)>,
     styles: HashMap<String, u8>,
-    /// numId -> ordered at each level, from numbering.xml.
-    ordered: HashMap<String, Vec<bool>>,
+    numbering: Numbering,
+    /// Counters by numbering key, one per level.
+    counters: HashMap<String, Vec<u64>>,
     images: Vec<Image>,
     seen: HashMap<String, String>,
     /// Notes referred to so far, as (element name, id), in reading order.
     notes: Vec<(String, String)>,
+    /// A drop capital waiting for the paragraph it belongs to.
+    dropcap: Vec<Span>,
 }
 
 impl Reader<'_> {
@@ -110,6 +127,43 @@ impl Reader<'_> {
         });
         self.seen.insert(path, name.clone());
         Some(name)
+    }
+
+    /// Whether list `id` is numbered at `level`, and the number Word shows.
+    /// Lists sharing a format count on together, unless one restarts.
+    fn number(&mut self, id: &str, level: usize) -> (bool, u64) {
+        let Some((abs, levels)) = self.numbering.nums.get(id) else {
+            return (false, 1);
+        };
+        let lvl = levels
+            .get(level)
+            .or(levels.first())
+            .copied()
+            .unwrap_or_default();
+        let restart = self
+            .numbering
+            .restarts
+            .get(id)
+            .and_then(|r| r.get(&level))
+            .copied();
+        let key = if restart.is_some() {
+            format!("num {id}")
+        } else {
+            format!("abstract {abs}")
+        };
+        let counters = self.counters.entry(key).or_default();
+        if counters.len() <= level {
+            counters.resize(level + 1, 0);
+        }
+        let n = if counters[level] == 0 {
+            restart.unwrap_or(lvl.start)
+        } else {
+            counters[level] + 1
+        };
+        counters[level] = n;
+        // A deeper level starts again under each new item.
+        counters.truncate(level + 1);
+        (lvl.ordered, n)
     }
 
     fn run(&mut self, r: Node, link: Option<&str>, out: &mut Vec<Span>) {
@@ -138,6 +192,18 @@ impl Reader<'_> {
                         if matches!(d.tag_name().name(), "drawing" | "pict") {
                             self.pictures(d, out);
                         }
+                    }
+                }
+                // A legacy form check box shows its state.
+                "fldChar" => {
+                    if let Some(b) = c.descendants().find(|d| d.tag_name().name() == "checkBox") {
+                        let state = w(b, "checked").or_else(|| w(b, "default"));
+                        let on = state.is_some_and(|s| {
+                            !matches!(s.attribute((W, "val")), Some("0" | "false"))
+                                && (s.tag_name().name() == "checked"
+                                    || s.attribute((W, "val")).is_some())
+                        });
+                        text.push(if on { '☒' } else { '☐' });
                     }
                 }
                 kind @ ("footnoteReference" | "endnoteReference") => {
@@ -309,16 +375,65 @@ impl Reader<'_> {
         }
     }
 
+    /// A table on its grid: w:gridSpan merges across, w:vMerge down.
     fn table(&mut self, t: Node) -> Block {
-        let mut rows = Vec::new();
-        for tr in self.parts_of(t, "tr") {
-            let mut row = Vec::new();
+        fn val<'a>(n: Option<Node<'a, '_>>) -> Option<&'a str> {
+            n.and_then(|x| x.attribute((W, "val")))
+        }
+        let count = |n: Option<Node>| val(n).and_then(|v| v.parse::<usize>().ok());
+        let mut rows: Vec<Vec<Vec<Span>>> = Vec::new();
+        let mut merges: Vec<Merge> = Vec::new();
+        // Grid column -> the merge a vertical run started there belongs to.
+        let mut down: HashMap<usize, usize> = HashMap::new();
+        for (r, tr) in self.parts_of(t, "tr").into_iter().enumerate() {
+            let trpr = w(tr, "trPr");
+            let mut row: Vec<Vec<Span>> = Vec::new();
+            for _ in 0..count(trpr.and_then(|p| w(p, "gridBefore")))
+                .unwrap_or(0)
+                .min(64)
+            {
+                row.push(vec![]);
+            }
             for tc in self.parts_of(tr, "tc") {
+                let tcpr = w(tc, "tcPr");
+                let span = count(tcpr.and_then(|p| w(p, "gridSpan")))
+                    .unwrap_or(1)
+                    .clamp(1, 64);
+                let col = row.len();
+                let vmerge = tcpr.and_then(|p| w(p, "vMerge"));
+                let continues = vmerge.is_some() && val(vmerge) != Some("restart");
+                if continues && let Some(&m) = down.get(&col) {
+                    merges[m].rows += 1;
+                    row.extend(std::iter::repeat_n(vec![], span));
+                    continue;
+                }
+                for c in col..col + span {
+                    down.remove(&c);
+                }
+                if vmerge.is_some() || span > 1 {
+                    if vmerge.is_some() {
+                        down.insert(col, merges.len());
+                    }
+                    merges.push(Merge {
+                        row: r,
+                        col,
+                        rows: 1,
+                        cols: span,
+                    });
+                }
                 row.push(self.flat(tc));
+                row.extend(std::iter::repeat_n(vec![], span - 1));
+            }
+            for _ in 0..count(trpr.and_then(|p| w(p, "gridAfter")))
+                .unwrap_or(0)
+                .min(64)
+            {
+                row.push(vec![]);
             }
             rows.push(row);
         }
-        Block::Table(rows)
+        merges.retain(|m| m.rows * m.cols > 1);
+        Block::Table(rows, merges)
     }
 
     fn paragraph(&mut self, p: Node, blocks: &mut Vec<Block>) {
@@ -338,12 +453,26 @@ impl Reader<'_> {
         let breaks_page = p
             .descendants()
             .any(|d| d.tag_name().name() == "br" && d.attribute((W, "type")) == Some("page"));
-        let spans = self.spans(p);
+        let mut spans = self.spans(p);
         if breaks_page {
             blocks.push(Block::PageBreak);
         }
         if spans.is_empty() {
             return;
+        }
+        // A drop capital is a paragraph of its own: it starts the next one.
+        let dropcap = ppr
+            .and_then(|x| w(x, "framePr"))
+            .and_then(|f| f.attribute((W, "dropCap")))
+            .is_some_and(|d| d != "none");
+        if dropcap {
+            self.dropcap.extend(spans);
+            return;
+        }
+        if !self.dropcap.is_empty() {
+            let mut first = std::mem::take(&mut self.dropcap);
+            first.append(&mut spans);
+            spans = first;
         }
         if let Some(level) = self.styles.get(style) {
             if *level == 0 {
@@ -361,12 +490,14 @@ impl Reader<'_> {
                 .and_then(|x| x.attribute((W, "val")))
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(0);
-            let levels = self.ordered.get(id);
-            let ordered = levels
-                .and_then(|l| l.get(level).or(l.first()))
-                .copied()
-                .unwrap_or(false);
-            add_item(blocks, level, ordered, vec![Block::Paragraph(spans)]);
+            let (ordered, number) = self.number(id, level);
+            add_item(
+                blocks,
+                level,
+                ordered,
+                ordered.then_some(number),
+                vec![Block::Paragraph(spans)],
+            );
             return;
         }
         let lower = style.to_lowercase();
@@ -415,42 +546,76 @@ fn heading_styles(pkg: &Package) -> HashMap<String, u8> {
     out
 }
 
-/// numId -> ordered at each level, following numId -> abstractNum -> formats.
-fn numbering(pkg: &Package) -> HashMap<String, Vec<bool>> {
-    let mut out = HashMap::new();
+/// One level of a list format: numbered or not, and its first number.
+#[derive(Clone, Copy, Default)]
+struct Level {
+    ordered: bool,
+    start: u64,
+}
+
+/// Numbering definitions from numbering.xml.
+#[derive(Default)]
+struct Numbering {
+    /// numId -> (abstractNumId, levels).
+    nums: HashMap<String, (String, Vec<Level>)>,
+    /// numId -> level -> start value that restarts the list there.
+    restarts: HashMap<String, HashMap<usize, u64>>,
+}
+
+fn numbering(pkg: &Package) -> Numbering {
+    let mut out = Numbering::default();
     let Some(text) = pkg.text("word/numbering.xml") else {
         return out;
     };
     let Ok(doc) = Xml::parse(&text) else {
         return out;
     };
-    let mut abstract_ordered = HashMap::new();
+    let number = |n: Option<Node>| {
+        n.and_then(|x| x.attribute((W, "val")))
+            .and_then(|v| v.parse::<u64>().ok())
+    };
+    let mut abstracts = HashMap::new();
     for a in doc
         .descendants()
         .filter(|n| n.tag_name().name() == "abstractNum")
     {
         let id = a.attribute((W, "abstractNumId")).unwrap_or("");
-        let levels: Vec<bool> = a
+        let levels: Vec<Level> = a
             .children()
             .filter(|c| c.tag_name().name() == "lvl")
-            .map(|l| {
-                w(l, "numFmt")
+            .map(|l| Level {
+                ordered: w(l, "numFmt")
                     .and_then(|f| f.attribute((W, "val")))
                     .unwrap_or("bullet")
-                    != "bullet"
+                    != "bullet",
+                start: number(w(l, "start")).unwrap_or(1),
             })
             .collect();
-        abstract_ordered.insert(id.to_string(), levels);
+        abstracts.insert(id.to_string(), levels);
     }
     for n in doc.descendants().filter(|n| n.tag_name().name() == "num") {
-        let id = n.attribute((W, "numId")).unwrap_or("");
+        let id = n.attribute((W, "numId")).unwrap_or("").to_string();
         let abs = w(n, "abstractNumId")
             .and_then(|x| x.attribute((W, "val")))
-            .unwrap_or("");
-        out.insert(
-            id.to_string(),
-            abstract_ordered.get(abs).cloned().unwrap_or_default(),
-        );
+            .unwrap_or("")
+            .to_string();
+        let levels = abstracts.get(&abs).cloned().unwrap_or_default();
+        for o in n
+            .children()
+            .filter(|c| c.tag_name().name() == "lvlOverride")
+        {
+            let level = o
+                .attribute((W, "ilvl"))
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0usize);
+            if let Some(start) = number(w(o, "startOverride")) {
+                out.restarts
+                    .entry(id.clone())
+                    .or_default()
+                    .insert(level, start);
+            }
+        }
+        out.nums.insert(id, (abs, levels));
     }
     out
 }
@@ -479,18 +644,30 @@ pub fn read(bytes: &[u8]) -> Result<Document> {
         .text("word/document.xml")
         .ok_or_else(|| bad("docx", "no word/document.xml"))?;
     let doc = Xml::parse(&xml).map_err(|e| bad("docx", e))?;
-    let body = w(doc.root_element(), "body").ok_or_else(|| bad("docx", "no document body"))?;
+    // Only one body is valid, but some writers make several; Word reads all.
+    let bodies: Vec<Node> = doc
+        .root_element()
+        .children()
+        .filter(|c| c.tag_name().name() == "body" && c.tag_name().namespace() == Some(W))
+        .collect();
+    if bodies.is_empty() {
+        return Err(bad("docx", "no document body"));
+    }
     let mut reader = Reader {
         pkg: &pkg,
         rels: relationships(&pkg, "word/document.xml"),
         styles: heading_styles(&pkg),
-        ordered: numbering(&pkg),
+        numbering: numbering(&pkg),
+        counters: HashMap::new(),
         images: vec![],
         seen: HashMap::new(),
         notes: vec![],
+        dropcap: vec![],
     };
     let mut blocks = Vec::new();
-    reader.blocks(body, &mut blocks);
+    for body in bodies {
+        reader.blocks(body, &mut blocks);
+    }
     reader.notes(&mut blocks);
     let mut out = Document {
         blocks,
@@ -561,7 +738,32 @@ fn unescape(s: &str) -> String {
 fn replace_part(xml: &str, find: &str, with: &str) -> Result<(String, usize)> {
     let t =
         regex::Regex::new(r"(<w:t(?:\s[^>]*)?>)([^<]*)(</w:t>)").map_err(|e| bad("regex", e))?;
-    let edge = regex::Regex::new(r"<w:p(?:\s[^>]*)?/?>|</w:p>").map_err(|e| bad("regex", e))?;
+    // Text is matched between these edges: paragraphs, and the two copies
+    // of a shape, so that no stretch is half in either copy.
+    let edge = regex::Regex::new(
+        r"<w:p(?:\s[^>]*)?/?>|</w:p>|<mc:(?:AlternateContent|Choice|Fallback)\b[^>]*>|</mc:(?:AlternateContent|Choice|Fallback)>",
+    )
+    .map_err(|e| bad("regex", e))?;
+    // Word writes shapes twice, the second time in mc:Fallback for old
+    // readers. Both copies change, but only the first is counted.
+    let fallback =
+        regex::Regex::new(r"<mc:Fallback\b|</mc:Fallback>").map_err(|e| bad("regex", e))?;
+    let mut copies: Vec<(usize, usize)> = Vec::new();
+    let (mut depth, mut opened) = (0usize, 0usize);
+    for m in fallback.find_iter(xml) {
+        if m.as_str().starts_with("</") {
+            depth = depth.saturating_sub(1);
+            if depth == 0 {
+                copies.push((opened, m.end()));
+            }
+        } else {
+            if depth == 0 {
+                opened = m.start();
+            }
+            depth += 1;
+        }
+    }
+    let counted = |at: usize| !copies.iter().any(|(a, b)| (*a..*b).contains(&at));
     let mut total = 0;
     let mut out = String::with_capacity(xml.len());
     let mut last = 0;
@@ -569,12 +771,17 @@ fn replace_part(xml: &str, find: &str, with: &str) -> Result<(String, usize)> {
         let (text, n) = replace_stretch(&xml[last..m.start()], &t, find, with);
         out.push_str(&text);
         out.push_str(m.as_str());
-        total += n;
+        if counted(last) {
+            total += n;
+        }
         last = m.end();
     }
     let (text, n) = replace_stretch(&xml[last..], &t, find, with);
     out.push_str(&text);
-    Ok((out, total + n))
+    if counted(last) {
+        total += n;
+    }
+    Ok((out, total))
 }
 
 /// Find `<w:t ...>text</w:t>` spans in one stretch of a paragraph; a match
@@ -647,6 +854,9 @@ struct Writer<'a> {
     media: Vec<(String, &'a [u8])>,
     next_id: usize,
     picture: usize,
+    /// Heading anchors, which name the bookmarks that `#anchor` links reach.
+    anchors: deft_core::text::Anchors,
+    bookmark: usize,
 }
 
 impl Writer<'_> {
@@ -702,8 +912,30 @@ impl Writer<'_> {
         if !self.media.iter().any(|(name, _)| *name == file) {
             self.media.push((file.clone(), &image.bytes));
         }
+        // Word shows an SVG through a PNG of it, which older readers use alone.
+        let fallback = self.doc.fallbacks.get(name);
+        let (blip, size) = match fallback {
+            Some(png) => {
+                let png_file = format!("{file}.png");
+                let png_rid = self.rel("image", &format!("media/{png_file}"), false);
+                if !self.media.iter().any(|(name, _)| *name == png_file) {
+                    self.media.push((png_file, png));
+                }
+                let size = image_size(png).map(|(w, h)| (w.div_ceil(2), h.div_ceil(2)));
+                (
+                    format!(
+                        "<a:blip r:embed=\"{png_rid}\"><a:extLst><a:ext uri=\"{{96DAC541-7B7A-43D3-8B79-37D633B846F1}}\"><asvg:svgBlip xmlns:asvg=\"http://schemas.microsoft.com/office/drawing/2016/SVG/main\" r:embed=\"{rid}\"/></a:ext></a:extLst></a:blip>"
+                    ),
+                    size,
+                )
+            }
+            None => (
+                format!("<a:blip r:embed=\"{rid}\"/>"),
+                image_size(&image.bytes),
+            ),
+        };
         self.picture += 1;
-        let (w, h) = image_size(&image.bytes).unwrap_or((640, 480));
+        let (w, h) = size.unwrap_or((640, 480));
         // 96 dpi to EMU, limited to the text width of a 6.5 inch column.
         let scale = (5_943_600.0 / (w as f64 * 9525.0)).min(1.0);
         let (cx, cy) = (
@@ -712,7 +944,7 @@ impl Writer<'_> {
         );
         let n = self.picture;
         format!(
-            "<w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\"><wp:extent cx=\"{cx}\" cy=\"{cy}\"/><wp:docPr id=\"{n}\" name=\"Picture {n}\"/><a:graphic xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:pic xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:nvPicPr><pic:cNvPr id=\"{n}\" name=\"{}\"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed=\"{rid}\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>",
+            "<w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\"><wp:extent cx=\"{cx}\" cy=\"{cy}\"/><wp:docPr id=\"{n}\" name=\"Picture {n}\"/><a:graphic xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:pic xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:nvPicPr><pic:cNvPr id=\"{n}\" name=\"{}\"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill>{blip}<a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>",
             xml_text(&file)
         )
     }
@@ -723,9 +955,13 @@ impl Writer<'_> {
             if let Some(name) = &s.image {
                 out.push_str(&self.picture(name));
             } else if let Some(link) = &s.link {
-                let rid = self.rel("hyperlink", link, true);
                 let run = self.run(s, "<w:color w:val=\"0563C1\"/><w:u w:val=\"single\"/>");
-                out.push_str(&format!("<w:hyperlink r:id=\"{rid}\">{run}</w:hyperlink>"));
+                // A link to a heading of this document goes to its bookmark.
+                let target = match link.strip_prefix('#') {
+                    Some(anchor) => format!("w:anchor=\"{}\"", xml_text(anchor)),
+                    None => format!("r:id=\"{}\"", self.rel("hyperlink", link, true)),
+                };
+                out.push_str(&format!("<w:hyperlink {target}>{run}</w:hyperlink>"));
             } else {
                 out.push_str(&self.run(s, ""));
             }
@@ -742,16 +978,21 @@ impl Writer<'_> {
         match b {
             Block::Heading(level, spans) => {
                 let body = self.spans(spans);
+                let text: String = spans.iter().map(|s| s.text.as_str()).collect();
+                let name = self.anchors.next(&text);
+                self.bookmark += 1;
+                let n = self.bookmark;
                 out.push_str(&format!(
-                    "<w:p><w:pPr><w:pStyle w:val=\"Heading{}\"/></w:pPr>{body}</w:p>",
-                    (*level).clamp(1, 6)
+                    "<w:p><w:pPr><w:pStyle w:val=\"Heading{}\"/></w:pPr><w:bookmarkStart w:id=\"{n}\" w:name=\"{}\"/>{body}<w:bookmarkEnd w:id=\"{n}\"/></w:p>",
+                    (*level).clamp(1, 6),
+                    xml_text(&name)
                 ));
             }
             Block::Paragraph(spans) => {
                 let body = self.spans(spans);
                 out.push_str(&format!("<w:p><w:pPr>{indent}</w:pPr>{body}</w:p>"));
             }
-            Block::List { ordered, items } => {
+            Block::List { ordered, items, .. } => {
                 let id = if *ordered { 2 } else { 1 };
                 for item in items {
                     for (i, inner) in item.iter().enumerate() {
@@ -788,7 +1029,7 @@ impl Writer<'_> {
                     ));
                 }
             }
-            Block::Table(rows) => {
+            Block::Table(rows, _) => {
                 out.push_str("<w:tbl><w:tblPr><w:tblStyle w:val=\"TableGrid\"/><w:tblW w:w=\"5000\" w:type=\"pct\"/><w:tblBorders><w:top w:val=\"single\" w:sz=\"4\" w:color=\"auto\"/><w:left w:val=\"single\" w:sz=\"4\" w:color=\"auto\"/><w:bottom w:val=\"single\" w:sz=\"4\" w:color=\"auto\"/><w:right w:val=\"single\" w:sz=\"4\" w:color=\"auto\"/><w:insideH w:val=\"single\" w:sz=\"4\" w:color=\"auto\"/><w:insideV w:val=\"single\" w:sz=\"4\" w:color=\"auto\"/></w:tblBorders></w:tblPr>");
                 for (r, row) in rows.iter().enumerate() {
                     out.push_str("<w:tr>");
@@ -838,7 +1079,7 @@ pub(crate) fn image_size(bytes: &[u8]) -> Option<(u32, u32)> {
     None
 }
 
-const CONTENT_TYPES: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Default Extension=\"png\" ContentType=\"image/png\"/><Default Extension=\"jpg\" ContentType=\"image/jpeg\"/><Default Extension=\"jpeg\" ContentType=\"image/jpeg\"/><Default Extension=\"gif\" ContentType=\"image/gif\"/><Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/><Override PartName=\"/word/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml\"/><Override PartName=\"/word/numbering.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml\"/><Override PartName=\"/docProps/core.xml\" ContentType=\"application/vnd.openxmlformats-package.core-properties+xml\"/></Types>";
+const CONTENT_TYPES: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Default Extension=\"png\" ContentType=\"image/png\"/><Default Extension=\"jpg\" ContentType=\"image/jpeg\"/><Default Extension=\"jpeg\" ContentType=\"image/jpeg\"/><Default Extension=\"gif\" ContentType=\"image/gif\"/><Default Extension=\"svg\" ContentType=\"image/svg+xml\"/><Default Extension=\"webp\" ContentType=\"image/webp\"/><Default Extension=\"bmp\" ContentType=\"image/bmp\"/><Default Extension=\"tif\" ContentType=\"image/tiff\"/><Default Extension=\"tiff\" ContentType=\"image/tiff\"/><Default Extension=\"emf\" ContentType=\"image/x-emf\"/><Default Extension=\"wmf\" ContentType=\"image/x-wmf\"/><Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/><Override PartName=\"/word/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml\"/><Override PartName=\"/word/numbering.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml\"/><Override PartName=\"/docProps/core.xml\" ContentType=\"application/vnd.openxmlformats-package.core-properties+xml\"/></Types>";
 
 const ROOT_RELS: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"word/document.xml\"/><Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties\" Target=\"docProps/core.xml\"/></Relationships>";
 
@@ -887,6 +1128,8 @@ pub fn write(doc: &Document) -> Result<Vec<u8>> {
         media: vec![],
         next_id: 2,
         picture: 0,
+        anchors: Default::default(),
+        bookmark: 0,
     };
     let mut body = String::new();
     for b in &doc.blocks {

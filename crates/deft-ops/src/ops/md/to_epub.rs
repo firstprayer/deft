@@ -1,6 +1,6 @@
 use super::_common::load_images;
 use deft_core::prelude::*;
-use deft_tools_doc::epub::{NewBook, write};
+use deft_tools_doc::epub::{NewBook, chapter_name, write};
 
 pub static OP: Op = Op {
     id: "md.to-epub",
@@ -45,49 +45,9 @@ fn chapters(md: &str) -> Vec<String> {
     out
 }
 
-/// Make a chapter's HTML fit for a book. Markdown can carry raw HTML that strict
-/// readers refuse: attributes EPUB does not allow, pictures on the web, and links
-/// to files that are not in the book. Returns how many pictures were left out.
-fn book_safe(html: &str, images: &[deft_tools_doc::Image]) -> (String, usize) {
-    let re = |p: &str| regex::Regex::new(p).expect("valid pattern");
-    let html = re(r#"(?i)\s(align|valign|bgcolor|border)="[^"]*""#).replace_all(html, "");
-    let html = re(r#"(?i)\s(width|height)="[^"]*[^0-9"][^"]*""#).replace_all(&html, "");
-    let html = re(r"(?i)</?picture\b[^>]*>|<source\b[^>]*>").replace_all(&html, "");
-    let mut left_out = 0;
-    let src = re(r#"(?i)\ssrc="([^"]*)""#);
-    let alt = re(r#"(?i)\salt="([^"]*)""#);
-    let html = re(r"(?i)<img\b[^>]*>").replace_all(&html, |c: &regex::Captures| {
-        let tag = &c[0];
-        let path = src
-            .captures(tag)
-            .map_or("", |m| m.get(1).map_or("", |g| g.as_str()));
-        if images.iter().any(|i| i.name == path) {
-            return tag.to_string();
-        }
-        left_out += 1;
-        alt.captures(tag)
-            .map_or(String::new(), |m| m[1].to_string())
-    });
-    let html = re(r#"(?is)<a\b[^>]*\bhref="([^"]*)"[^>]*>(.*?)</a>"#).replace_all(
-        &html,
-        |c: &regex::Captures| {
-            let target = c[1].to_ascii_lowercase();
-            let keep = ["http:", "https:", "mailto:", "#"]
-                .iter()
-                .any(|p| target.starts_with(p));
-            if keep {
-                c[0].to_string()
-            } else {
-                c[2].to_string()
-            }
-        },
-    );
-    (html.into_owned(), left_out)
-}
-
 fn run(job: &Job) -> Result<OpResult> {
     let p = job.params;
-    let mut parts = Vec::new();
+    let mut parts: Vec<(String, Vec<String>)> = Vec::new();
     let mut images = Vec::new();
     let mut warnings = Vec::new();
     for input in &job.inputs {
@@ -104,16 +64,26 @@ fn run(job: &Job) -> Result<OpResult> {
                 images.push(image);
             }
         }
-        parts.extend(chapters(&md));
+        // Anchors are counted over the whole file, as `md toc` counts them.
+        let mut ids = deft_tools_text::heading_ids(&md).into_iter();
+        for chapter in chapters(&md) {
+            let n = deft_tools_text::heading_ids(&chapter).len();
+            let own: Vec<String> = ids.by_ref().take(n).collect();
+            parts.push((chapter, own));
+        }
     }
-    let mut left_out = 0;
-    let list: Vec<(String, String)> = parts
+    let titles: Vec<String> = parts
         .iter()
         .enumerate()
-        .map(|(i, md)| {
-            let title = deft_tools_text::title(md).unwrap_or_else(|| format!("Chapter {}", i + 1));
+        .map(|(i, (md, _))| {
+            deft_tools_text::title(md).unwrap_or_else(|| format!("Chapter {}", i + 1))
+        })
+        .collect();
+    let html: Vec<String> = parts
+        .iter()
+        .map(|(md, ids)| {
+            let mut html = deft_tools_text::html_fragment(md, ids);
             // Paths inside the book are flat, so only file names remain.
-            let mut html = deft_tools_text::to_html(md, false, None);
             for image in &images {
                 let quoted = format!("/{}\"", image.name);
                 while let Some(at) = html.find(&quoted) {
@@ -121,17 +91,26 @@ fn run(job: &Job) -> Result<OpResult> {
                     html.replace_range(start..at + 1, "");
                 }
             }
-            let (html, missed) = book_safe(&html, &images);
-            left_out += missed;
-            (title, html)
+            html
         })
         .collect();
-    if left_out > 0 {
+    let names: Vec<String> = (0..html.len()).map(chapter_name).collect();
+    let has_image = |src: &str| images.iter().any(|i| i.name == src);
+    let cleaned = deft_tools_doc::xhtml::for_book(&html, &names, &has_image);
+    if cleaned.pictures_left_out > 0 {
         warnings.push(format!(
-            "{left_out} pictures left out: a book holds only local pictures"
+            "{} pictures left out: a book holds only local pictures",
+            cleaned.pictures_left_out
         ));
     }
-    let first = parts.first().and_then(|m| deft_tools_text::title(m));
+    if cleaned.markup_dropped > 0 {
+        warnings.push(format!(
+            "{} raw HTML tags or attributes dropped: e-book readers refuse them",
+            cleaned.markup_dropped
+        ));
+    }
+    let list: Vec<(String, String)> = titles.into_iter().zip(cleaned.bodies).collect();
+    let first = parts.first().and_then(|(m, _)| deft_tools_text::title(m));
     let title = p
         .opt_text("title")
         .or(first)

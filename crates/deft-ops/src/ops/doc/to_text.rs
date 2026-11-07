@@ -21,9 +21,9 @@ pub static OP: Op = Op {
 fn run(job: &Job) -> Result<OpResult> {
     let doc = load(job.input())?;
     let words = doc.words();
-    Ok(
-        OpResult::one(Produced::bytes(doc.text().into_bytes(), Format::Txt))
-            .fact("words", words)
-            .note(format!("{words} words")),
-    )
+    let mut res = OpResult::one(Produced::bytes(doc.text().into_bytes(), Format::Txt))
+        .fact("words", words)
+        .note(format!("{words} words"));
+    res.warnings = doc.warnings;
+    Ok(res)
 }

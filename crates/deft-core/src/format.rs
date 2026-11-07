@@ -94,6 +94,30 @@ formats! {
     Rar => "rar", "application/vnd.rar", "rar";
 }
 
+/// What an OLE compound file (the container of old Office files) holds,
+/// from the names of its streams: "encrypted" for an Office file saved with
+/// a password, "word" or "powerpoint" for the old binary formats.
+pub fn ole_content(bytes: &[u8]) -> Option<&'static str> {
+    if !bytes.starts_with(&[0xD0, 0xCF, 0x11, 0xE0]) {
+        return None;
+    }
+    let utf16 =
+        |name: &str| -> Vec<u8> { name.encode_utf16().flat_map(u16::to_le_bytes).collect() };
+    let has = |name: &str| {
+        let needle = utf16(name);
+        bytes.windows(needle.len()).any(|w| w == needle)
+    };
+    if has("EncryptedPackage") {
+        Some("encrypted")
+    } else if has("WordDocument") {
+        Some("word")
+    } else if has("PowerPoint Document") {
+        Some("powerpoint")
+    } else {
+        None
+    }
+}
+
 impl Format {
     /// Format implied by a path's extension. Handles double extensions like `.tar.gz`.
     pub fn from_path(path: &Path) -> Option<Format> {

@@ -22,6 +22,8 @@ fn word(body: &str, parts: &[(&str, &str)]) -> Vec<u8> {
         .map(|(name, xml)| {
             let root = if name.contains("foot") {
                 "footnotes"
+            } else if name.contains("numbering") {
+                "numbering"
             } else {
                 "endnotes"
             };
@@ -82,7 +84,7 @@ fn word_tables_keep_nested_and_controlled_text() {
         para("wrapped")
     );
     let doc = docx::read(&word(&format!("{table}{wrapped}"), &[])).unwrap();
-    let Block::Table(rows) = &doc.blocks[0] else {
+    let Block::Table(rows, _) = &doc.blocks[0] else {
         panic!("{:?}", doc.blocks)
     };
     let cell = |i: usize| -> String { rows[0][i].iter().map(|s| s.text.as_str()).collect() };
@@ -163,9 +165,9 @@ fn word_replace_reaches_notes_and_text_after_a_box() {
         &body,
         &[("word/footnotes.xml", &foot), ("word/endnotes.xml", &end)],
     );
-    // The box is written twice, so five places hold six matches.
+    // The box is written twice; its copy changes but is not counted.
     let (bytes, n) = docx::replace(&file, "Acme", "Zed").unwrap();
-    assert_eq!(n, 6);
+    assert_eq!(n, 5);
     let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
     for name in [
         "word/document.xml",
@@ -351,7 +353,42 @@ fn main_content_drops_site_chrome() {
     assert!(inner.contains("<h1>T</h1>") && !inner.contains("Home"));
     assert!(!inner.contains("ad") && !inner.contains("footer"));
     let plain = "<body><header>h</header><p>text</p></body>";
-    assert_eq!(html::main_content(plain), "<p>text</p>");
+    let kept = html::main_content(plain);
+    assert!(
+        kept.contains("<p>text</p>") && !kept.contains("<header>"),
+        "{kept}"
+    );
+}
+
+#[test]
+fn main_content_leaves_out_furniture_inside_main() {
+    let text = "Markdown is a lightweight markup language, made in 2004. ".repeat(12);
+    // A Wikipedia page: the language menu and the categories sit in <main>.
+    let wiki = format!(
+        "<body><a class=\"mw-jump-link\" href=\"#c\">Jump to content</a><main><div class=\"vector-page-titlebar\"><h1>Markdown</h1><div id=\"p-lang-btn\" class=\"vector-dropdown mw-portlet mw-portlet-lang\"><ul><li><a href=\"https://als.wikipedia.org\">Alemannisch</a></li></ul></div></div><div id=\"bodyContent\"><div class=\"hatnote navigation-not-searchable\">Main article: X</div><p>{text}</p><div class=\"navbox\"><a href=\"/a\">A</a></div></div><div id=\"catlinks\" class=\"catlinks\"><a href=\"/wiki/Category:X\">Category X</a></div></main></body>"
+    );
+    let md = html::to_markdown(&html::main_content(&wiki)).unwrap();
+    assert!(md.starts_with("# Markdown\n"), "{md}");
+    assert!(
+        md.contains("Main article: X") && md.contains("lightweight markup"),
+        "{md}"
+    );
+    for gone in ["Alemannisch", "Category", "Jump to", "[A]"] {
+        assert!(!md.contains(gone), "{gone}: {md}");
+    }
+    // A blog post without <main> or <article>: the title is in a <header>
+    // beside the text, and the site has its own navigation and lists.
+    let blog = format!(
+        "<body><nav><a href=\"/\">Rust Blog</a></nav><section><div><header><h2>Announcing Rust 1.83.0</h2></header><div class=\"publish-date-author\">Nov. 28, 2024</div><div class=\"post\"><p>{text}</p><p>{text}</p></div></div></section><div><h2>Most viewed</h2><ol><li><a href=\"/a\">Another story</a></li></ol></div><footer>Get help!</footer></body>"
+    );
+    let md = html::to_markdown(&html::main_content(&blog)).unwrap();
+    assert!(
+        md.starts_with("## Announcing Rust 1.83.0\n\nNov. 28, 2024"),
+        "{md}"
+    );
+    for gone in ["Rust Blog", "Most viewed", "Another story", "Get help"] {
+        assert!(!md.contains(gone), "{gone}: {md}");
+    }
 }
 
 #[test]
@@ -391,4 +428,493 @@ fn nested_lists_stay_nested() {
         .map(|(l, t)| (*l, t.as_str()))
         .collect();
     assert_eq!(got, [(0, "one"), (1, "inner"), (2, "deep"), (0, "two")]);
+}
+
+#[test]
+fn preformatted_text_stays_code() {
+    let page = "<p>Intro</p><pre class=\"screen\">&lt;p&gt;She had &lt;i&gt;flair&lt;/i&gt;.&lt;/p&gt;\n\n  two</pre>";
+    let md = html::to_markdown(page).unwrap();
+    assert!(
+        md.contains("```\n<p>She had <i>flair</i>.</p>\n\n  two\n```"),
+        "{md}"
+    );
+    let text = html::to_text(page).unwrap();
+    assert!(text.contains("<p>She had <i>flair</i>.</p>"), "{text}");
+    let fenced =
+        html::to_markdown("<pre><code class=\"language-rust\">a ``` b</code></pre>").unwrap();
+    assert!(fenced.starts_with("````rust\na ``` b\n````"), "{fenced}");
+}
+
+#[test]
+fn line_breaks_stay_breaks() {
+    let md = html::to_markdown("<p>Section MO<br/>Theorem A<br/>Theorem B</p>").unwrap();
+    assert_eq!(md, "Section MO  \nTheorem A  \nTheorem B\n");
+    let text = html::to_text("<p>one<br>two</p>").unwrap();
+    assert_eq!(text, "one\ntwo\n");
+}
+
+#[test]
+fn a_bang_before_a_link_is_not_a_picture() {
+    let md = html::to_markdown("<p><em>coupole</em>!<a href=\"#note-26\">*</a></p>").unwrap();
+    assert_eq!(md, "*coupole*\\![\\*](#note-26)\n");
+    let blocks = markdown::parse(&md);
+    let Block::Paragraph(spans) = &blocks[0] else {
+        panic!("{blocks:?}")
+    };
+    assert!(spans.iter().all(|s| s.image.is_none()), "{spans:?}");
+    assert!(spans.iter().any(|s| s.text == "!"), "{spans:?}");
+}
+
+#[test]
+fn a_link_around_blocks_goes_on_its_heading() {
+    let page = "<ul><li><a href=\"/voting\"><div><h2>Voting</h2></div><div><p>Find out how.</p></div></a></li></ul>";
+    let md = html::to_markdown(page).unwrap();
+    assert!(md.contains("## [Voting](/voting)"), "{md}");
+    assert!(md.contains("Find out how."), "{md}");
+    assert!(!md.contains("[##"), "{md}");
+}
+
+/// A one-slide deck from raw parts, for structures `pptx::write` never makes.
+fn deck(slide: &str, slide_rels: &str, parts: &[(&str, &str)]) -> Vec<u8> {
+    use std::io::Write;
+    const P: &str = "xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"";
+    const RELS: &str = "xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"";
+    let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let options = zip::write::SimpleFileOptions::default();
+    let mut all = vec![
+        (
+            "ppt/presentation.xml".to_string(),
+            format!(
+                "<p:presentation {P}><p:sldIdLst><p:sldId id=\"256\" r:id=\"rId1\"/></p:sldIdLst></p:presentation>"
+            ),
+        ),
+        (
+            "ppt/_rels/presentation.xml.rels".to_string(),
+            format!(
+                "<Relationships {RELS}><Relationship Id=\"rId1\" Type=\"slide\" Target=\"slides/slide1.xml\"/></Relationships>"
+            ),
+        ),
+        (
+            "ppt/slides/slide1.xml".to_string(),
+            format!("<p:sld {P}><p:cSld><p:spTree>{slide}</p:spTree></p:cSld></p:sld>"),
+        ),
+        (
+            "ppt/slides/_rels/slide1.xml.rels".to_string(),
+            format!("<Relationships {RELS}>{slide_rels}</Relationships>"),
+        ),
+    ];
+    all.extend(parts.iter().map(|(n, x)| (n.to_string(), x.to_string())));
+    for (name, xml) in all {
+        zip.start_file(name, options).unwrap();
+        zip.write_all(xml.as_bytes()).unwrap();
+    }
+    zip.finish().unwrap().into_inner()
+}
+
+#[test]
+fn smartart_text_is_read_in_diagram_order() {
+    let frame = "<p:graphicFrame><a:graphic><a:graphicData><dgm:relIds xmlns:dgm=\"http://schemas.openxmlformats.org/drawingml/2006/diagram\" r:dm=\"rId2\"/></a:graphicData></a:graphic></p:graphicFrame>";
+    let rels = "<Relationship Id=\"rId2\" Type=\"diagramData\" Target=\"../diagrams/data1.xml\"/>";
+    let pt = |id: &str, text: &str| {
+        format!(
+            "<dgm:pt modelId=\"{id}\"><dgm:t><a:p><a:r><a:t>{text}</a:t></a:r></a:p></dgm:t></dgm:pt>"
+        )
+    };
+    // The file lists the second postulate first; the connections say otherwise.
+    let data = format!(
+        "<dgm:dataModel xmlns:dgm=\"http://schemas.openxmlformats.org/drawingml/2006/diagram\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><dgm:ptLst><dgm:pt modelId=\"0\" type=\"doc\"/>{}{}<dgm:pt modelId=\"9\" type=\"sibTrans\"><dgm:t><a:p><a:r><a:t>not text</a:t></a:r></a:p></dgm:t></dgm:pt></dgm:ptLst><dgm:cxnLst><dgm:cxn modelId=\"c1\" srcId=\"0\" destId=\"1\" srcOrd=\"0\"/><dgm:cxn modelId=\"c2\" srcId=\"0\" destId=\"2\" srcOrd=\"1\"/><dgm:cxn modelId=\"c3\" type=\"presOf\" srcId=\"2\" destId=\"0\" srcOrd=\"0\"/></dgm:cxnLst></dgm:dataModel>",
+        pt("2", "2- A line can be extended."),
+        pt("1", "1- A line can be drawn."),
+    );
+    let bytes = deck(frame, rels, &[("ppt/diagrams/data1.xml", &data)]);
+    let (slides, _) = pptx::read(&bytes).unwrap();
+    let text: Vec<String> = slides[0]
+        .body
+        .iter()
+        .map(|p| p.iter().map(|s| s.text.as_str()).collect())
+        .collect();
+    assert_eq!(
+        text,
+        ["1- A line can be drawn.", "2- A line can be extended."]
+    );
+}
+
+#[test]
+fn slide_tables_links_and_untitled_slides() {
+    let title = "<p:sp><p:nvSpPr><p:nvPr><p:ph type=\"title\"/></p:nvPr></p:nvSpPr><p:txBody><a:p><a:r><a:t> </a:t></a:r></a:p></p:txBody></p:sp>";
+    let link = "<p:sp><p:txBody><a:p><a:r><a:rPr><a:hlinkClick r:id=\"rId4\"/></a:rPr><a:t>This is </a:t></a:r><a:r><a:rPr><a:hlinkClick r:id=\"rId4\"/></a:rPr><a:t>a link</a:t></a:r></a:p></p:txBody></p:sp>";
+    let cell = |a: &str, b: &str| {
+        format!(
+            "<a:tc><a:txBody><a:p><a:r><a:t>{a}</a:t></a:r></a:p><a:p><a:r><a:t>{b}</a:t></a:r></a:p></a:txBody></a:tc>"
+        )
+    };
+    let table = format!(
+        "<p:graphicFrame><a:graphic><a:graphicData><a:tbl><a:tr>{}{}</a:tr><a:tr>{}{}</a:tr></a:tbl></a:graphicData></a:graphic></p:graphicFrame>",
+        cell("How", ""),
+        cell("Result", ""),
+        cell("Sessions.", "Communities."),
+        cell("Exchanges.", "Cohesion.")
+    );
+    let rels = "<Relationship Id=\"rId4\" Type=\"hyperlink\" Target=\"http://tika.apache.org/\" TargetMode=\"External\"/>";
+    let bytes = deck(&format!("{title}{link}{table}"), rels, &[]);
+    let (slides, images) = pptx::read(&bytes).unwrap();
+    let md = markdown::render(&pptx::to_document(&slides, images, false));
+    assert!(md.starts_with("## Slide 1\n"), "{md}");
+    assert!(
+        md.contains("- [This is a link](http://tika.apache.org/)"),
+        "{md}"
+    );
+    assert!(
+        md.contains(
+            "| How | Result |\n| --- | --- |\n| Sessions. Communities. | Exchanges. Cohesion. |"
+        ),
+        "{md}"
+    );
+}
+
+#[test]
+fn book_chapters_become_valid_xhtml() {
+    let one = "<h1 id=\"a\">A</h1><p align=\"center\">x&nbsp;y <Listing number=\"1\"><pre>code</pre></Listing> <tt>t</tt></p><p><a href=\"#b\">to b</a> <a href=\"#nowhere\">dead</a> <a href=\"other.md\">file</a> <img src=\"web.png\" alt=\"pic\"><img src=\"in.png\" alt=\"kept\"><br><input type=\"checkbox\" checked disabled></p><script>x()</script>";
+    let two = "<h2 id=\"b\">B</h2><p id=\"b\">again</p>";
+    let names = ["c1.xhtml".to_string(), "c2.xhtml".to_string()];
+    let has = |src: &str| src == "in.png";
+    let out = xhtml::for_book(&[one.to_string(), two.to_string()], &names, &has);
+    for body in &out.bodies {
+        let doc = format!("<body xmlns=\"http://www.w3.org/1999/xhtml\">{body}</body>");
+        roxmltree::Document::parse(&doc).unwrap_or_else(|e| panic!("{e}: {body}"));
+    }
+    let first = &out.bodies[0];
+    assert!(first.contains("x\u{a0}y"), "{first}");
+    assert!(
+        !first.contains("isting") && !first.contains("align"),
+        "{first}"
+    );
+    assert!(
+        first.contains("<pre>code</pre>") && first.contains("<code>t</code>"),
+        "{first}"
+    );
+    assert!(first.contains("<a href=\"c2.xhtml#b\">to b</a>"), "{first}");
+    assert!(
+        first.contains(" dead ") && first.contains(" file "),
+        "{first}"
+    );
+    assert!(
+        first.contains("pic<img src=\"in.png\" alt=\"kept\"/><br/>"),
+        "{first}"
+    );
+    assert!(first.contains("checked=\"checked\""), "{first}");
+    assert!(
+        !first.contains("script") && !first.contains("x()"),
+        "{first}"
+    );
+    assert_eq!(out.bodies[1].matches("id=\"b\"").count(), 1);
+    assert_eq!(out.pictures_left_out, 1);
+    assert!(out.markup_dropped >= 3);
+}
+
+#[test]
+fn word_links_to_headings_use_bookmarks() {
+    let doc = Document {
+        blocks: markdown::parse(
+            "# Intro\n\nSee [the end](#the-end) or [web](https://a.example).\n\n## The End\n\n## The End\n",
+        ),
+        ..Default::default()
+    };
+    let bytes = docx::write(&doc).unwrap();
+    let pkg = zipped::Package::open(&bytes).unwrap();
+    let body = pkg.text("word/document.xml").unwrap();
+    let rels = pkg.text("word/_rels/document.xml.rels").unwrap();
+    assert!(
+        body.contains("<w:hyperlink w:anchor=\"the-end\">"),
+        "{body}"
+    );
+    for name in ["intro", "the-end", "the-end-1"] {
+        assert!(body.contains(&format!("w:name=\"{name}\"")), "{body}");
+    }
+    assert!(!rels.contains("Target=\"#"), "{rels}");
+    assert!(rels.contains("https://a.example"), "{rels}");
+}
+
+#[test]
+fn a_rule_before_a_heading_is_not_front_matter() {
+    let md = "# Title\n\n### 1. One\n\ntext\n\n---\n### 2. Two\n\nmore\n\n---\n## Three\n";
+    let names: Vec<String> = markdown::headings(md)
+        .into_iter()
+        .map(|h| h.plain)
+        .collect();
+    assert_eq!(names, ["Title", "1. One", "2. Two", "Three"]);
+    let fronted = "---\ntitle: x\n---\n# Real\n";
+    let found = markdown::headings(fronted);
+    assert_eq!(found.len(), 1);
+    assert_eq!((found[0].plain.as_str(), found[0].line), ("Real", 3));
+}
+
+#[test]
+fn rtf_decodes_each_font_code_page() {
+    let cp1250 = rtf::read(br"{\rtf1\ansi\ansicpg1250{\fonttbl{\f0\fcharset238 Arial CE;}}\f0 za\'bf\'f3\'b3\'e6 g\'ea\'9cl\'b9\par}");
+    assert_eq!(cp1250.text(), "zażółć gęślą\n");
+    // Shift-JIS in a \fcharset128 font, with a trail byte written as a letter.
+    let japanese = rtf::read(br"{\rtf1\ansi\ansicpg1252{\fonttbl{\f0\fcharset0 Times;}{\f1\fcharset128 MS Gothic;}}\f0 caf\'e9 {\f1 \'83e\'83X\'83g \'94\'4f}\par}");
+    assert_eq!(japanese.text(), "café テスト 念\n");
+    // \uc2: two bytes stand for each \u character.
+    let unicode = rtf::read(
+        br"{\rtf1\ansi{\fonttbl{\f1\fcharset128 MS Gothic;}}\f1\uc2 \u24565\'94\'4f!\par}",
+    );
+    assert_eq!(unicode.text(), "念!\n");
+    let meta = rtf::read(
+        br"{\rtf1\ansi{\info{\upr{\author Axel D?fler}{\*\ud{\author Axel D\u246?fler}}}}Text\par}",
+    );
+    assert_eq!(meta.author.as_deref(), Some("Axel Döfler"));
+    assert_eq!(meta.text(), "Text\n");
+}
+
+#[test]
+fn rtf_keeps_tables_lists_notes_links_and_pictures() {
+    let png = "89504e470d0a1a0a";
+    let src = format!(
+        r#"{{\rtf1\ansi{{\fonttbl{{\f0 Arial;}}{{\f3\fcharset2 Symbol;}}}}{{\stylesheet{{\s1 heading 1;}}{{\*\cs10 Default;}}}}
+\pard\s1 Title\par
+\pard Claim{{\super\chftn}}{{\footnote \pard\plain {{\chftn}} The source.}} here.\par
+{{\listtext\pard\plain\f3 \'b7\tab}}\pard\li720 one\par
+{{\listtext\pard\plain\f3 \'b7\tab}}\pard\li1440 deeper\par
+{{\listtext\pard\plain 2.\tab}}\pard\li720 two\par
+\pard See {{\field{{\*\fldinst HYPERLINK "http://tika.apache.org"}}{{\fldrslt tika}}}}.\par
+\trowd\cellx1000\cellx2000\pard\intbl a\cell b\cell\row
+\pard\intbl c\par d\cell e\cell\row
+\pard After {{\*\shppict{{\pict\pngblip {png}}}}}{{\nonshppict{{\pict\wmetafile8 0102}}}}\par}}"#
+    );
+    let doc = rtf::read(src.as_bytes());
+    let md = markdown::render(&doc);
+    assert!(md.starts_with("# Title\n"), "{md}");
+    assert!(md.contains("Claim[^1] here."), "{md}");
+    assert!(md.contains("[^1]: The source."), "{md}");
+    assert!(md.contains("- one\n  - deeper\n"), "{md}");
+    assert!(md.contains("See [tika](http://tika.apache.org)."), "{md}");
+    assert!(md.contains("| a | b |\n| --- | --- |\n| c d | e |"), "{md}");
+    assert_eq!(doc.images.len(), 1);
+    assert_eq!(doc.images[0].name, "image1.png");
+    assert!(md.contains("After ![](image1.png)"), "{md}");
+}
+
+fn odt(content: &str, manifest: &str, parts: &[(&str, &[u8])]) -> Vec<u8> {
+    use std::io::Write;
+    let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let options = zip::write::SimpleFileOptions::default();
+    let ns = "xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" xmlns:draw=\"urn:oasis:names:tc:opendocument:xmlns:drawing:1.0\" xmlns:svg=\"urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\"";
+    let xml = format!(
+        "<office:document-content {ns}><office:body><office:text>{content}</office:text></office:body></office:document-content>"
+    );
+    let mut all: Vec<(&str, Vec<u8>)> = vec![
+        ("content.xml", xml.into_bytes()),
+        ("META-INF/manifest.xml", manifest.as_bytes().to_vec()),
+    ];
+    all.extend(parts.iter().map(|(n, b)| (*n, b.to_vec())));
+    for (name, data) in all {
+        zip.start_file(name, options).unwrap();
+        zip.write_all(&data).unwrap();
+    }
+    zip.finish().unwrap().into_inner()
+}
+
+#[test]
+fn odt_keeps_notes_fields_shapes_indexes_and_picture_links() {
+    let content = "<text:tracked-changes><text:changed-region><text:deletion><text:p>gone</text:p></text:deletion></text:changed-region></text:tracked-changes>\
+<text:h text:outline-level=\"1\">Apache Tika <office:annotation><text:p>a comment</text:p></office:annotation>Test</text:h>\
+<text:p>Rather<text:note text:id=\"n1\"><text:note-citation>1</text:note-citation><text:note-body><text:p>A simple footnote</text:p></text:note-body></text:note> difficult.</text:p>\
+<text:p><draw:rect><svg:title>Rect</svg:title><text:p>A rectangle</text:p></draw:rect></text:p>\
+<text:p>Project <text:bibliography-mark text:identifier=\"Solr\">[Solr]</text:bibliography-mark>, title: <text:bookmark-ref>Apache Tika Test</text:bookmark-ref>, by<text:s text:c=\"2\"/>me</text:p>\
+<text:p><draw:a xlink:href=\"https://tika.apache.org/\"><draw:frame><draw:image xlink:href=\"Pictures/p.png\"/><svg:title>Visit Tika</svg:title></draw:frame></draw:a></text:p>\
+<text:bibliography><text:bibliography-source><text:index-title-template>Template</text:index-title-template></text:bibliography-source><text:index-body><text:index-title><text:p>Bibliography</text:p></text:index-title><text:p>Solr: Various, 2009</text:p></text:index-body></text:bibliography>";
+    let bytes = odt(content, "<manifest/>", &[("Pictures/p.png", b"\x89PNG")]);
+    let doc = odf::read(&bytes).unwrap();
+    let md = markdown::render(&doc);
+    assert!(md.starts_with("# Apache Tika Test\n"), "{md}");
+    assert!(md.contains("Rather[^1] difficult."), "{md}");
+    assert!(md.contains("[^1]: A simple footnote"), "{md}");
+    assert!(md.contains("A rectangle") && !md.contains("Rect\n"), "{md}");
+    assert!(
+        md.contains("Project \\[Solr\\], title: Apache Tika Test, by  me"),
+        "{md}"
+    );
+    assert!(
+        md.contains("[![Visit Tika](p.png)](https://tika.apache.org/)"),
+        "{md}"
+    );
+    assert!(md.contains("Bibliography\n\nSolr: Various, 2009"), "{md}");
+    assert!(
+        !md.contains("gone") && !md.contains("comment") && !md.contains("Template"),
+        "{md}"
+    );
+    let locked = odt("<text:p>x</text:p>", "<manifest:encryption-data/>", &[]);
+    let e = odf::read(&locked).unwrap_err();
+    assert_eq!(e.code, deft_core::error::ErrorCode::InputEncrypted);
+}
+
+#[test]
+fn book_pictures_keep_their_titles_and_spaces() {
+    let book = epub::Book {
+        chapters: vec!["<p><img src=\"images/cover.png\" alt=\"Cover Image\" title=\"A/B\"/> <img src=\"../img/my%20pic.jpg\" alt=\"\"/></p>".into()],
+        ..Default::default()
+    };
+    let md = book.markdown().unwrap();
+    assert!(md.contains("![Cover Image](cover.png \"A/B\")"), "{md}");
+    assert!(md.contains("![](my%20pic.jpg)"), "{md}");
+    let doc = Document {
+        blocks: vec![Block::Paragraph(vec![Span {
+            image: Some("Object 1".into()),
+            ..Default::default()
+        }])],
+        ..Default::default()
+    };
+    assert_eq!(markdown::render(&doc), "![](Object%201)\n");
+}
+
+#[test]
+fn word_merged_cells_become_spans() {
+    let tc =
+        |props: &str, text: &str| format!("<w:tc><w:tcPr>{props}</w:tcPr>{}</w:tc>", para(text));
+    let body = format!(
+        "<w:tbl><w:tr>{}</w:tr><w:tr>{}{}{}</w:tr><w:tr>{}{}{}</w:tr></w:tbl>",
+        tc("<w:gridSpan w:val=\"3\"/>", "December 2007"),
+        tc("<w:vMerge w:val=\"restart\"/>", "Tall"),
+        tc("", "b"),
+        tc("", "c"),
+        tc("<w:vMerge/>", ""),
+        tc("", "d"),
+        tc("", "e"),
+    );
+    let doc = docx::read(&word(&body, &[])).unwrap();
+    let Block::Table(rows, merges) = &doc.blocks[0] else {
+        panic!("{:?}", doc.blocks)
+    };
+    assert!(rows.iter().all(|r| r.len() == 3), "{rows:?}");
+    assert_eq!(
+        merges,
+        &[
+            Merge {
+                row: 0,
+                col: 0,
+                rows: 1,
+                cols: 3
+            },
+            Merge {
+                row: 1,
+                col: 0,
+                rows: 2,
+                cols: 1
+            }
+        ]
+    );
+    let html = markdown::render_for_layout(&doc);
+    assert!(
+        html.contains("<tr><th colspan=\"3\">December 2007</th></tr>"),
+        "{html}"
+    );
+    assert!(html.contains("<tr><td rowspan=\"2\">Tall</td><td>b</td><td>c</td></tr>\n<tr><td>d</td><td>e</td></tr>"), "{html}");
+    // Plain Markdown pads instead.
+    assert!(markdown::render(&doc).contains("| December 2007 |  |  |"));
+}
+
+#[test]
+fn word_shows_svg_through_a_png() {
+    let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+    png.extend(1920u32.to_be_bytes());
+    png.extend(1080u32.to_be_bytes());
+    png.extend([8, 6, 0, 0, 0]);
+    let mut doc = Document {
+        blocks: vec![Block::Paragraph(vec![Span {
+            image: Some("fig.svg".into()),
+            ..Default::default()
+        }])],
+        images: vec![Image {
+            name: "fig.svg".into(),
+            bytes: b"<svg viewBox=\"0 0 960 540\"/>".to_vec(),
+        }],
+        ..Default::default()
+    };
+    doc.fallbacks.insert("fig.svg".into(), png);
+    let pkg = zipped::Package::open(&docx::write(&doc).unwrap()).unwrap();
+    let body = pkg.text("word/document.xml").unwrap();
+    assert!(body.contains("<asvg:svgBlip"), "{body}");
+    // 960 x 540 CSS pixels, 16:9, within the column width.
+    assert!(
+        body.contains("<wp:extent cx=\"5943600\" cy=\"3343275\"/>"),
+        "{body}"
+    );
+    let types = pkg.text("[Content_Types].xml").unwrap();
+    assert!(types.contains("Extension=\"svg\""), "{types}");
+    assert!(pkg.has("word/media/fig.svg") && pkg.has("word/media/fig.svg.png"));
+}
+
+#[test]
+fn word_list_numbers_follow_restarts_and_start_values() {
+    let numbering = "<w:abstractNum w:abstractNumId=\"0\"><w:lvl w:ilvl=\"0\"><w:start w:val=\"1\"/><w:numFmt w:val=\"decimal\"/></w:lvl></w:abstractNum>\
+<w:abstractNum w:abstractNumId=\"1\"><w:lvl w:ilvl=\"0\"><w:start w:val=\"10\"/><w:numFmt w:val=\"decimal\"/></w:lvl></w:abstractNum>\
+<w:num w:numId=\"1\"><w:abstractNumId w:val=\"0\"/></w:num>\
+<w:num w:numId=\"2\"><w:abstractNumId w:val=\"0\"/><w:lvlOverride w:ilvl=\"0\"><w:startOverride w:val=\"1\"/></w:lvlOverride></w:num>\
+<w:num w:numId=\"3\"><w:abstractNumId w:val=\"1\"/></w:num>";
+    let item = |num: u32, text: &str| {
+        format!(
+            "<w:p><w:pPr><w:numPr><w:ilvl w:val=\"0\"/><w:numId w:val=\"{num}\"/></w:numPr></w:pPr>{}</w:p>",
+            run(text)
+        )
+    };
+    let body = [
+        item(1, "one"),
+        item(1, "two"),
+        item(2, "restarted"),
+        item(3, "ten"),
+        para("between"),
+        item(3, "eleven"),
+        item(1, "three"),
+    ]
+    .concat();
+    let doc = docx::read(&word(&body, &[("word/numbering.xml", numbering)])).unwrap();
+    let md = markdown::render(&doc);
+    assert_eq!(
+        md,
+        "1. one\n2. two\n\n<!-- -->\n\n1. restarted\n\n<!-- -->\n\n10. ten\n\nbetween\n\n11. eleven\n\n<!-- -->\n\n3. three\n"
+    );
+}
+
+#[test]
+fn word_drop_caps_check_boxes_and_extra_bodies() {
+    let dropcap = format!(
+        "<w:p><w:pPr><w:framePr w:dropCap=\"drop\" w:lines=\"3\"/></w:pPr>{}</w:p>{}",
+        run("D"),
+        para("rop caps lead.")
+    );
+    let check = |state: &str| {
+        format!(
+            "<w:r><w:fldChar w:fldCharType=\"begin\"><w:ffData><w:checkBox>{state}</w:checkBox></w:ffData></w:fldChar></w:r><w:r><w:instrText> FORMCHECKBOX </w:instrText></w:r><w:r><w:fldChar w:fldCharType=\"end\"/></w:r>"
+        )
+    };
+    let boxes = format!(
+        "<w:p>{}{}{}{}</w:p>",
+        run("Off: "),
+        check("<w:default w:val=\"0\"/>"),
+        run(" On: "),
+        check("<w:default w:val=\"0\"/><w:checked/>")
+    );
+    // Three bodies are not valid, but they are written, and Word reads all.
+    let body = format!("{dropcap}{boxes}</w:body><w:body>{}", para("Second body."));
+    let text = docx::read(&word(&body, &[])).unwrap().text();
+    assert_eq!(text, "Drop caps lead.\n\nOff: ☐ On: ☒\n\nSecond body.\n");
+}
+
+#[test]
+fn word_replace_counts_a_shape_once() {
+    let body = format!(
+        "{}<w:p>{}</w:p>",
+        para("plain text"),
+        text_box("text in a box")
+    );
+    let (bytes, n) = docx::replace(&word(&body, &[]), "text", "words").unwrap();
+    assert_eq!(n, 2);
+    let xml = zipped::Package::open(&bytes)
+        .unwrap()
+        .text("word/document.xml")
+        .unwrap();
+    // Both copies of the box change.
+    assert_eq!(xml.matches("words in a box").count(), 2, "{xml}");
 }
