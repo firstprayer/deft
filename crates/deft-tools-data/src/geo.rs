@@ -12,6 +12,22 @@ pub struct Point {
 pub struct Track {
     pub name: String,
     pub points: Vec<Point>,
+    /// Where a new segment starts in `points`. The recording stopped there,
+    /// so the gap is not part of the route.
+    pub breaks: Vec<usize>,
+}
+
+impl Track {
+    pub fn segments(&self) -> Vec<&[Point]> {
+        let mut out = Vec::with_capacity(self.breaks.len() + 1);
+        let mut start = 0;
+        for &at in &self.breaks {
+            out.push(&self.points[start..at]);
+            start = at;
+        }
+        out.push(&self.points[start..]);
+        out
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -54,13 +70,22 @@ pub fn parse_gpx(text: &str) -> Result<Geo, String> {
                 }
             }
             "trk" | "rte" => {
-                let points: Vec<Point> = node
-                    .descendants()
-                    .filter(|n| matches!(n.tag_name().name(), "trkpt" | "rtept"))
-                    .filter_map(gpx_point)
-                    .collect();
-                let name = child_text(node, "name").unwrap_or_default();
-                geo.tracks.push(Track { name, points });
+                let mut track = Track {
+                    name: child_text(node, "name").unwrap_or_default(),
+                    ..Default::default()
+                };
+                for segment in node.children().filter(|n| n.tag_name().name() == "trkseg") {
+                    if !track.points.is_empty() {
+                        track.breaks.push(track.points.len());
+                    }
+                    let points = segment
+                        .children()
+                        .filter(|n| n.tag_name().name() == "trkpt");
+                    track.points.extend(points.filter_map(gpx_point));
+                }
+                let route = node.children().filter(|n| n.tag_name().name() == "rtept");
+                track.points.extend(route.filter_map(gpx_point));
+                geo.tracks.push(track);
             }
             _ => {}
         }
@@ -81,6 +106,33 @@ fn coordinates(text: &str) -> Vec<Point> {
                 lon,
                 elevation,
                 time: None,
+            })
+        })
+        .collect()
+}
+
+/// A `gx:Track`: `when` elements paired in order with `lon lat alt` coords.
+fn gx_track(shape: roxmltree::Node) -> Vec<Point> {
+    let texts = |name: &str| -> Vec<String> {
+        shape
+            .children()
+            .filter(|c| c.tag_name().name() == name)
+            .map(|c| c.text().unwrap_or("").trim().to_string())
+            .collect()
+    };
+    let times = texts("when");
+    texts("coord")
+        .iter()
+        .enumerate()
+        .filter_map(|(i, coord)| {
+            let mut parts = coord.split_whitespace();
+            let lon = parts.next()?.parse().ok()?;
+            let lat = parts.next()?.parse().ok()?;
+            Some(Point {
+                lat,
+                lon,
+                elevation: parts.next().and_then(|e| e.parse().ok()),
+                time: times.get(i).filter(|t| !t.is_empty()).cloned(),
             })
         })
         .collect()
@@ -113,6 +165,14 @@ pub fn parse_kml(text: &str) -> Result<Geo, String> {
                     geo.tracks.push(Track {
                         name: name.clone(),
                         points: points(),
+                        ..Default::default()
+                    });
+                }
+                "Track" => {
+                    geo.tracks.push(Track {
+                        name: name.clone(),
+                        points: gx_track(shape),
+                        ..Default::default()
                     });
                 }
                 _ => {}
@@ -154,19 +214,20 @@ pub fn write_gpx(geo: &Geo) -> String {
         ));
     }
     for track in &geo.tracks {
-        s.push_str(&format!(
-            "  <trk><name>{}</name><trkseg>\n",
-            xml(&track.name)
-        ));
-        for p in &track.points {
-            s.push_str(&format!(
-                "    <trkpt lat=\"{}\" lon=\"{}\">{}</trkpt>\n",
-                p.lat,
-                p.lon,
-                gpx_fields(p)
-            ));
+        s.push_str(&format!("  <trk><name>{}</name>\n", xml(&track.name)));
+        for segment in track.segments() {
+            s.push_str("  <trkseg>\n");
+            for p in segment {
+                s.push_str(&format!(
+                    "    <trkpt lat=\"{}\" lon=\"{}\">{}</trkpt>\n",
+                    p.lat,
+                    p.lon,
+                    gpx_fields(p)
+                ));
+            }
+            s.push_str("  </trkseg>\n");
         }
-        s.push_str("  </trkseg></trk>\n");
+        s.push_str("  </trk>\n");
     }
     s.push_str("</gpx>\n");
     s
@@ -188,11 +249,25 @@ pub fn write_kml(geo: &Geo) -> String {
         ));
     }
     for track in &geo.tracks {
-        let line: Vec<String> = track.points.iter().map(kml_tuple).collect();
+        let lines: Vec<String> = track
+            .segments()
+            .iter()
+            .map(|segment| {
+                let line: Vec<String> = segment.iter().map(kml_tuple).collect();
+                format!(
+                    "<LineString><coordinates>{}</coordinates></LineString>",
+                    line.join(" ")
+                )
+            })
+            .collect();
+        let shape = if lines.len() > 1 {
+            format!("<MultiGeometry>{}</MultiGeometry>", lines.concat())
+        } else {
+            lines.concat()
+        };
         s.push_str(&format!(
-            "  <Placemark><name>{}</name><LineString><coordinates>{}</coordinates></LineString></Placemark>\n",
-            xml(&track.name),
-            line.join(" ")
+            "  <Placemark><name>{}</name>{shape}</Placemark>\n",
+            xml(&track.name)
         ));
     }
     s.push_str("</Document></kml>\n");
@@ -201,9 +276,9 @@ pub fn write_kml(geo: &Geo) -> String {
 
 pub fn to_csv(geo: &Geo) -> Result<Vec<u8>, String> {
     let mut w = csv::Writer::from_writer(Vec::new());
-    w.write_record(["kind", "name", "lat", "lon", "elevation", "time"])
+    w.write_record(["kind", "name", "lat", "lon", "elevation", "time", "segment"])
         .map_err(|e| e.to_string())?;
-    let mut row = |kind: &str, name: &str, p: &Point| {
+    let mut row = |kind: &str, name: &str, p: &Point, segment: &str| {
         let elevation = p.elevation.map(|e| e.to_string()).unwrap_or_default();
         w.write_record([
             kind,
@@ -212,15 +287,18 @@ pub fn to_csv(geo: &Geo) -> Result<Vec<u8>, String> {
             &p.lon.to_string(),
             &elevation,
             p.time.as_deref().unwrap_or(""),
+            segment,
         ])
         .map_err(|e| e.to_string())
     };
     for place in &geo.places {
-        row("place", &place.name, &place.point)?;
+        row("place", &place.name, &place.point, "")?;
     }
     for track in &geo.tracks {
-        for p in &track.points {
-            row("track", &track.name, p)?;
+        for (n, segment) in track.segments().iter().enumerate() {
+            for p in *segment {
+                row("track", &track.name, p, &(n + 1).to_string())?;
+            }
         }
     }
     w.into_inner().map_err(|e| e.to_string())
@@ -257,19 +335,41 @@ pub struct Stats {
     pub climb_m: f64,
 }
 
+/// Rises smaller than this are GPS noise, not climbing.
+const CLIMB_STEP_M: f64 = 2.0;
+
+/// Metres climbed. A rise counts once it passes the step, measured from the
+/// lowest point since the last rise, so a slow steady climb still adds up.
+fn climb(points: &[Point]) -> f64 {
+    let mut total = 0.0;
+    let mut base: Option<f64> = None;
+    for e in points.iter().filter_map(|p| p.elevation) {
+        match base {
+            Some(b) if e - b >= CLIMB_STEP_M => {
+                total += e - b;
+                base = Some(e);
+            }
+            Some(b) if e >= b => {}
+            _ => base = Some(e),
+        }
+    }
+    total
+}
+
 pub fn stats(geo: &Geo) -> Stats {
     let mut out = Stats::default();
     for track in &geo.tracks {
         out.points += track.points.len();
-        for pair in track.points.windows(2) {
-            out.distance_km += distance_km(&pair[0], &pair[1]);
-            if let (Some(a), Some(b)) = (pair[0].elevation, pair[1].elevation) {
-                out.climb_m += (b - a).max(0.0);
+        // Each segment alone: the gap between two is a pause, not a journey.
+        for segment in track.segments() {
+            for pair in segment.windows(2) {
+                out.distance_km += distance_km(&pair[0], &pair[1]);
             }
-        }
-        let time = |p: Option<&Point>| p.and_then(|p| p.time.as_deref()).and_then(seconds);
-        if let (Some(a), Some(b)) = (time(track.points.first()), time(track.points.last())) {
-            out.seconds = Some(out.seconds.unwrap_or(0) + b - a);
+            out.climb_m += climb(segment);
+            let time = |p: Option<&Point>| p.and_then(|p| p.time.as_deref()).and_then(seconds);
+            if let (Some(a), Some(b)) = (time(segment.first()), time(segment.last())) {
+                out.seconds = Some(out.seconds.unwrap_or(0) + b - a);
+            }
         }
     }
     out

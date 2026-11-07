@@ -187,14 +187,13 @@ Markdown to PDF, HTML, Word, EPUB; table of contents
 
 ## html
 
-HTML to Markdown, text, Word, PDF; screenshots
+HTML to Markdown, text, Word and PDF
 
 | Command | What it does | Needs | Example |
 |---|---|---|---|
-| `deft html screenshot` | Render a local page to an image with Chrome: --size 1280x800 | chrome | `deft html screenshot page.html --size 800x600 -o shot.png` |
 | `deft html to-docx` | Convert the content to a Word document |  | `deft html to-docx page.html -o page.docx` |
 | `deft html to-md` | Convert to Markdown; scripts and styles are dropped |  | `deft html to-md page.html -o page.md` |
-| `deft html to-pdf` | Make a PDF; --browser keeps the CSS |  | `deft html to-pdf page.html -o page.pdf` |
+| `deft html to-pdf` | Typeset as PDF, content not layout |  | `deft html to-pdf page.html -o page.pdf` |
 | `deft html to-text` | Extract the readable text |  | `deft html to-text page.html -o page.txt` |
 
 ## epub

@@ -25,8 +25,12 @@ fn paragraph_spans(p: Node) -> Vec<Span> {
     let mut out = Vec::new();
     for r in p
         .children()
-        .filter(|c| matches!(c.tag_name().name(), "r" | "fld"))
+        .filter(|c| matches!(c.tag_name().name(), "r" | "fld" | "br"))
     {
+        if r.tag_name().name() == "br" {
+            out.push(Span::plain("\n"));
+            continue;
+        }
         let props = r.children().find(|c| c.tag_name().name() == "rPr");
         let on = |k: &str| props.and_then(|x| x.attribute(k)) == Some("1");
         let text: String = r
@@ -93,14 +97,14 @@ fn read_slide(pkg: &Package, part: &str, images: &mut Vec<Image>) -> Result<Slid
             .descendants()
             .filter(|n| name(n) == "p")
             .map(paragraph_spans)
-            .filter(|s| !s.is_empty())
+            .filter(|s| s.iter().any(|x| !x.text.trim().is_empty()))
             .collect();
         if is_title && slide.title.is_none() {
             let joined: Vec<String> = paragraphs
                 .iter()
                 .map(|p| p.iter().map(|s| s.text.as_str()).collect())
                 .collect();
-            slide.title = Some(joined.join(" "));
+            slide.title = Some(joined.join(" ").replace('\n', " "));
         } else {
             slide.body.append(&mut paragraphs);
         }

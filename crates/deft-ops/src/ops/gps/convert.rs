@@ -7,7 +7,10 @@ const OUT: &[Format] = &[Format::Gpx, Format::Kml, Format::Csv];
 pub static OP: Op = Op {
     id: "gps.convert",
     summary: "Change format: --to gpx|kml|csv",
-    details: &["KML has no times, so a GPX track loses them when converted to KML."],
+    details: &[
+        "KML has no times, so a GPX track loses them when converted to KML.",
+        "Heart rate and other GPX extensions are not kept.",
+    ],
     input: Input::each(IN, "gpx|kml"),
     output: Output::one(OUT, "gpx|kml|csv"),
     params: &[param(

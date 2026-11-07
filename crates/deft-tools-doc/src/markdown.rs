@@ -21,6 +21,11 @@ fn inline(spans: &[Span]) -> String {
             out.push_str(&format!("![{}]({name})", escape(&s.text)));
             continue;
         }
+        if s.note {
+            // `[1]` is a reference and `[1]:` starts the note.
+            out.push_str(&s.text.replacen('[', "[^", 1));
+            continue;
+        }
         let text = s.text.trim_matches(' ');
         if text.is_empty() {
             out.push_str(&s.text);
@@ -33,6 +38,9 @@ fn inline(spans: &[Span]) -> String {
         } else {
             escape(text).replace('\n', "  \n")
         };
+        if s.strike {
+            body = format!("~~{body}~~");
+        }
         if s.bold && s.italic {
             body = format!("***{body}***");
         } else if s.bold {
@@ -69,9 +77,10 @@ fn table(rows: &[Vec<Vec<Span>>], out: &mut String) {
     }
 }
 
-fn write(blocks: &[Block], prefix: &str, out: &mut String) {
+/// `in_item` keeps a nested list against its item, which keeps the list tight.
+fn write(blocks: &[Block], prefix: &str, in_item: bool, out: &mut String) {
     for (i, b) in blocks.iter().enumerate() {
-        if i > 0 {
+        if i > 0 && !(in_item && matches!(b, Block::List { .. })) {
             out.push_str(prefix.trim_end());
             out.push('\n');
         }
@@ -100,7 +109,7 @@ fn write(blocks: &[Block], prefix: &str, out: &mut String) {
                     };
                     let pad = " ".repeat(marker.len());
                     let mut body = String::new();
-                    write(item, "", &mut body);
+                    write(item, "", true, &mut body);
                     for (l, line) in body.lines().enumerate() {
                         out.push_str(prefix);
                         out.push_str(if l == 0 { &marker } else { &pad });
@@ -109,7 +118,7 @@ fn write(blocks: &[Block], prefix: &str, out: &mut String) {
                     }
                 }
             }
-            Block::Quote(inner) => write(inner, &format!("{prefix}> "), out),
+            Block::Quote(inner) => write(inner, &format!("{prefix}> "), false, out),
             Block::Code(code) => {
                 out.push_str(&format!("{prefix}```\n"));
                 for line in code.lines() {
@@ -129,7 +138,7 @@ fn write(blocks: &[Block], prefix: &str, out: &mut String) {
 /// Render a document as Markdown.
 pub fn render(doc: &Document) -> String {
     let mut out = String::new();
-    write(&doc.blocks, "", &mut out);
+    write(&doc.blocks, "", false, &mut out);
     out
 }
 
@@ -137,6 +146,7 @@ pub fn render(doc: &Document) -> String {
 struct Style {
     bold: u32,
     italic: u32,
+    strike: u32,
     link: Option<String>,
 }
 
@@ -145,9 +155,10 @@ fn span(text: &str, style: &Style, code: bool) -> Span {
         text: text.to_string(),
         bold: style.bold > 0,
         italic: style.italic > 0,
+        strike: style.strike > 0,
         code,
         link: style.link.clone(),
-        image: None,
+        ..Default::default()
     }
 }
 
@@ -156,6 +167,58 @@ enum Frame {
     Quote(Vec<Block>),
     List(bool, Vec<Vec<Block>>),
     Item(Vec<Block>),
+    Note(String, Vec<Block>),
+}
+
+/// One heading of a Markdown file.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Heading {
+    pub level: usize,
+    /// Text for a link label, keeping code spans.
+    pub label: String,
+    /// Text alone, which is what an anchor is made from.
+    pub plain: String,
+    /// First and last line, counted from 0.
+    pub line: usize,
+    pub end_line: usize,
+}
+
+/// The headings of a file, found by parsing, so that fences, underlined
+/// headings and front matter are all read as a renderer reads them.
+pub fn headings(md: &str) -> Vec<Heading> {
+    let options = Options::ENABLE_TABLES | Options::ENABLE_YAML_STYLE_METADATA_BLOCKS;
+    let line_of = |at: usize| md[..at].matches('\n').count();
+    let mut out: Vec<Heading> = Vec::new();
+    let mut open = false;
+    for (event, range) in Parser::new_ext(md, options).into_offset_iter() {
+        match event {
+            Event::Start(Tag::Heading { level, .. }) => {
+                open = true;
+                out.push(Heading {
+                    level: level as usize,
+                    label: String::new(),
+                    plain: String::new(),
+                    line: line_of(range.start),
+                    end_line: line_of(range.end.saturating_sub(1)),
+                });
+            }
+            Event::End(TagEnd::Heading(_)) => open = false,
+            Event::Text(t) if open => {
+                if let Some(h) = out.last_mut() {
+                    h.label.push_str(&t.replace('[', "\\[").replace(']', "\\]"));
+                    h.plain.push_str(&t);
+                }
+            }
+            Event::Code(t) if open => {
+                if let Some(h) = out.last_mut() {
+                    h.label.push_str(&format!("`{t}`"));
+                    h.plain.push_str(&t);
+                }
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 /// Parse Markdown into blocks. Image paths are kept as written in `Span::image`.
@@ -170,7 +233,7 @@ pub fn parse(md: &str) -> Vec<Block> {
 
     fn push(stack: &mut [Frame], b: Block) {
         match stack.last_mut().expect("top frame") {
-            Frame::Top(v) | Frame::Quote(v) | Frame::Item(v) => v.push(b),
+            Frame::Top(v) | Frame::Quote(v) | Frame::Item(v) | Frame::Note(_, v) => v.push(b),
             Frame::List(..) => {}
         }
     }
@@ -180,8 +243,10 @@ pub fn parse(md: &str) -> Vec<Block> {
         }
     }
 
-    let options =
-        Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
+    let options = Options::ENABLE_TABLES
+        | Options::ENABLE_STRIKETHROUGH
+        | Options::ENABLE_TASKLISTS
+        | Options::ENABLE_FOOTNOTES;
     for event in Parser::new_ext(md, options) {
         match event {
             Event::Start(Tag::Heading { level, .. }) => {
@@ -228,6 +293,25 @@ pub fn parse(md: &str) -> Vec<Block> {
                     items.push(v);
                 }
             }
+            Event::Start(Tag::FootnoteDefinition(label)) => {
+                stack.push(Frame::Note(label.to_string(), vec![]));
+            }
+            Event::End(TagEnd::FootnoteDefinition) => {
+                flush(&mut stack, &mut spans);
+                if let Some(Frame::Note(label, mut inner)) = stack.pop() {
+                    let marker = [Span::note(format!("[{label}]:")), Span::plain(" ")];
+                    match inner.first_mut() {
+                        Some(Block::Paragraph(first)) => {
+                            first.splice(0..0, marker);
+                        }
+                        _ => inner.insert(0, Block::Paragraph(marker.to_vec())),
+                    }
+                    for b in inner {
+                        push(&mut stack, b);
+                    }
+                }
+            }
+            Event::FootnoteReference(label) => spans.push(Span::note(format!("[{label}]"))),
             Event::Start(Tag::CodeBlock(_)) => code = Some(String::new()),
             Event::End(TagEnd::CodeBlock) => {
                 let text = code.take().unwrap_or_default();
@@ -251,6 +335,8 @@ pub fn parse(md: &str) -> Vec<Block> {
             }
             Event::Start(Tag::Emphasis) => style.italic += 1,
             Event::End(TagEnd::Emphasis) => style.italic = style.italic.saturating_sub(1),
+            Event::Start(Tag::Strikethrough) => style.strike += 1,
+            Event::End(TagEnd::Strikethrough) => style.strike = style.strike.saturating_sub(1),
             Event::Start(Tag::Strong) => style.bold += 1,
             Event::End(TagEnd::Strong) => style.bold = style.bold.saturating_sub(1),
             Event::Start(Tag::Link { dest_url, .. }) => style.link = Some(dest_url.to_string()),

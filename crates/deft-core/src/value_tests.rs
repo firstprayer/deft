@@ -1,6 +1,14 @@
 use super::*;
 
 #[test]
+fn percent_escapes_decode() {
+    assert_eq!(percent_decode("my%20photo.png"), "my photo.png");
+    assert_eq!(percent_decode("caf%C3%A9"), "café");
+    assert_eq!(percent_decode("100%.png"), "100%.png");
+    assert_eq!(percent_decode("%zz%2"), "%zz%2");
+}
+
+#[test]
 fn pages() {
     let p = PageSet::parse("1-3,5,8-").unwrap();
     assert_eq!(p.resolve(10).unwrap(), vec![0, 1, 2, 4, 7, 8, 9]);

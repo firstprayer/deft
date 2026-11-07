@@ -12,16 +12,23 @@ Deft follows semantic versioning. Before 1.0, a minor version may change command
 - `pdf extract-sheets`: each table in a PDF as its own CSV, or as a sheet in one XLSX.
 - `video frames --interval` and `--from`.
 - `deft find` says when no command does a job.
+- `html to-docx --main` and `html to-pdf --main`.
+- `calendar to-csv` adds `status` and `except` columns, and `calendar from-csv` reads them.
 
 ### Changed
 
 - `video stabilize` uses two passes where ffmpeg has vidstab, which removes far more shake.
 - `video compress --target-size` uses two passes and the whole size budget.
 - YAML output quotes strings such as `yes`, `on` and dates, which older parsers misread.
+- Word readers keep footnotes, endnotes, text boxes, nested tables, content controls and list levels, and `doc replace` reaches notes.
+- `doc to-html` embeds pictures. Pictures in PDFs keep their natural size.
+- `calendar to-csv` shows the last day of an all-day event, not the day after it.
+- `gps info` and `gps convert` treat track segments separately, and `climb_m` ignores rises under 2 m.
 
 ### Removed
 
 - The `archive` and `subtitle` groups, and `audio waveform`.
+- `html screenshot` and `html to-pdf --browser`. Deft no longer uses Chrome.
 - The `youtube` group, `deft engine install` and `update`, `--offline` and `--install-engines`. Deft no longer touches the network.
 - Commands an agent does in one ordinary line: `file hash`, `base64`, `split`, `join`, `rename` and `organize`; `video crop`, `resize`, `rotate`, `mute`, `fade`, `repeat`, `reverse`, `stack`, `thumbnail`, `extract-audio` and `extract-subtitles`; `audio chunk`, `compress`, `fade`, `merge`, `reverse`, `speed`, `strip` and `volume`; `image diff`, `invert` and `sharpen`; `pdf grayscale` and `repair`; `data query`; `sheet transpose`; `email info`, `contact info` and `calendar info`.
 - `sheet filter`, `sort`, `select`, `group`, `dedupe` and `join`: `sheet query` does all of them in SQL.
@@ -29,6 +36,15 @@ Deft follows semantic versioning. Before 1.0, a minor version may change command
 
 ### Fixed
 
+- `pdf redact` removes the text and form values from the file, not just from the page, and `pdf strip` removes the XMP packet.
+- `pdf encrypt` output opens in Apple's PDF readers. `pdf to-text` and `search` read fonts that came out as garbage before, and ligatures.
+- `pdf merge` keeps every form and bookmark. `extract-sheets` uses real glyph widths.
+- HEIC photos from phones come out whole and upright. `image strip` removes everything after a JPEG's end. `image info` finds GPS in every format. Display P3 colour survives.
+- `image compress` never grows a file and fails when it misses a target. `image trim --speck` ignores dust.
+- `video from-images`, `merge`, `watermark`, `add-subtitles` and `info` handle mixed sizes, silent clips and phone rotation. `audio convert`, `split` and `normalize` work with cover art.
+- Word readers keep footnotes, text boxes and nested tables. EPUB keeps every chapter and refuses DRM. HTML keeps the headline and declared charset.
+- `sheet query` keeps leading zeros and exact numbers, reads every sheet, and treats empty cells as empty. It no longer needs sqlite3: SQLite is built in.
+- Text options keep their spaces. `-o` works on report commands.
 - `sheet query` runs on SQLite compiled into deft, so it no longer needs the `sqlite3` program. Numbers keep every digit, identifiers such as 007 stay text, empty cells are NULL, every sheet of a workbook is a table, repeated headers work and `--sheet` is new. A SQLite file is opened read-only.
 - Report commands write their result as JSON with `-o name.json` instead of ignoring `-o`.
 - Text options keep their spaces, so `doc replace --find ' '` works.

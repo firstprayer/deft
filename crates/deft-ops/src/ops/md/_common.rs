@@ -78,30 +78,71 @@ pub fn save_images(images: &[Image], dir: Option<std::path::PathBuf>) -> Result<
     Ok(None)
 }
 
-/// Read the images a Markdown document refers to, relative to `base`.
-pub fn load_images(blocks: &mut [deft_tools_doc::Block], base: Option<&Path>) -> Vec<Image> {
+/// The images found so far, and what could not be used.
+#[derive(Default)]
+struct Loaded {
+    images: Vec<Image>,
+    warnings: Vec<String>,
+}
+
+impl Loaded {
+    /// The name this picture goes by. Two different pictures can share a file
+    /// name when they come from different folders.
+    fn add(&mut self, name: &str, bytes: Vec<u8>) -> String {
+        let (stem, extension) = name.rsplit_once('.').unwrap_or((name, ""));
+        let mut candidate = name.to_string();
+        let mut n = 1;
+        loop {
+            match self.images.iter().find(|i| i.name == candidate) {
+                Some(i) if i.bytes == bytes => return candidate,
+                Some(_) => {
+                    n += 1;
+                    candidate = format!("{stem}-{n}.{extension}");
+                }
+                None => break,
+            }
+        }
+        self.images.push(Image {
+            name: candidate.clone(),
+            bytes,
+        });
+        candidate
+    }
+}
+
+/// Read the images a Markdown document refers to, relative to `base`. Returns
+/// them with a warning for each one that could not be embedded.
+pub fn load_images(
+    blocks: &mut [deft_tools_doc::Block],
+    base: Option<&Path>,
+) -> (Vec<Image>, Vec<String>) {
     use deft_tools_doc::{Block, Span};
-    fn spans(list: &mut [Span], base: Option<&Path>, out: &mut Vec<Image>) {
+    fn spans(list: &mut [Span], base: Option<&Path>, out: &mut Loaded) {
         for s in list {
             let Some(path) = s.image.clone() else {
                 continue;
             };
-            let full = base.map_or_else(|| Path::new(&path).to_path_buf(), |b| b.join(&path));
-            let name = Path::new(&path)
-                .file_name()
-                .map_or(path.clone(), |n| n.to_string_lossy().to_string());
-            match std::fs::read(&full) {
-                Ok(bytes) => {
-                    if !out.iter().any(|i| i.name == name) {
-                        out.push(Image {
-                            name: name.clone(),
-                            bytes,
-                        });
-                    }
-                    s.image = Some(name);
+            let located = |p: &str| base.map_or_else(|| Path::new(p).to_path_buf(), |b| b.join(p));
+            // Markdown writes a space in a file name as %20.
+            let decoded = percent_decode(&path);
+            let full = [located(&path), located(&decoded)]
+                .into_iter()
+                .find(|p| p.is_file());
+            match full.and_then(|p| Some((std::fs::read(&p).ok()?, p))) {
+                Some((bytes, full)) => {
+                    let name = full
+                        .file_name()
+                        .map_or(path.clone(), |n| n.to_string_lossy().to_string());
+                    s.image = Some(out.add(&name, bytes));
                 }
                 // A web image or a missing file: keep its text.
-                Err(_) => {
+                None => {
+                    let remote = path.starts_with("http://") || path.starts_with("https://");
+                    out.warnings.push(if remote {
+                        format!("remote image not embedded: {path}")
+                    } else {
+                        format!("image not found: {path}")
+                    });
                     s.image = None;
                     if s.text.is_empty() {
                         s.text = path;
@@ -110,7 +151,7 @@ pub fn load_images(blocks: &mut [deft_tools_doc::Block], base: Option<&Path>) ->
             }
         }
     }
-    fn walk(blocks: &mut [Block], base: Option<&Path>, out: &mut Vec<Image>) {
+    fn walk(blocks: &mut [Block], base: Option<&Path>, out: &mut Loaded) {
         for b in blocks {
             match b {
                 Block::Heading(_, s) | Block::Paragraph(s) => spans(s, base, out),
@@ -131,7 +172,7 @@ pub fn load_images(blocks: &mut [deft_tools_doc::Block], base: Option<&Path>) ->
             }
         }
     }
-    let mut out = Vec::new();
+    let mut out = Loaded::default();
     walk(blocks, base, &mut out);
-    out
+    (out.images, out.warnings)
 }

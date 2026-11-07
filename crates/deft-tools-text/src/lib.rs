@@ -2,6 +2,7 @@
 //! (Markdown is translated to Typst markup and compiled in-process).
 
 use deft_core::error::{ErrorCode, Result, err};
+use deft_core::value::percent_decode;
 use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use std::collections::HashMap;
 use std::path::Path;
@@ -94,6 +95,23 @@ fn esc(text: &str) -> String {
         s.push(c);
     }
     s
+}
+
+/// Long unbroken text, such as a URL, gets places to break, or it runs off
+/// the page. Other scripts break by themselves.
+fn breakable(text: &str) -> String {
+    const LIMIT: usize = 40;
+    let mut out = String::with_capacity(text.len());
+    let mut run = 0;
+    for c in text.chars() {
+        run = if c.is_ascii_graphic() { run + 1 } else { 0 };
+        out.push(c);
+        if run == LIMIT {
+            out.push('\u{200B}');
+            run = 0;
+        }
+    }
+    out
 }
 
 /// A Typst string literal.
@@ -201,9 +219,17 @@ fn translate(md: &str, base: Option<&Path>) -> Translation {
                         out.push_str(&format!("#link({})[{}];", lit(&url), esc(&url)));
                         continue;
                     }
-                    let path = base
-                        .map(|b| b.join(&url))
-                        .unwrap_or_else(|| Path::new(&url).to_path_buf());
+                    let located = |name: &str| {
+                        base.map(|b| b.join(name))
+                            .unwrap_or_else(|| Path::new(name).to_path_buf())
+                    };
+                    let path = located(&url);
+                    // Markdown writes a space in a file name as %20.
+                    let path = if path.exists() {
+                        path
+                    } else {
+                        located(&percent_decode(&url))
+                    };
                     match std::fs::read(&path) {
                         Ok(bytes) => {
                             let ext = path
@@ -213,7 +239,8 @@ fn translate(md: &str, base: Option<&Path>) -> Translation {
                                 .to_ascii_lowercase();
                             let name = format!("img-{}.{ext}", files.len() + 1);
                             files.insert(name.clone(), bytes);
-                            out.push_str(&format!("#box(image({}, width: 100%));", lit(&name)));
+                            // No width: the natural size, shrunk to fit the column.
+                            out.push_str(&format!("#box(image({}));", lit(&name)));
                         }
                         Err(_) => {
                             warnings.push(format!("image not found: {url}"));
@@ -270,7 +297,7 @@ fn translate(md: &str, base: Option<&Path>) -> Translation {
                 TagEnd::TableCell => out.push_str(if in_head { "]," } else { "], " }),
                 _ => {}
             },
-            Event::Text(t) => out.push_str(&esc(&t)),
+            Event::Text(t) => out.push_str(&esc(&breakable(&t))),
             Event::Code(t) => out.push_str(&format!("#raw({});", lit(&t))),
             Event::SoftBreak => out.push(' '),
             Event::HardBreak => out.push_str(" \\\n"),
@@ -364,13 +391,23 @@ pub struct PdfOutput {
     pub warnings: Vec<String>,
 }
 
+/// Whether any text fell back to the empty box of a font without the letter.
+fn has_missing_glyphs(frame: &typst::layout::Frame) -> bool {
+    use typst::layout::FrameItem;
+    frame.items().any(|(_, item)| match item {
+        FrameItem::Group(group) => has_missing_glyphs(&group.frame),
+        FrameItem::Text(text) => text.glyphs.iter().any(|g| g.id == 0),
+        _ => false,
+    })
+}
+
 /// Compile Typst markup to PDF. System fonts are only scanned when the text
 /// needs them, because scanning is slow.
 fn compile(
     markup: String,
     files: HashMap<String, Vec<u8>>,
     needs_system_fonts: bool,
-) -> Result<(Vec<u8>, usize)> {
+) -> Result<(Vec<u8>, usize, bool)> {
     let mut fonts = FontStore::new();
     for data in deft_tools_image::bundled_fonts() {
         fonts.extend(Font::iter(Bytes::new(data)).map(|font| {
@@ -379,7 +416,14 @@ fn compile(
         }));
     }
     if needs_system_fonts {
-        fonts.extend(typst_kit::fonts::system());
+        // macOS's LastResort claims every character and draws each as a box,
+        // which would hide the real fonts behind it.
+        fonts.extend(typst_kit::fonts::system().filter(|(_, info)| {
+            !info
+                .family
+                .replace(' ', "")
+                .eq_ignore_ascii_case("lastresort")
+        }));
     }
     let main = Source::new(file_id("main.typ"), markup);
     let files = files
@@ -404,6 +448,7 @@ fn compile(
         )
     })?;
     let pages = doc.pages().len();
+    let missing = doc.pages().iter().any(|p| has_missing_glyphs(&p.frame));
     let bytes = typst_pdf::pdf(&doc, &typst_pdf::PdfOptions::default()).map_err(|errors| {
         let msg: Vec<String> = errors
             .iter()
@@ -415,7 +460,7 @@ fn compile(
             format!("PDF export failed: {}", msg.join("; ")),
         )
     })?;
-    Ok((bytes, pages))
+    Ok((bytes, pages, missing))
 }
 
 /// Render Markdown to PDF. `base` resolves relative image paths.
@@ -442,15 +487,19 @@ pub fn to_pdf(md: &str, base: Option<&Path>, style: &PdfStyle) -> Result<PdfOutp
         margin = style.margin,
         size = style.font_size,
     );
-    let (bytes, pages) = compile(
+    let (bytes, pages, missing) = compile(
         format!("{preamble}{}", t.markup),
         t.files,
         non_latin || style.font.is_some(),
     )?;
+    let mut warnings = t.warnings;
+    if missing {
+        warnings.push("some characters have no font and print as empty boxes".to_string());
+    }
     Ok(PdfOutput {
         bytes,
         pages,
-        warnings: t.warnings,
+        warnings,
     })
 }
 

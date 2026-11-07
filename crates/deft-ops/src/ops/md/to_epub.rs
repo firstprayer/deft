@@ -49,11 +49,14 @@ fn run(job: &Job) -> Result<OpResult> {
     let p = job.params;
     let mut parts = Vec::new();
     let mut images = Vec::new();
+    let mut warnings = Vec::new();
     for input in &job.inputs {
         let md = String::from_utf8_lossy(input.bytes()?).to_string();
         let base = input.path.as_ref().and_then(|x| x.parent());
         let mut blocks = deft_tools_doc::markdown::parse(&md);
-        for image in load_images(&mut blocks, base) {
+        let (found, problems) = load_images(&mut blocks, base);
+        warnings.extend(problems);
+        for image in found {
             if !images
                 .iter()
                 .any(|i: &deft_tools_doc::Image| i.name == image.name)
@@ -94,7 +97,9 @@ fn run(job: &Job) -> Result<OpResult> {
         chapters: list,
         images,
     })?;
-    Ok(OpResult::one(Produced::bytes(bytes, Format::Epub))
+    let mut res = OpResult::one(Produced::bytes(bytes, Format::Epub))
         .fact("chapters", n)
-        .note(format!("{n} chapters")))
+        .note(format!("{n} chapters"));
+    res.warnings = warnings;
+    Ok(res)
 }

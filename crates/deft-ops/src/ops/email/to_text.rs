@@ -19,8 +19,13 @@ pub static OP: Op = Op {
 
 fn run(job: &Job) -> Result<OpResult> {
     let m = deft_tools_doc::email::read(job.input().bytes()?)?;
+    let cc = if m.cc.is_empty() {
+        String::new()
+    } else {
+        format!("Cc: {}\n", m.cc)
+    };
     let text = format!(
-        "From: {}\nTo: {}\nDate: {}\nSubject: {}\n\n{}\n",
+        "From: {}\nTo: {}\n{cc}Date: {}\nSubject: {}\n\n{}\n",
         m.from,
         m.to,
         m.date,

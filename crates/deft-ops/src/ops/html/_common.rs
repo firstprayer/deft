@@ -4,17 +4,29 @@ use deft_core::prelude::*;
 
 pub const IN: &[Format] = &[Format::Html];
 
-pub fn text(input: &InputFile) -> Result<String> {
-    Ok(String::from_utf8_lossy(input.bytes()?).to_string())
+/// The charset a page declares in its first bytes.
+fn declared_charset(bytes: &[u8]) -> Option<String> {
+    let head = String::from_utf8_lossy(&bytes[..bytes.len().min(2048)]);
+    let re = regex::Regex::new(r#"(?i)(?:charset|encoding)\s*=\s*["']?\s*([\w.:-]+)"#).ok()?;
+    Some(re.captures(&head)?.get(1)?.as_str().to_string())
 }
 
-/// The input as a `file://` address for a browser.
-pub fn file_url(job: &Job) -> Result<String> {
-    let path = std::path::absolute(job.input().local_path(job.ctx)?)?;
-    Ok(format!(
-        "file://{}",
-        path.display().to_string().replace(' ', "%20")
-    ))
+/// The page as text. UTF-8 is taken as it is; otherwise the page's own
+/// declaration decides, then windows-1252, which is what browsers assume.
+pub fn text(input: &InputFile) -> Result<String> {
+    let bytes = input.bytes()?;
+    let found = deft_tools_file::detect_encoding(bytes);
+    let sure = found == deft_tools_file::Encoding::for_label(b"utf-8").expect("utf-8 exists")
+        || deft_tools_file::Encoding::for_bom(bytes).is_some();
+    let encoding = if sure {
+        found
+    } else {
+        declared_charset(bytes)
+            .and_then(|name| deft_tools_file::find_encoding(&name))
+            .or_else(|| deft_tools_file::find_encoding("windows-1252"))
+            .unwrap_or(found)
+    };
+    Ok(deft_tools_file::decode_text(bytes, encoding).0)
 }
 
 pub const MAIN: ParamSpec = param(
