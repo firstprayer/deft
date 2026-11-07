@@ -6,6 +6,7 @@ const IN: &[Format] = &[Format::Vcf];
 pub static OP: Op = Op {
     id: "contact.to-csv",
     summary: "Turn a VCF address book into a table",
+    details: &["Photos and labels such as home or work are not kept."],
     input: Input::each(IN, "vcf"),
     output: Output::one(&[Format::Csv], "csv"),
     converts: &[Edge {

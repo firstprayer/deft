@@ -83,6 +83,26 @@ fn joined_parts(value: &str) -> String {
         .join(", ")
 }
 
+/// vCard 4.0 writes a phone number as a `tel:` address.
+fn without_scheme(phone: &str) -> &str {
+    match phone.get(..4) {
+        Some(scheme) if scheme.eq_ignore_ascii_case("tel:") => &phone[4..],
+        _ => phone,
+    }
+}
+
+/// (family, given) from a name as people write it.
+fn name_parts(name: &str) -> (&str, &str) {
+    let name = name.trim();
+    if let Some((family, given)) = name.split_once(", ") {
+        return (family, given);
+    }
+    match name.rsplit_once(' ') {
+        Some((given, family)) => (family, given.trim()),
+        None => (name, ""),
+    }
+}
+
 pub fn parse(text: &str) -> Vec<Contact> {
     let mut contacts = Vec::new();
     let mut current: Option<Contact> = None;
@@ -92,7 +112,14 @@ pub fn parse(text: &str) -> Vec<Contact> {
         };
         match (name.as_str(), value.to_ascii_uppercase().as_str()) {
             ("BEGIN", "VCARD") => current = Some(Contact::default()),
-            ("END", "VCARD") => contacts.extend(current.take()),
+            ("END", "VCARD") => {
+                if let Some(c) = current.as_mut()
+                    && c.name.is_empty()
+                {
+                    c.name = c.organization.clone();
+                }
+                contacts.extend(current.take());
+            }
             _ => {}
         }
         let Some(c) = current.as_mut() else {
@@ -104,9 +131,15 @@ pub fn parse(text: &str) -> Vec<Contact> {
             "N" if c.name.is_empty() => c.name = structured_name(&text),
             "ORG" => c.organization = joined_parts(&text),
             "TITLE" => c.title = text,
-            "TEL" => c.phones.push(text),
+            "TEL" => c.phones.push(without_scheme(&text).to_string()),
             "EMAIL" => c.emails.push(text),
-            "ADR" if c.address.is_empty() => c.address = joined_parts(&text),
+            "ADR" => {
+                let address = joined_parts(&text);
+                if !c.address.is_empty() && !address.is_empty() {
+                    c.address.push_str("; ");
+                }
+                c.address.push_str(&address);
+            }
             "BDAY" => c.birthday = text,
             "URL" => c.url = text,
             "NOTE" => c.note = text,
@@ -155,12 +188,23 @@ pub fn from_csv(bytes: &[u8]) -> Result<Vec<Contact>, String> {
         .map(|h| h.trim().to_ascii_lowercase())
         .collect();
     let find = |names: &[&str]| headers.iter().position(|h| names.contains(&h.as_str()));
-    let name = find(&["name", "full name", "fn"]).ok_or("the CSV needs a name column")?;
+    let name = find(&["name", "full name", "fn"]);
+    let first = find(&["first name", "given name"]);
+    let last = find(&["last name", "family name", "surname"]);
+    if name.is_none() && first.is_none() && last.is_none() {
+        return Err("the CSV needs a name column".to_string());
+    }
     let columns = [
         find(&["organization", "organisation", "company", "org"]),
         find(&["title", "job title"]),
-        find(&["phone", "phones", "tel", "mobile"]),
-        find(&["email", "emails", "e-mail"]),
+        find(&["phone", "phones", "tel", "mobile", "mobile phone"]),
+        find(&[
+            "email",
+            "emails",
+            "e-mail",
+            "email address",
+            "e-mail address",
+        ]),
         find(&["address"]),
         find(&["birthday", "bday"]),
         find(&["url", "website"]),
@@ -171,8 +215,13 @@ pub fn from_csv(bytes: &[u8]) -> Result<Vec<Contact>, String> {
         let row = row.map_err(|e| e.to_string())?;
         let cell = |i: Option<usize>| i.and_then(|i| row.get(i)).unwrap_or("").trim().to_string();
         let [org, title, phone, email, address, birthday, url, note] = columns;
+        let full = [cell(first), cell(last)]
+            .into_iter()
+            .filter(|p| !p.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
         contacts.push(Contact {
-            name: cell(Some(name)),
+            name: Some(cell(name)).filter(|n| !n.is_empty()).unwrap_or(full),
             organization: cell(org),
             title: cell(title),
             phones: list(&cell(phone)),
@@ -199,7 +248,8 @@ pub fn write(contacts: &[Contact]) -> String {
     for c in contacts {
         s.push_str("BEGIN:VCARD\r\nVERSION:3.0\r\n");
         s.push_str(&format!("FN:{}\r\n", escape(&c.name)));
-        s.push_str(&format!("N:{};;;;\r\n", escape(&c.name)));
+        let (family, given) = name_parts(&c.name);
+        s.push_str(&format!("N:{};{};;;\r\n", escape(family), escape(given)));
         let fields = [
             ("ORG", &c.organization),
             ("TITLE", &c.title),
