@@ -5,27 +5,128 @@ use deft_core::error::{ErrorCode, Result, err};
 use lopdf::{Dictionary, Document, Object, ObjectId, Stream, dictionary};
 use std::collections::{HashMap, HashSet};
 
+mod catalog;
 pub mod compare;
 pub mod extract;
+pub mod fonts;
 pub mod forms;
 pub mod layout;
 pub mod meta;
 mod outline;
 pub mod pages;
 pub mod text;
+mod writer;
+mod xmp;
 
 pub use lopdf;
 
 // ------------------------------------------------------------------ load / save
 
 /// Parse a PDF. Encrypted files open with an empty user password when
-/// possible; otherwise `password` is required.
+/// possible; otherwise `password` is required. A protected file keeps its
+/// encryption state, so `meta::save_protected` can protect the result again.
 pub fn load(bytes: &[u8], password: Option<&str>) -> Result<Document> {
+    let mut doc = match attachments_only(bytes) {
+        Some(doc) => doc,
+        None => load_decrypted(bytes, password)?,
+    };
+    recover_packed_objects(&mut doc);
+    let pages = doc.get_pages();
+    if pages.is_empty() {
+        return Err(err(ErrorCode::InputCorrupt, "the PDF has no pages"));
+    }
+    // lopdf keeps a page it cannot read as a stand-in, which would be written
+    // out as a null page. Refuse rather than drop a page.
+    if let Some((n, _)) = pages
+        .iter()
+        .find(|(_, id)| doc.get_dictionary(**id).is_err())
+    {
+        return Err(err(
+            ErrorCode::InputCorrupt,
+            format!("page {n} cannot be read; the file is damaged"),
+        ));
+    }
+    // lopdf's text extraction misses resources inherited from parent nodes.
+    flatten_inheritance(&mut doc);
+    Ok(doc)
+}
+
+/// Read the objects of an object stream that lopdf skipped. Its parser stops
+/// at a comment before an object, which qpdf and others write, so the page
+/// stored there would be lost.
+fn recover_packed_objects(doc: &mut Document) {
+    let mut wanted = Vec::new();
+    for o in doc.objects.values() {
+        references(o, &mut wanted);
+    }
+    if wanted.iter().all(|id| doc.objects.contains_key(id)) {
+        return;
+    }
+    let mut found = Vec::new();
+    for (&(container, _), obj) in &doc.objects {
+        let Ok(stream) = obj.as_stream() else {
+            continue;
+        };
+        if !stream.dict.has_type(b"ObjStm") {
+            continue;
+        }
+        let Ok(plain) = stream.get_plain_content() else {
+            continue;
+        };
+        let mut cleaned = stream.clone();
+        cleaned.dict.remove(b"Filter");
+        cleaned.dict.remove(b"DecodeParms");
+        cleaned.set_content(blank_comments(&plain));
+        let Ok(objects) = lopdf::ObjectStream::new(&cleaned) else {
+            continue;
+        };
+        for (id, o) in objects.objects {
+            // Only objects this container still holds, by the cross-reference
+            // table; an older copy must not shadow a newer one.
+            let current = match doc.reference_table.get(id.0) {
+                None => true,
+                Some(lopdf::xref::XrefEntry::Compressed { container: c, .. }) => *c == container,
+                Some(_) => false,
+            };
+            if current && !doc.objects.contains_key(&id) {
+                found.push((id, o));
+            }
+        }
+    }
+    for (id, o) in found {
+        doc.max_id = doc.max_id.max(id.0);
+        doc.objects.insert(id, o);
+    }
+}
+
+/// Replace comments with spaces, keeping every offset in place.
+fn blank_comments(data: &[u8]) -> Vec<u8> {
+    let mut out = data.to_vec();
+    let (mut depth, mut i) = (0usize, 0);
+    while i < out.len() {
+        match out[i] {
+            b'\\' if depth > 0 => i += 1,
+            b'(' => depth += 1,
+            b')' if depth > 0 => depth -= 1,
+            b'%' if depth == 0 => {
+                while i < out.len() && !matches!(out[i], b'\r' | b'\n') {
+                    out[i] = b' ';
+                    i += 1;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    out
+}
+
+fn load_decrypted(bytes: &[u8], password: Option<&str>) -> Result<Document> {
     let options = match password {
         Some(p) => lopdf::LoadOptions::with_password(p),
         None => lopdf::LoadOptions::default(),
     };
-    let mut doc = Document::load_mem_with_options(bytes, options).map_err(|e| match e {
+    let doc = Document::load_mem_with_options(bytes, options).map_err(|e| match e {
         lopdf::Error::InvalidPassword | lopdf::Error::Decryption(_) => {
             encrypted_error(password.is_some())
         }
@@ -34,23 +135,47 @@ pub fn load(bytes: &[u8], password: Option<&str>) -> Result<Document> {
             format!("not a readable PDF: {other}"),
         ),
     })?;
+    // lopdf leaves /Encrypt in place when no password opened the file.
     if doc.trailer.get(b"Encrypt").is_ok() {
-        if doc.encryption_state.is_none() {
-            return Err(encrypted_error(password.is_some()));
-        }
-        // Decrypted on load; write the result without encryption.
-        if let Ok(id) = doc.trailer.get(b"Encrypt").and_then(Object::as_reference) {
-            doc.objects.remove(&id);
-        }
-        doc.trailer.remove(b"Encrypt");
-        doc.encryption_state = None;
+        return Err(encrypted_error(password.is_some()));
     }
-    if doc.get_pages().is_empty() {
-        return Err(err(ErrorCode::InputCorrupt, "the PDF has no pages"));
-    }
-    // lopdf's text extraction misses resources inherited from parent nodes.
-    flatten_inheritance(&mut doc);
     Ok(doc)
+}
+
+/// A file where only the attachments are encrypted (Acrobat's "encrypt only
+/// file attachments"): strings and streams use the Identity filter, so the
+/// document reads without a password. lopdf would ask for one, or decrypt the
+/// plain text into noise. Read it as it is and keep /Encrypt for the
+/// attachments, which stay encrypted.
+fn attachments_only(bytes: &[u8]) -> Option<Document> {
+    if !bytes.windows(4).any(|w| w == b"/EFF") {
+        return None;
+    }
+    // Hide the trailer key so lopdf reads the objects as written.
+    let mut hidden = bytes.to_vec();
+    let mut i = 0;
+    while let Some(at) = hidden[i..].windows(8).position(|w| w == b"/Encrypt") {
+        let end = i + at + 8;
+        if hidden.get(end).is_some_and(|b| b.is_ascii_whitespace()) {
+            hidden[end - 1] = b'x';
+        }
+        i = end;
+    }
+    let mut doc = Document::load_mem(&hidden).ok()?;
+    let key = doc.trailer.remove(b"Encrypx")?;
+    let dict = deref(&doc, &key).as_dict().ok()?;
+    let version = dict.get(b"V").ok().and_then(num).unwrap_or(0.0);
+    let identity = |k: &[u8]| {
+        dict.get(k)
+            .ok()
+            .and_then(|o| o.as_name().ok())
+            .is_none_or(|n| n == b"Identity")
+    };
+    if version < 4.0 || !identity(b"StmF") || !identity(b"StrF") {
+        return None;
+    }
+    doc.trailer.set("Encrypt", key);
+    Some(doc)
 }
 
 fn encrypted_error(had_password: bool) -> deft_core::error::DeftError {
@@ -243,18 +368,21 @@ fn set_page_tree(doc: &mut Document, pages: &[ObjectId]) -> Result<()> {
     Ok(())
 }
 
+/// Every object an object refers to directly.
+pub(crate) fn references(o: &Object, out: &mut Vec<ObjectId>) {
+    match o {
+        Object::Reference(id) => out.push(*id),
+        Object::Array(a) => a.iter().for_each(|x| references(x, out)),
+        Object::Dictionary(d) => d.iter().for_each(|(_, x)| references(x, out)),
+        Object::Stream(s) => s.dict.iter().for_each(|(_, x)| references(x, out)),
+        _ => {}
+    }
+}
+
 /// Drop objects unreachable from the trailer. lopdf's `prune_objects` scans a
 /// list once per object, which takes seconds on long documents.
 pub(crate) fn prune(doc: &mut Document) {
-    fn refs(o: &Object, out: &mut Vec<ObjectId>) {
-        match o {
-            Object::Reference(id) => out.push(*id),
-            Object::Array(a) => a.iter().for_each(|x| refs(x, out)),
-            Object::Dictionary(d) => d.iter().for_each(|(_, x)| refs(x, out)),
-            Object::Stream(s) => s.dict.iter().for_each(|(_, x)| refs(x, out)),
-            _ => {}
-        }
-    }
+    let refs = references;
     let mut stack = Vec::new();
     doc.trailer.iter().for_each(|(_, o)| refs(o, &mut stack));
     let mut seen = HashSet::new();
@@ -277,10 +405,11 @@ fn detach_removed_pages(doc: &mut Document, kept: &[ObjectId]) -> Result<()> {
     outline::keep_pages(doc, &keep);
     forms::keep_fields_on(doc, kept);
     if let Ok(catalog) = doc.catalog_mut() {
-        for key in [&b"StructTreeRoot"[..], b"Dests", b"Names", b"OpenAction"] {
+        for key in [&b"StructTreeRoot"[..], b"Dests", b"OpenAction"] {
             catalog.remove(key);
         }
     }
+    catalog::keep_document_names(doc);
     let points_away = |doc: &Document, annot: &Dictionary| {
         outline::dest_page(doc, annot).is_some_and(|id| !keep.contains(&id))
     };
@@ -320,12 +449,110 @@ pub fn select(doc: &mut Document, indexes: &[usize]) -> Result<()> {
     }
     flatten_inheritance(doc);
     let ids = page_ids(doc);
+    let labels = catalog::page_labels(doc, ids.len());
     let picked: Vec<ObjectId> = indexes.iter().map(|&i| ids[i]).collect();
     let dropped = ids.iter().any(|id| !picked.contains(id));
     if dropped {
         detach_removed_pages(doc, &picked)?;
     }
-    set_page_tree(doc, &picked)
+    set_page_tree(doc, &picked)?;
+    // Each page keeps the label it had.
+    if let Some(labels) = labels {
+        let kept: Vec<_> = indexes.iter().map(|&i| labels[i].clone()).collect();
+        catalog::set_page_labels(doc, &kept);
+    }
+    Ok(())
+}
+
+/// Split into documents of the given pages (zero-based) each. Each part is
+/// made from the objects its pages and the document level need, not from a
+/// copy of the whole file, so a long document splits in time that grows with
+/// its length.
+pub fn split(doc: &mut Document, groups: &[Vec<usize>]) -> Result<Vec<Document>> {
+    flatten_inheritance(doc);
+    outline::inline_named_dests(doc);
+    let ids = page_ids(doc);
+    let pages: HashSet<ObjectId> = ids.iter().copied().collect();
+    // What an object needs, not going on into pages, which every part picks
+    // for itself, nor up to a parent.
+    let reach = |doc: &Document, from: Vec<ObjectId>, seen: &mut HashSet<ObjectId>| {
+        let mut stack = from;
+        while let Some(id) = stack.pop() {
+            if !seen.insert(id) {
+                continue;
+            }
+            let Some(o) = doc.objects.get(&id) else {
+                continue;
+            };
+            let mut next = Vec::new();
+            match o {
+                Object::Dictionary(d) => d
+                    .iter()
+                    .filter(|(k, _)| !matches!(k.as_slice(), b"Parent" | b"StructTreeRoot"))
+                    .for_each(|(_, v)| references(v, &mut next)),
+                other => references(other, &mut next),
+            }
+            stack.extend(next.into_iter().filter(|n| !pages.contains(n)));
+        }
+    };
+    let mut shared = HashSet::new();
+    let mut roots = Vec::new();
+    doc.trailer
+        .iter()
+        .for_each(|(_, o)| references(o, &mut roots));
+    reach(doc, roots, &mut shared);
+    // The page tree's own nodes, so the part keeps every page's place.
+    for o in doc
+        .objects
+        .iter()
+        .filter(|(_, o)| o.as_dict().is_ok_and(|d| d.has_type(b"Pages")))
+    {
+        shared.insert(*o.0);
+    }
+    let objects = std::mem::take(&mut doc.objects);
+    let table = std::mem::replace(
+        &mut doc.reference_table,
+        lopdf::xref::Xref::new(0, lopdf::xref::XrefType::CrossReferenceStream),
+    );
+    let frame = doc.clone();
+    doc.objects = objects;
+    doc.reference_table = table;
+    let mut parts = Vec::with_capacity(groups.len());
+    for group in groups {
+        let mut keep = shared.clone();
+        let picked: Vec<ObjectId> = group.iter().map(|&i| ids[i]).collect();
+        reach(doc, picked, &mut keep);
+        let mut part = frame.clone();
+        part.objects = keep
+            .iter()
+            .filter_map(|id| Some((*id, doc.objects.get(id)?.clone())))
+            .collect();
+        // Pages of other parts are absent: lopdf keeps their places as
+        // stand-ins, which select then drops.
+        select_known(&mut part, &ids, group)?;
+        parts.push(part);
+    }
+    Ok(parts)
+}
+
+/// `select` for a part whose other pages are absent; `ids` are all the
+/// document's pages in order.
+fn select_known(doc: &mut Document, ids: &[ObjectId], indexes: &[usize]) -> Result<()> {
+    if indexes.is_empty() {
+        return Err(err(
+            ErrorCode::BadValue,
+            "no pages left; a PDF needs at least one page",
+        ));
+    }
+    let labels = catalog::page_labels(doc, ids.len());
+    let picked: Vec<ObjectId> = indexes.iter().map(|&i| ids[i]).collect();
+    detach_removed_pages(doc, &picked)?;
+    set_page_tree(doc, &picked)?;
+    if let Some(labels) = labels {
+        let kept: Vec<_> = indexes.iter().map(|&i| labels[i].clone()).collect();
+        catalog::set_page_labels(doc, &kept);
+    }
+    Ok(())
 }
 
 /// Add `offset` to every object number. lopdf's renumbering takes seconds on
@@ -352,20 +579,37 @@ fn shift_ids(doc: &mut Document, offset: u32) {
     doc.max_id += offset;
 }
 
-/// Join documents in order. The first document's catalog is kept, and the forms
-/// and bookmarks of the others join it.
+/// Join documents in order. The first document's catalog is kept, and the forms,
+/// bookmarks, attachments, page labels and layers of the others join it.
 pub fn merge(mut docs: Vec<Document>) -> Result<Document> {
     let mut base = docs.remove(0);
     flatten_inheritance(&mut base);
     let mut all = page_ids(&base);
+    let mut labels = vec![(all.len(), catalog::page_labels(&base, all.len()))];
     for mut other in docs {
+        // A protected input keeps the result protected. Older revisions derive
+        // the key from the file ID, so the ID goes with the protection.
+        if base.encryption_state.is_none()
+            && let Some(state) = other.encryption_state.take()
+        {
+            base.encryption_state = Some(state);
+            match other.trailer.get(b"ID").ok().cloned() {
+                Some(id) => base.trailer.set("ID", id),
+                None => {
+                    base.trailer.remove(b"ID");
+                }
+            }
+        }
         flatten_inheritance(&mut other);
         // Its names go with its catalog.
         outline::inline_named_dests(&mut other);
         shift_ids(&mut other, base.max_id);
         let pages = page_ids(&other);
+        labels.push((pages.len(), catalog::page_labels(&other, pages.len())));
         let bookmarks = other.catalog().ok().and_then(outline::root_of);
         let form = forms::acro_form(&other).cloned();
+        let attachments = catalog::attachments(&other);
+        let layers = catalog::layers(&other);
         let skip: HashSet<ObjectId> = other
             .objects
             .iter()
@@ -389,8 +633,15 @@ pub fn merge(mut docs: Vec<Document>) -> Result<Document> {
         if let Some(form) = form {
             forms::append_form(&mut base, &form);
         }
+        catalog::append_attachments(&mut base, attachments);
+        if let Some(layers) = layers {
+            catalog::append_layers(&mut base, layers);
+        }
     }
     set_page_tree(&mut base, &all)?;
+    if let Some(labels) = catalog::joined_labels(&labels) {
+        catalog::set_page_labels(&mut base, &labels);
+    }
     Ok(base)
 }
 
@@ -450,19 +701,24 @@ pub fn info(doc: &Document) -> Info {
             .and_then(|o| text_string(doc, o))
             .filter(|s| !s.trim().is_empty())
     };
-    let mut images = 0;
-    let mut fonts = 0;
-    for obj in doc.objects.values() {
-        match obj {
-            Object::Stream(s)
-                if s.dict.get(b"Subtype").and_then(Object::as_name).ok() == Some(b"Image") =>
-            {
-                images += 1
-            }
-            Object::Dictionary(d) if d.has_type(b"Font") => fonts += 1,
-            _ => {}
+    // The pictures the pages show, as pdf extract-images saves them: soft
+    // masks and stencil masks of a picture are part of it, and images no
+    // page uses are left out.
+    let mut seen = HashSet::new();
+    let mut used = Vec::new();
+    for &page in &ids {
+        if let Ok(dict) = doc.get_dictionary(page)
+            && let Some(res) = extract::resources(doc, dict)
+        {
+            extract::images_of(doc, res, &mut seen, &mut used);
         }
     }
+    let images = used.len();
+    let fonts = doc
+        .objects
+        .values()
+        .filter(|o| o.as_dict().is_ok_and(|d| d.has_type(b"Font")))
+        .count();
     Info {
         pages: ids.len(),
         version: doc.version.clone(),
@@ -474,7 +730,8 @@ pub fn info(doc: &Document) -> Info {
         paper: paper_name(width, height),
         images,
         fonts,
-        forms: doc.catalog().ok().is_some_and(|c| c.has(b"AcroForm")),
+        // An empty /AcroForm is common in books and scans; only fields count.
+        forms: !forms::fields(doc).is_empty(),
     }
 }
 
@@ -1034,10 +1291,74 @@ pub fn recompress_images(doc: &mut Document, policy: ImagePolicy) -> usize {
             .collect()
     });
     let n = replaced.len();
+    let mut shrunk = Vec::new();
     for (id, stream) in replaced {
+        let mask = stream
+            .dict
+            .get(b"SMask")
+            .and_then(Object::as_reference)
+            .ok();
+        let get = |k: &[u8]| stream.dict.get(k).and_then(Object::as_i64).unwrap_or(0) as u32;
+        if let Some(mask) = mask {
+            shrunk.push((mask, get(b"Width"), get(b"Height")));
+        }
         doc.objects.insert(id, Object::Stream(stream));
     }
+    shrink_masks(doc, &shrunk);
     n
+}
+
+/// Downsample the soft masks of recompressed images to their new size. The
+/// mask stays a lossless image of its own.
+fn shrink_masks(doc: &mut Document, images: &[(ObjectId, u32, u32)]) {
+    let mut uses: HashMap<ObjectId, usize> = HashMap::new();
+    for o in doc.objects.values() {
+        if let Ok(s) = o.as_stream()
+            && let Ok(id) = s.dict.get(b"SMask").and_then(Object::as_reference)
+        {
+            *uses.entry(id).or_default() += 1;
+        }
+    }
+    for &(id, w, h) in images {
+        // A mask shared by several images keeps its size.
+        if uses.get(&id) != Some(&1) || w == 0 || h == 0 {
+            continue;
+        }
+        let Some(stream) = doc.objects.get(&id).and_then(|o| o.as_stream().ok()) else {
+            continue;
+        };
+        if let Some(smaller) = shrink_mask(stream, w, h) {
+            doc.objects.insert(id, Object::Stream(smaller));
+        }
+    }
+}
+
+fn shrink_mask(s: &Stream, w: u32, h: u32) -> Option<Stream> {
+    let d = &s.dict;
+    let get_i = |k: &[u8]| d.get(k).ok().and_then(|o| o.as_i64().ok());
+    let (mw, mh) = (get_i(b"Width")? as u32, get_i(b"Height")? as u32);
+    if get_i(b"BitsPerComponent") != Some(8) || d.has(b"Decode") || (mw <= w && mh <= h) {
+        return None;
+    }
+    let filters = s.filters().unwrap_or_default();
+    if !(filters.is_empty() || (filters.len() == 1 && filters[0] == b"FlateDecode")) {
+        return None;
+    }
+    let raw = if filters.is_empty() {
+        s.content.clone()
+    } else {
+        s.decompressed_content().ok()?
+    };
+    let gray = image::GrayImage::from_raw(mw, mh, raw)?;
+    let small =
+        deft_tools_image::resize_exact(&image::DynamicImage::ImageLuma8(gray), w, h).ok()?;
+    let mut dict = d.clone();
+    dict.set("Width", w as i64);
+    dict.set("Height", h as i64);
+    dict.set("Filter", "FlateDecode");
+    dict.remove(b"DecodeParms");
+    dict.remove(b"Length");
+    Some(Stream::new(dict, flate(small.to_luma8().as_raw())).with_compression(false))
 }
 
 /// A CMYK or YCCK JPEG as RGB, decoded the way the page renderer (hayro,
@@ -1084,12 +1405,15 @@ fn cmyk_jpeg(data: &[u8], w: u32, h: u32) -> Option<image::DynamicImage> {
 fn recompress_one(s: &Stream, comps: usize, policy: ImagePolicy, cap: u32) -> Option<Stream> {
     let d = &s.dict;
     let get_i = |k: &[u8]| d.get(k).ok().and_then(|o| o.as_i64().ok());
+    // A soft mask is a separate image and is downsampled after; a colour-key
+    // /Mask needs exact colours, which JPEG does not keep. A soft mask
+    // overrides /Mask, so then /Mask does not count.
+    let soft = d.has(b"SMask");
     if d.get(b"ImageMask")
         .and_then(Object::as_bool)
         .unwrap_or(false)
         || d.has(b"Decode")
-        || d.has(b"Mask")
-        || d.has(b"SMask")
+        || (d.has(b"Mask") && !soft)
     {
         return None;
     }
@@ -1158,6 +1482,9 @@ fn recompress_one(s: &Stream, comps: usize, policy: ImagePolicy, cap: u32) -> Op
         return None;
     }
     let mut dict = d.clone();
+    if soft {
+        dict.remove(b"Mask");
+    }
     dict.set("Filter", "DCTDecode");
     dict.remove(b"DecodeParms");
     dict.set("Width", img.width() as i64);
@@ -1198,6 +1525,20 @@ impl Renderer {
         Ok(Renderer { pdf })
     }
 
+    /// A renderer for a loaded document, which is already decrypted. What is
+    /// left of /Encrypt (attachments only) stays out, as the renderer would
+    /// ask for the password.
+    pub fn of(doc: &Document) -> Result<Renderer> {
+        let mut copy = doc.clone();
+        copy.encryption_state = None;
+        copy.trailer.remove(b"Encrypt");
+        fonts::add_text_maps(&mut copy);
+        let mut out = Vec::new();
+        copy.save_to(&mut out)
+            .map_err(|e| err(ErrorCode::Internal, format!("reading PDF: {e}")))?;
+        Renderer::new(&out)
+    }
+
     pub fn page_count(&self) -> usize {
         self.pdf.pages().len()
     }
@@ -1232,7 +1573,7 @@ impl Renderer {
         let pixmap = hayro::render(
             page,
             &cache,
-            &Default::default(),
+            &fonts::interpreter_settings(),
             &hayro::RenderSettings::default(),
             &settings,
         );

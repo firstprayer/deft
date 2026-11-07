@@ -196,3 +196,232 @@ fn grayscale_replaces_an_icc_colour_space() {
         b"DeviceGray"
     );
 }
+
+/// A file whose objects sit in an object stream, with a comment before the
+/// page, as qpdf writes them.
+fn packed_pdf(page: &str) -> Vec<u8> {
+    let members = [
+        "<< /Type /Catalog /Pages 3 0 R >>\n".to_string(),
+        "<< /Type /Pages /Kids [4 0 R] /Count 1 >>\n".to_string(),
+        format!("% Page 1\n{page}\n"),
+    ];
+    let mut index = String::new();
+    let mut body = String::new();
+    for (n, m) in members.iter().enumerate() {
+        index.push_str(&format!("{} {} ", n + 2, body.len()));
+        body.push_str(m);
+    }
+    index.push('\n');
+    let content = format!("{index}{body}");
+    let mut out = b"%PDF-1.5\n".to_vec();
+    let packed = out.len();
+    out.extend(format!(
+        "1 0 obj\n<< /Type /ObjStm /N 3 /First {} /Length {} >>\nstream\n{content}\nendstream\nendobj\n",
+        index.len(),
+        content.len()
+    ).bytes());
+    let contents = out.len();
+    out.extend(b"5 0 obj\n<< /Length 37 >>\nstream\nBT /F1 24 Tf 72 720 Td (Potato) Tj ET\nendstream\nendobj\n");
+    let xref = out.len();
+    let mut rows = vec![0u8, 0, 0, 0];
+    let normal = |at: usize| [1, (at >> 8) as u8, at as u8, 0];
+    rows.extend(normal(packed));
+    for i in 0..3 {
+        rows.extend([2, 0, 1, i]);
+    }
+    rows.extend(normal(contents));
+    rows.extend(normal(xref));
+    out.extend(
+        format!(
+            "6 0 obj\n<< /Type /XRef /Size 7 /W [1 2 1] /Root 2 0 R /Length {} >>\nstream\n",
+            rows.len()
+        )
+        .bytes(),
+    );
+    out.extend(rows);
+    out.extend(format!("\nendstream\nendobj\nstartxref\n{xref}\n%%EOF\n").bytes());
+    out
+}
+
+#[test]
+fn a_page_after_a_comment_in_an_object_stream_is_kept() {
+    let bytes =
+        packed_pdf("<< /Type /Page /Parent 3 0 R /MediaBox [0 0 200 200] /Contents 5 0 R >>");
+    let mut doc = load(&bytes, None).unwrap();
+    let ids = page_ids(&doc);
+    assert_eq!(ids.len(), 1);
+    assert!(doc.get_dictionary(ids[0]).unwrap().has(b"Contents"));
+    let doc = load(&save(&mut doc).unwrap(), None).unwrap();
+    assert_eq!(display_size(&doc, page_ids(&doc)[0]), (200.0, 200.0));
+}
+
+#[test]
+fn a_page_that_cannot_be_read_is_refused() {
+    let e = load(&packed_pdf("(not a page)"), None).unwrap_err();
+    assert_eq!(e.code, ErrorCode::InputCorrupt);
+    assert!(e.message.contains("page 1"), "{}", e.message);
+}
+
+/// Acrobat's "encrypt only file attachments": the document itself is plain.
+fn attachments_locked() -> Vec<u8> {
+    let mut doc = load(&text_pdf("open", 2), None).unwrap();
+    let bytes = |n: usize| Object::string_literal(vec![7u8; n]);
+    let filter = dictionary! { "Type" => "CryptFilter", "CFM" => "AESV3", "Length" => 32 };
+    let encrypt = doc.add_object(dictionary! {
+        "Filter" => "Standard", "V" => 5, "R" => 6, "Length" => 256, "P" => -4,
+        "CF" => dictionary! { "StdCF" => filter },
+        "StmF" => "Identity", "StrF" => "Identity", "EFF" => "StdCF",
+        "O" => bytes(48), "U" => bytes(48), "OE" => bytes(32), "UE" => bytes(32),
+        "Perms" => bytes(16),
+    });
+    doc.trailer.set("Encrypt", encrypt);
+    let mut out = Vec::new();
+    doc.save_to(&mut out).unwrap();
+    out
+}
+
+#[test]
+fn a_file_with_only_its_attachments_encrypted_opens() {
+    let locked = attachments_locked();
+    for password in [None, Some("wrong")] {
+        let mut doc = load(&locked, password).unwrap();
+        assert_eq!(page_ids(&doc).len(), 2);
+        assert!(extract_text(&doc, &[1]).unwrap().contains("open page 2"));
+        // The attachments stay encrypted, so the file keeps its /Encrypt.
+        let out = save(&mut doc).unwrap();
+        assert!(Document::load_mem(&out).unwrap().trailer.has(b"Encrypt"));
+        assert_eq!(page_ids(&load(&out, None).unwrap()).len(), 2);
+    }
+}
+
+#[test]
+fn the_region_of_form_fields_is_measured_as_shown() {
+    let mut doc = load(&text_pdf("form", 1), None).unwrap();
+    let page = page_ids(&doc)[0];
+    let widget = dictionary! {
+        "Subtype" => "Widget", "FT" => "Tx",
+        "Rect" => vec![100.into(), 800.into(), 300.into(), 820.into()],
+    };
+    let hidden = dictionary! {
+        "Subtype" => "Widget", "F" => 2,
+        "Rect" => vec![0.into(), 0.into(), 10.into(), 10.into()],
+    };
+    doc.get_dictionary_mut(page).unwrap().set(
+        "Annots",
+        vec![Object::Dictionary(widget), Object::Dictionary(hidden)],
+    );
+    // From the top-left of the 595x842 page, with the border around it.
+    let r = pages::annotations_region(&doc, page).unwrap();
+    assert_eq!(r, [99.0, 21.0, 202.0, 22.0]);
+    rotate(&mut doc, &[0], 90);
+    let r = pages::annotations_region(&doc, page).unwrap();
+    // Turned clockwise, the top of the page is on the right.
+    assert_eq!(r, [799.0, 99.0, 22.0, 202.0]);
+}
+
+#[test]
+fn images_with_a_soft_mask_are_recompressed_and_keep_it() {
+    let (mut doc, image) = icc_image_pdf();
+    let alpha: Vec<u8> = (0..400 * 400).map(|i| (i % 400) as u8).collect();
+    let mask = doc.add_object(Stream::new(
+        dictionary! {
+            "Type" => "XObject", "Subtype" => "Image", "Width" => 400, "Height" => 400,
+            "ColorSpace" => "DeviceGray", "BitsPerComponent" => 8, "Filter" => "FlateDecode",
+        },
+        flate(&alpha),
+    ));
+    let d = &mut doc
+        .get_object_mut(image)
+        .unwrap()
+        .as_stream_mut()
+        .unwrap()
+        .dict;
+    d.set("SMask", mask);
+    d.set("Filter", "FlateDecode");
+    let raw = doc
+        .get_object(image)
+        .unwrap()
+        .as_stream()
+        .unwrap()
+        .content
+        .clone();
+    doc.get_object_mut(image)
+        .unwrap()
+        .as_stream_mut()
+        .unwrap()
+        .set_content(flate(&raw));
+    let policy = ImagePolicy {
+        dpi: 20.0,
+        quality: 50,
+        grayscale: false,
+    };
+    assert_eq!(recompress_images(&mut doc, policy), 1);
+    let picture = doc.get_object(image).unwrap().as_stream().unwrap();
+    assert_eq!(
+        picture.dict.get(b"Filter").unwrap().as_name().unwrap(),
+        b"DCTDecode"
+    );
+    assert_eq!(
+        picture.dict.get(b"SMask").unwrap().as_reference().unwrap(),
+        mask
+    );
+    let width = picture.dict.get(b"Width").unwrap().as_i64().unwrap();
+    let alpha = doc.get_object(mask).unwrap().as_stream().unwrap();
+    assert_eq!(alpha.dict.get(b"Width").unwrap().as_i64().unwrap(), width);
+    assert_eq!(
+        alpha.dict.get(b"Filter").unwrap().as_name().unwrap(),
+        b"FlateDecode"
+    );
+    assert!(width < 400);
+}
+
+#[test]
+fn info_counts_the_pictures_pages_show_and_only_real_forms() {
+    let (mut doc, image) = icc_image_pdf();
+    let mask = doc.add_object(Stream::new(
+        dictionary! { "Subtype" => "Image", "Width" => 1, "Height" => 1 },
+        vec![0],
+    ));
+    doc.get_object_mut(image)
+        .unwrap()
+        .as_stream_mut()
+        .unwrap()
+        .dict
+        .set("SMask", mask);
+    // An image no page uses.
+    doc.add_object(Stream::new(dictionary! { "Subtype" => "Image" }, vec![]));
+    let page = page_ids(&doc)[0];
+    let res = dictionary! { "XObject" => dictionary! { "Im1" => image } };
+    doc.get_dictionary_mut(page).unwrap().set("Resources", res);
+    doc.catalog_mut()
+        .unwrap()
+        .set("AcroForm", dictionary! { "Fields" => Vec::<Object>::new() });
+    let i = info(&doc);
+    assert_eq!(i.images, 1);
+    assert!(!i.forms, "an empty form is no form");
+}
+
+#[test]
+fn split_gives_the_same_parts_as_select() {
+    let bytes = text_pdf("part", 4);
+    let groups = vec![vec![0], vec![1, 2], vec![3]];
+    let mut doc = load(&bytes, None).unwrap();
+    let parts = split(&mut doc, &groups).unwrap();
+    for (group, mut part) in groups.iter().zip(parts) {
+        let mut selected = load(&bytes, None).unwrap();
+        select(&mut selected, group).unwrap();
+        let (a, b) = (save(&mut part).unwrap(), save(&mut selected).unwrap());
+        let (a, b) = (load(&a, None).unwrap(), load(&b, None).unwrap());
+        assert_eq!(page_ids(&a).len(), group.len());
+        let all: Vec<usize> = (0..group.len()).collect();
+        assert_eq!(
+            extract_text(&a, &all).unwrap(),
+            extract_text(&b, &all).unwrap()
+        );
+        assert!(
+            extract_text(&a, &[0])
+                .unwrap()
+                .contains(&format!("page {}", group[0] + 1))
+        );
+    }
+}

@@ -22,8 +22,13 @@ pub fn resolve_set(pages: &PageSet, count: usize) -> Result<Vec<usize>> {
     pages.resolve_set(count).map_err(|m| bad_value("pages", m))
 }
 
+/// The output PDF. A password-protected input stays protected, with the same
+/// passwords and permissions; only `pdf decrypt` takes the password away.
 pub fn write(doc: &mut Document) -> Result<Produced> {
-    Ok(Produced::bytes(deft_tools_pdf::save(doc)?, Format::Pdf))
+    Ok(Produced::bytes(
+        deft_tools_pdf::meta::save_protected(doc)?,
+        Format::Pdf,
+    ))
 }
 
 pub fn plural(n: usize, word: &str) -> String {

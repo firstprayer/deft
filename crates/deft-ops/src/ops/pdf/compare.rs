@@ -29,18 +29,13 @@ fn run(job: &Job) -> Result<OpResult> {
         return Err(err(ErrorCode::BadOption, "give exactly two PDFs"));
     }
     let p = job.params;
-    let mut a = open(&job.inputs[0], p)?;
-    let mut b = open(&job.inputs[1], p)?;
+    let a = open(&job.inputs[0], p)?;
+    let b = open(&job.inputs[1], p)?;
     let visual = !p.flag("text-only");
-    let (ba, bb) = if visual {
-        (deft_tools_pdf::save(&mut a)?, deft_tools_pdf::save(&mut b)?)
-    } else {
-        (vec![], vec![])
-    };
     let renderers = if visual {
         Some((
-            deft_tools_pdf::Renderer::new(&ba)?,
-            deft_tools_pdf::Renderer::new(&bb)?,
+            deft_tools_pdf::Renderer::of(&a)?,
+            deft_tools_pdf::Renderer::of(&b)?,
         ))
     } else {
         None

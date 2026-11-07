@@ -319,3 +319,129 @@ fn lines_a_wide_gap_above_and_a_smaller_footer_below_stay_out() {
     assert_eq!(found[0].rows[0][0], "Item");
     assert_eq!(found[0].rows.last().unwrap()[0], "Exchange");
 }
+
+/// A page in two columns: each has a table, and the right one also prose,
+/// whose lines fall between the rows of the left one.
+fn two_column_page() -> Vec<Run> {
+    let mut runs = Vec::new();
+    for i in 0..8 {
+        let y = 700.0 - i as f64 * 14.0;
+        let n = format!("{}", 100 + i);
+        runs.extend(line(
+            y,
+            &[
+                (40.0, &n),
+                (70.0, "Outlays"),
+                (200.0, "1,200"),
+                (250.0, "380"),
+            ],
+        ));
+    }
+    for i in 0..6 {
+        let y = 693.0 - i as f64 * 14.0;
+        let n = format!("{}", 900 + i);
+        runs.extend(line(
+            y,
+            &[
+                (320.0, &n),
+                (350.0, "Farm loans"),
+                (480.0, "-0.5"),
+                (530.0, "-0.7"),
+            ],
+        ));
+    }
+    for i in 0..5 {
+        let y = 600.0 - i as f64 * 11.0;
+        runs.extend(line(
+            y,
+            &[(320.0, "The program makes loans to farmers who cannot")],
+        ));
+    }
+    runs
+}
+
+#[test]
+fn tables_side_by_side_in_two_columns_stay_apart() {
+    let found = runs_tables(two_column_page(), 612.0, 792.0);
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert_eq!(found[0].rows[0], ["100", "Outlays", "1,200", "380"]);
+    assert_eq!(found[1].rows[0], ["900", "Farm loans", "-0.5", "-0.7"]);
+    assert!(found.iter().all(|t| t.rows.iter().all(|r| r.len() == 4)));
+}
+
+#[test]
+fn one_table_with_a_wide_gap_is_not_cut_in_two() {
+    let mut runs = Vec::new();
+    for i in 0..10 {
+        let y = 700.0 - i as f64 * 14.0;
+        runs.extend(line(
+            y,
+            &[(40.0, "Item"), (100.0, "12"), (450.0, "Box"), (520.0, "4")],
+        ));
+    }
+    let found = runs_tables(runs, 612.0, 792.0);
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].rows[0].len(), 4);
+}
+
+#[test]
+fn line_numbers_beside_the_page_are_not_a_column() {
+    let mut runs = Vec::new();
+    for i in 0..12 {
+        let y = 700.0 - i as f64 * 14.0;
+        runs.extend(line(y, &[(-26.0, &format!("{}", i + 1))]));
+        runs.extend(line(y, &[(48.0, "a line of running text in a book")]));
+    }
+    assert!(runs_tables(runs, 432.0, 648.0).is_empty());
+}
+
+fn block(rows: &[&[(f64, &str)]]) -> Vec<Vec<Run>> {
+    rows.iter()
+        .enumerate()
+        .map(|(i, cells)| line(700.0 - i as f64 * 14.0, cells))
+        .collect()
+}
+
+#[test]
+fn contents_lists_indexes_and_formulas_are_not_tables() {
+    let contents = block(&[
+        &[(50.0, "PREFACE"), (300.0, "xiii")],
+        &[(50.0, "INTRODUCTION"), (300.0, "1")],
+        &[(50.0, "CHAPTER ONE: Creators"), (300.0, "21")],
+        &[(50.0, "CHAPTER TWO: Mere Copyists"), (300.0, "31")],
+        &[(50.0, "CHAPTER THREE: Catalogs"), (300.0, "48")],
+    ]);
+    assert!(page_tables(&contents).is_empty());
+    let list = block(&[
+        &[(50.0, "1."), (70.0, "name of the service;")],
+        &[(50.0, "2."), (70.0, "channel of the program;")],
+        &[(50.0, "3."), (70.0, "type of program;")],
+        &[(50.0, "4."), (70.0, "date of transmission;")],
+    ]);
+    assert!(page_tables(&list).is_empty());
+    let index = block(&[
+        &[
+            (50.0, "Barlow, Joel, 8, 112"),
+            (250.0, "Bunyan, John, 93, 94"),
+        ],
+        &[
+            (50.0, "Barnes & Noble, 147"),
+            (250.0, "Burdick, Quentin, 60"),
+        ],
+        &[
+            (50.0, "Barry, Hank, 189, 191"),
+            (250.0, "Bush, George W., 323n"),
+        ],
+        &[
+            (50.0, "Bell, Alexander, 60"),
+            (250.0, "Byrd, Robert, 112, 120"),
+        ],
+    ]);
+    assert!(page_tables(&index).is_empty());
+    let cases = block(&[
+        &[(50.0, "d(x,y) ="), (120.0, "0"), (160.0, "falls x = y")],
+        &[(120.0, "1"), (160.0, "falls x ≠ y")],
+        &[(50.0, "⇒"), (120.0, "A ∩ B"), (160.0, "∪ C")],
+    ]);
+    assert!(page_tables(&cases).is_empty());
+}

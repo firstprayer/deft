@@ -79,6 +79,66 @@ pub fn content_region(r: &Renderer, index: usize, max_pixels: u64) -> Result<Opt
     }))
 }
 
+/// Where the page's visible annotations (form fields, stamps, notes) sit, as
+/// a region in points from the top-left of the page as shown. The renderer
+/// does not draw them, so a crop to the content must add them.
+pub fn annotations_region(doc: &Document, page: ObjectId) -> Option<[f64; 4]> {
+    let annots = doc
+        .get_dictionary(page)
+        .ok()?
+        .get(b"Annots")
+        .ok()
+        .map(|o| deref(doc, o))?
+        .as_array()
+        .ok()?;
+    let [a, b, c, d, e, f] = display_matrix(doc, page);
+    let det = a * d - b * c;
+    if det == 0.0 {
+        return None;
+    }
+    // User space back to display space.
+    let to_display = |x: f64, y: f64| {
+        let (x, y) = (x - e, y - f);
+        ((d * x - c * y) / det, (a * y - b * x) / det)
+    };
+    let (_, ph) = display_size(doc, page);
+    let mut area: Option<[f64; 4]> = None;
+    for annot in annots {
+        let Ok(dict) = deref(doc, annot).as_dict() else {
+            continue;
+        };
+        let flags = dict
+            .get(b"F")
+            .ok()
+            .and_then(|o| crate::num(deref(doc, o)))
+            .unwrap_or(0.0) as i64;
+        let hidden = flags & 0b10 != 0 || flags & 0b10_0000 != 0;
+        let subtype = dict
+            .get(b"Subtype")
+            .and_then(Object::as_name)
+            .unwrap_or(b"");
+        let drawn = dict.has(b"AP") || subtype == b"Widget";
+        if hidden || !drawn || subtype == b"Popup" {
+            continue;
+        }
+        let Some([x0, y0, x1, y1]) = annot_rect(doc, dict) else {
+            continue;
+        };
+        // A viewer strokes the border on the rectangle's edge, so half of it
+        // lies outside.
+        let (x0, y0, x1, y1) = (x0 - 1.0, y0 - 1.0, x1 + 1.0, y1 + 1.0);
+        for (x, y) in [(x0, y0), (x1, y0), (x0, y1), (x1, y1)] {
+            let (dx, dy) = to_display(x, y);
+            let (dx, dy) = (dx, ph - dy);
+            area = Some(match area {
+                None => [dx, dy, dx, dy],
+                Some(r) => [r[0].min(dx), r[1].min(dy), r[2].max(dx), r[3].max(dy)],
+            });
+        }
+    }
+    area.map(|[x0, y0, x1, y1]| [x0, y0, x1 - x0, y1 - y0])
+}
+
 /// Scale a page's content onto a new paper size, centred.
 pub fn resize_page(doc: &mut Document, page: ObjectId, w: f64, h: f64) -> Result<()> {
     let [x0, y0, x1, y1] = page_box(doc, page);

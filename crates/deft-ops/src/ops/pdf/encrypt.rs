@@ -40,6 +40,6 @@ fn run(job: &Job) -> Result<OpResult> {
         p.flag("no-print"),
         p.flag("no-copy"),
     )?;
-    let bytes = deft_tools_pdf::meta::save_encrypted(&mut doc)?;
+    let bytes = deft_tools_pdf::meta::save_protected(&mut doc)?;
     Ok(OpResult::one(Produced::bytes(bytes, Format::Pdf)))
 }

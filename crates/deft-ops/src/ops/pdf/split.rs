@@ -36,7 +36,7 @@ pub static OP: Op = Op {
 
 fn run(job: &Job) -> Result<OpResult> {
     let input = job.input();
-    let doc = open(input, job.params)?;
+    let mut doc = open(input, job.params)?;
     let count = deft_tools_pdf::page_ids(&doc).len();
     let groups: Vec<Vec<usize>> = match job.params.opt_text("ranges") {
         Some(r) => r
@@ -58,9 +58,8 @@ fn run(job: &Job) -> Result<OpResult> {
     };
     let stem = input.stem();
     let mut outputs = Vec::new();
-    for (n, pages) in groups.iter().enumerate() {
-        let mut part = doc.clone();
-        deft_tools_pdf::select(&mut part, pages)?;
+    let parts = deft_tools_pdf::split(&mut doc, &groups)?;
+    for (n, (pages, mut part)) in groups.iter().zip(parts).enumerate() {
         outputs.push(
             write(&mut part)?
                 .named(format!("{stem}-{:03}.pdf", n + 1))

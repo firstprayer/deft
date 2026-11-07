@@ -64,6 +64,8 @@ fn run(job: &Job) -> Result<OpResult> {
         }
         return Ok(OpResult::report(map, format!("{n} fields")));
     }
-    deft_tools_pdf::meta::write(&mut doc, &fields)?;
-    Ok(OpResult::one(write(&mut doc)?))
+    let warnings = deft_tools_pdf::meta::write(&mut doc, &fields)?;
+    let mut res = OpResult::one(write(&mut doc)?);
+    res.warnings = warnings;
+    Ok(res)
 }

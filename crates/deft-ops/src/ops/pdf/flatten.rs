@@ -24,8 +24,14 @@ pub static OP: Op = Op {
 
 fn run(job: &Job) -> Result<OpResult> {
     let mut doc = open(job.input(), job.params)?;
+    let xfa = deft_tools_pdf::forms::is_dynamic_xfa(&doc);
     let n = deft_tools_pdf::forms::flatten(&mut doc)?;
-    Ok(OpResult::one(write(&mut doc)?)
+    let res = OpResult::one(write(&mut doc)?)
         .fact("flattened", n)
-        .note(format!("{n} annotations")))
+        .note(format!("{n} annotations"));
+    Ok(if xfa {
+        res.warn(deft_tools_pdf::forms::XFA_WARNING)
+    } else {
+        res
+    })
 }

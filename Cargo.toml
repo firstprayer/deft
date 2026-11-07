@@ -56,6 +56,7 @@ toml = { version = "=0.8.23", features = ["preserve_order"] }
 roxmltree = "=0.21.2"
 regex = "1.13.1"
 encoding_rs = "=0.8.44"
+unicode-normalization = "=0.1.26"
 chardetng = "=1.0.0"
 md-5 = "=0.11.0"
 sha1 = "=0.11.0"

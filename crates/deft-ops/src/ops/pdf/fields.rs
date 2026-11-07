@@ -21,5 +21,10 @@ fn run(job: &Job) -> Result<OpResult> {
         .map(|f| f.to_json())
         .collect();
     let note = format!("{} fields", list.len());
-    Ok(OpResult::report(facts![("fields", list)], note))
+    let res = OpResult::report(facts![("fields", list)], note);
+    Ok(if deft_tools_pdf::forms::is_dynamic_xfa(&doc) {
+        res.warn(deft_tools_pdf::forms::XFA_WARNING)
+    } else {
+        res
+    })
 }

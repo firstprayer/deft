@@ -40,6 +40,9 @@ impl Field {
         if self.read_only {
             v["read_only"] = json!(true);
         }
+        if let Some(n) = self.max_len.filter(|n| *n > 0 && self.kind == "text") {
+            v["max_length"] = json!(n);
+        }
         v
     }
 }
@@ -206,6 +209,22 @@ pub(crate) fn acro_form(doc: &Document) -> Option<&Dictionary> {
     let catalog = doc.catalog().ok()?;
     deref(doc, catalog.get(b"AcroForm").ok()?).as_dict().ok()
 }
+
+/// Whether the form is a dynamic XFA form: its pages and fields live in XFA
+/// data that only some viewers render, and the PDF page is a placeholder.
+pub fn is_dynamic_xfa(doc: &Document) -> bool {
+    let needs_rendering = doc
+        .catalog()
+        .ok()
+        .and_then(|c| c.get(b"NeedsRendering").ok())
+        .and_then(|o| deref(doc, o).as_bool().ok())
+        .unwrap_or(false);
+    needs_rendering && acro_form(doc).is_some_and(|f| f.has(b"XFA"))
+}
+
+/// The warning for a dynamic XFA form.
+pub const XFA_WARNING: &str = "this is a dynamic XFA form: its real fields and values are in \
+     XFA data, which deft cannot read or fill; the PDF page is a placeholder";
 
 /// Every field of the document's form, in document order.
 pub fn fields(doc: &Document) -> Vec<Field> {
@@ -545,6 +564,158 @@ fn scalar(v: &Value) -> String {
     }
 }
 
+/// A name without its [n] indexes: "f1_01" for "f1_01[0]".
+fn without_indexes(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    let mut rest = name;
+    while let Some(open) = rest.find('[') {
+        let close = rest[open..].find(']').map(|c| open + c);
+        match close {
+            Some(close) if rest[open + 1..close].chars().all(|c| c.is_ascii_digit()) => {
+                out.push_str(&rest[..open]);
+                rest = &rest[close + 1..];
+            }
+            _ => {
+                out.push_str(&rest[..=open]);
+                rest = &rest[open + 1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The field a name means: its full name, the last part of it when that is
+/// unique, or either without the [0] indexes of XFA-made forms (IRS forms
+/// name every field f1_01[0]) when that is unique.
+fn find_field<'a>(all: &'a [Field], name: &str) -> Result<&'a Field> {
+    if let Some(f) = all.iter().find(|f| f.name == name) {
+        return Ok(f);
+    }
+    let last = |f: &Field| f.name.rsplit('.').next().unwrap_or("").to_string();
+    let mut matches: Vec<&Field> = all.iter().filter(|f| last(f) == name).collect();
+    if matches.is_empty() && !name.contains('[') {
+        let plain = without_indexes(name);
+        matches = all
+            .iter()
+            .filter(|f| without_indexes(&f.name) == plain || without_indexes(&last(f)) == plain)
+            .collect();
+    }
+    match matches.as_slice() {
+        [f] => Ok(f),
+        [] => Err(err(ErrorCode::BadValue, format!("no field {name:?}"))
+            .hint("list the names: deft pdf fields <file>")),
+        many => Err(err(
+            ErrorCode::BadValue,
+            format!(
+                "{name:?} matches {} fields ({}, ...); use the full name",
+                many.len(),
+                many[0].name
+            ),
+        )),
+    }
+}
+
+/// Select options of a multi-select list box.
+fn set_list(
+    doc: &mut Document,
+    f: &Field,
+    value: &Value,
+    font: ObjectId,
+    warnings: &mut Vec<String>,
+) -> Result<()> {
+    let picked: Vec<String> = value.as_array().into_iter().flatten().map(scalar).collect();
+    for p in &picked {
+        if !f.options.contains(p) {
+            warnings.push(format!("{}: {p:?} is not one of its options", f.name));
+        }
+    }
+    let indexes: Vec<Object> = f
+        .options
+        .iter()
+        .enumerate()
+        .filter(|(_, o)| picked.contains(o))
+        .map(|(i, _)| Object::Integer(i as i64))
+        .collect();
+    let v = Object::Array(picked.iter().map(|p| text_object(p)).collect());
+    set_on(doc, f.id, b"V", v)?;
+    set_on(doc, f.id, b"I", Object::Array(indexes))?;
+    for w in f.widgets.clone() {
+        let rect = doc.get_dictionary(w).ok().and_then(|d| annot_rect(doc, d));
+        if let Some(s) = rect.and_then(|r| list_appearance(f, &picked, r, font)) {
+            let id = doc.add_object(s);
+            set_on(doc, w, b"AP", Object::Dictionary(dictionary! { "N" => id }))?;
+        }
+    }
+    Ok(())
+}
+
+/// A list box drawn with its options, the selected ones highlighted.
+fn list_appearance(f: &Field, picked: &[String], rect: [f64; 4], font: ObjectId) -> Option<Stream> {
+    let (w, h) = (rect[2] - rect[0], rect[3] - rect[1]);
+    let da = f.default_appearance.as_deref();
+    let size = match font_size(da) {
+        s if s > 0.0 => s,
+        _ => 10.0,
+    };
+    let leading = size * 1.15;
+    let color = color_ops(da);
+    let mut ops = String::from("/Tx BMC q\n");
+    let mut top = h - 1.0;
+    for option in &f.options {
+        if top - leading < 0.0 {
+            break;
+        }
+        let bytes = win_ansi(option).ok()?;
+        let y = top - leading;
+        if picked.contains(option) {
+            ops.push_str(&format!(
+                "0.6 0.75 0.9 rg 0 {y:.2} {w:.2} {leading:.2} re f\n"
+            ));
+        }
+        ops.push_str(&format!(
+            "BT /DeftHelv {size:.2} Tf {color} 1 0 0 1 2 {:.2} Tm {} Tj ET\n",
+            y + size * 0.25,
+            pdf_string(&bytes)
+        ));
+        top = y;
+    }
+    ops.push_str("Q EMC\n");
+    Some(Stream::new(
+        dictionary! {
+            "Type" => "XObject",
+            "Subtype" => "Form",
+            "BBox" => vec![0.into(), 0.into(), Object::Real(w as f32), Object::Real(h as f32)],
+            "Resources" => dictionary! { "Font" => dictionary! { "DeftHelv" => font } },
+        },
+        ops.into_bytes(),
+    ))
+}
+
+/// A text field with /MaxLen holds and shows at most that many characters (a
+/// comb field one per box), so a longer value would be cut on the page while
+/// the form data kept all of it.
+fn check_length(f: &Field, text: &str) -> Result<()> {
+    let Some(max) = f.max_len.filter(|n| *n > 0 && f.kind == "text") else {
+        return Ok(());
+    };
+    let n = text.chars().count();
+    if n as i64 <= max {
+        return Ok(());
+    }
+    let hint = if f.flags & (1 << 24) != 0 {
+        "it has one box per character; a number spread over several fields, \
+         such as an SSN, goes in parts into each of them"
+    } else {
+        "shorten the value; deft pdf fields shows each max_length"
+    };
+    Err(err(
+        ErrorCode::BadValue,
+        format!("{}: at most {max} characters, got {n}", f.name),
+    )
+    .hint(hint))
+}
+
 fn set_button(doc: &mut Document, f: &Field, value: &Value) -> Result<()> {
     // A radio group takes an export name; a checkbox takes true or false.
     let wanted = match value {
@@ -582,6 +753,9 @@ fn set_on(doc: &mut Document, id: ObjectId, key: &[u8], value: Object) -> Result
 /// Fill fields from name -> value pairs. Returns warnings. Unknown names are an
 /// error, so a typo cannot pass as success.
 pub fn fill(doc: &mut Document, values: &BTreeMap<String, Value>) -> Result<Vec<String>> {
+    if is_dynamic_xfa(doc) {
+        return Err(err(ErrorCode::InputUnsupported, XFA_WARNING));
+    }
     let all = fields(doc);
     if all.is_empty() {
         return Err(err(
@@ -595,32 +769,31 @@ pub fn fill(doc: &mut Document, values: &BTreeMap<String, Value>) -> Result<Vec<
     let mut warnings = Vec::new();
     let mut needs_viewer = false;
     for (name, value) in values {
-        let matches: Vec<&Field> = all
-            .iter()
-            .filter(|f| f.name == *name || f.name.rsplit('.').next() == Some(name.as_str()))
-            .collect();
-        let Some(f) = matches
-            .iter()
-            .find(|f| f.name == *name)
-            .or(matches.first())
-            .copied()
-        else {
-            return Err(err(ErrorCode::BadValue, format!("no field {name:?}"))
-                .hint("list the names: deft pdf fields <file>"));
-        };
-        if matches.len() > 1 && !matches.iter().any(|f| f.name == *name) {
-            return Err(err(
-                ErrorCode::BadValue,
-                format!(
-                    "{name:?} matches {} fields; use the full name",
-                    matches.len()
-                ),
-            ));
-        }
+        let f = find_field(&all, name)?;
         match f.kind {
+            "choice" if value.is_array() && f.flags & (1 << 21) != 0 => {
+                set_list(doc, f, value, font, &mut warnings)?;
+            }
+            _ if value.is_array() || value.is_object() => {
+                let got = if value.is_array() {
+                    "a list"
+                } else {
+                    "an object"
+                };
+                let want = if matches!(f.kind, "checkbox" | "radio") {
+                    "true, false or an option"
+                } else {
+                    "text"
+                };
+                return Err(err(
+                    ErrorCode::BadValue,
+                    format!("{}: expected {want}, got {got}", f.name),
+                ));
+            }
             "checkbox" | "radio" => set_button(doc, f, value)?,
             "text" | "choice" => {
                 let text = scalar(value);
+                check_length(f, &text)?;
                 if f.kind == "choice" && !f.options.is_empty() && !f.options.contains(&text) {
                     warnings.push(format!("{}: {text:?} is not one of its options", f.name));
                 }
@@ -740,6 +913,7 @@ fn placement(bbox: [f64; 4], matrix: [f64; 6], rect: [f64; 4]) -> [f64; 6] {
 /// can be edited. Links stay. Returns how many were flattened.
 pub fn flatten(doc: &mut Document) -> Result<usize> {
     let mut total = 0;
+    let mut removed = HashSet::new();
     for page in page_ids(doc) {
         let annots: Vec<Object> = doc
             .get_dictionary(page)
@@ -765,6 +939,9 @@ pub fn flatten(doc: &mut Document) -> Result<usize> {
             if matches!(subtype, b"Link" | b"Popup") {
                 keep.push(a.clone());
                 continue;
+            }
+            if let Ok(id) = a.as_reference() {
+                removed.insert(id);
             }
             let flags = dict
                 .get(b"F")
@@ -797,5 +974,86 @@ pub fn flatten(doc: &mut Document) -> Result<usize> {
     if let Ok(catalog) = doc.catalog_mut() {
         catalog.remove(b"AcroForm");
     }
+    // The fields and their values must not stay in the file, reachable from
+    // the structure tree or from nothing.
+    drop_object_refs(doc, &removed);
+    crate::prune(doc);
     Ok(total)
 }
+
+/// Remove the structure tree's references (/OBJR) to annotations that are
+/// gone. The marked content of what was baked into the page stays.
+fn drop_object_refs(doc: &mut Document, gone: &HashSet<ObjectId>) {
+    if gone.is_empty() {
+        return;
+    }
+    let Some(root) = doc
+        .catalog()
+        .ok()
+        .and_then(|c| c.get(b"StructTreeRoot").ok())
+        .and_then(|o| o.as_reference().ok())
+    else {
+        return;
+    };
+    let is_gone = |o: &Object, objects: &BTreeMap<ObjectId, Object>| {
+        let o = match o {
+            Object::Reference(id) => objects.get(id).unwrap_or(o),
+            _ => o,
+        };
+        o.as_dict().is_ok_and(|d| {
+            d.get(b"Type").and_then(Object::as_name).ok() == Some(b"OBJR")
+                && d.get(b"Obj")
+                    .and_then(Object::as_reference)
+                    .is_ok_and(|id| gone.contains(&id))
+        })
+    };
+    // Cut the references from every /K in an object, direct children included,
+    // and return the objects it refers to.
+    fn clean(
+        o: &mut Object,
+        objects: &BTreeMap<ObjectId, Object>,
+        is_gone: &dyn Fn(&Object, &BTreeMap<ObjectId, Object>) -> bool,
+        next: &mut Vec<ObjectId>,
+    ) {
+        match o {
+            Object::Reference(id) => next.push(*id),
+            Object::Array(a) => a.iter_mut().for_each(|x| clean(x, objects, is_gone, next)),
+            Object::Dictionary(d) => {
+                if let Ok(Object::Array(k)) = d.get_mut(b"K") {
+                    k.retain(|x| !is_gone(x, objects));
+                }
+                if d.get(b"K").is_ok_and(|k| is_gone(k, objects)) {
+                    d.remove(b"K");
+                }
+                for (key, v) in d.iter_mut() {
+                    // Up the tree, and into pages and content, is not this walk.
+                    if !matches!(
+                        key.as_slice(),
+                        b"P" | b"Pg" | b"Obj" | b"Stm" | b"ParentTree"
+                    ) {
+                        clean(v, objects, is_gone, next);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut stack = vec![root];
+    let mut seen = HashSet::new();
+    while let Some(id) = stack.pop() {
+        if !seen.insert(id) {
+            continue;
+        }
+        let Some(mut o) = doc.objects.remove(&id) else {
+            continue;
+        };
+        if o.as_dict().is_ok() {
+            clean(&mut o, &doc.objects, &is_gone, &mut stack);
+        }
+        doc.objects.insert(id, o);
+    }
+}
+
+#[cfg(test)]
+#[path = "forms_tests.rs"]
+mod tests;

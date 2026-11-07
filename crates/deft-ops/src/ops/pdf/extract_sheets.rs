@@ -38,12 +38,23 @@ pub static OP: Op = Op {
     ..Op::DEFAULT
 };
 
+/// Only pages without text can be a scan that needs OCR.
+fn no_tables_warning(has_text: bool) -> &'static str {
+    if has_text {
+        "no tables found; deft pdf to-text shows the text"
+    } else {
+        "no tables found; the pages have no text: a scan needs pdf ocr first"
+    }
+}
+
 fn run(job: &Job) -> Result<OpResult> {
     let doc = open(job.input(), job.params)?;
     let ids = deft_tools_pdf::page_ids(&doc);
     let indexes = resolve(&job.params.pages("pages"), ids.len())?;
     let mut pages = Vec::with_capacity(indexes.len());
+    let mut has_text = false;
     deft_tools_pdf::text::reader(&doc)?.each_page_text(&indexes, |_, page| {
+        has_text |= page.glyphs.iter().any(|g| !g.text.trim().is_empty());
         pages.push(deft_tools_pdf::layout::tables(&page));
     });
     let stem = job.input().stem();
@@ -65,7 +76,7 @@ fn run(job: &Job) -> Result<OpResult> {
         return Ok(OpResult::many(vec![])
             .fact("tables", 0)
             .note(note)
-            .warn("no tables found; a scan needs pdf ocr first"));
+            .warn(no_tables_warning(has_text)));
     }
     let xlsx = job.out_format == Some(Format::Xlsx) || job.params.text("to") == "xlsx";
     if xlsx {
@@ -84,4 +95,13 @@ fn run(job: &Job) -> Result<OpResult> {
         );
     }
     Ok(OpResult::many(outputs).fact("tables", count).note(note))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn only_pages_without_text_get_the_ocr_hint() {
+        assert!(!super::no_tables_warning(true).contains("ocr"));
+        assert!(super::no_tables_warning(false).contains("ocr"));
+    }
 }

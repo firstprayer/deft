@@ -41,5 +41,10 @@ fn run(job: &Job) -> Result<OpResult> {
         ("fonts", i.fonts),
         ("forms", i.forms),
     ];
-    Ok(OpResult::report(facts, note))
+    let res = OpResult::report(facts, note);
+    Ok(if deft_tools_pdf::forms::is_dynamic_xfa(&doc) {
+        res.warn(deft_tools_pdf::forms::XFA_WARNING)
+    } else {
+        res
+    })
 }

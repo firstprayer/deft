@@ -1,16 +1,16 @@
 //! Text as a page shows it, read through the interpreter that renders the page.
 //! That one reader knows every font, Form XObjects and annotation appearances,
-//! and gives real positions, so text, search, tables and redaction all agree.
+//! and gives real positions, so text, search and tables all agree.
 
 use crate::Renderer;
 use crate::layout::Run;
-use deft_core::error::{ErrorCode, Result, err};
+use deft_core::error::Result;
 use hayro::hayro_interpret::font::{Glyph as Drawn, GlyphRun};
 use hayro::hayro_interpret::hayro_cmap::BfString;
 use hayro::hayro_interpret::util::TransformExt;
 use hayro::hayro_interpret::{
     BlendMode, ClipPath, Context, Device, DrawMode, DrawProps, Image, ImageDrawProps,
-    InterpreterCache, InterpreterSettings, SoftMask, interpret_page,
+    InterpreterCache, SoftMask, interpret_page,
 };
 use hayro::kurbo::{BezPath, Point, Rect, Vec2};
 use lopdf::Document;
@@ -62,7 +62,14 @@ impl Glyph {
     fn same_line(&self, next: &Glyph) -> bool {
         let (along, across) = self.step_to(next);
         let size = self.size().max(next.size());
-        across <= size * LINE_STEP && along >= -size * 2.0
+        // Vertical writing: one operator sets its glyphs down a column.
+        let step = next.start - self.start;
+        let fall = -step.dot(self.up) / self.size().max(f64::EPSILON);
+        let column = next.run == self.run
+            && step.dot(self.direction()).abs() < size * 0.5
+            && fall > 0.0
+            && fall < size * 1.6;
+        column || (across <= size * LINE_STEP && along >= -size * 2.0)
     }
 
     fn is_blank(&self) -> bool {
@@ -101,6 +108,13 @@ fn plain(text: &str) -> String {
             'ﬄ' => out.push_str("ffl"),
             'ﬅ' | 'ﬆ' => out.push_str("st"),
             '\u{A0}' | '\t' => out.push(' '),
+            // Arabic presentation forms are the shapes of letters, not letters.
+            '\u{FB50}'..='\u{FDFF}' | '\u{FE70}'..='\u{FEFC}' => {
+                use unicode_normalization::UnicodeNormalization;
+                out.extend(std::iter::once(c).nfkc());
+            }
+            // A glyph that is part of a cluster another glyph names.
+            '\u{200B}' => {}
             c if c.is_control() => {}
             c => out.push(c),
         }
@@ -171,9 +185,61 @@ impl<'a> Device<'a> for Collector {
                 run: self.runs,
             });
         }
+        join_gbk(&mut found);
         if !self.repeats(&found) {
             self.glyphs.append(&mut found);
             self.runs += 1;
+        }
+    }
+}
+
+/// A GBK font's high bytes arrive as private-use characters, one glyph each:
+/// each pair is one Chinese character, given to its first glyph.
+fn join_gbk(glyphs: &mut [Glyph]) {
+    let byte = |g: &Glyph| -> Option<u8> {
+        let mut chars = g.text.chars();
+        let c = chars.next()? as u32;
+        let base = crate::fonts::GBK_BYTES;
+        (chars.next().is_none() && (base..base + 0x80).contains(&c))
+            .then(|| (c - base + 0x80) as u8)
+    };
+    let mut i = 0;
+    while i < glyphs.len() {
+        let Some(lead) = byte(&glyphs[i]) else {
+            i += 1;
+            continue;
+        };
+        let trail = glyphs.get(i + 1).and_then(|g| {
+            let c = g.text.chars().next()? as u32;
+            match byte(g) {
+                Some(b) => Some(b),
+                // A trail byte can be ASCII.
+                None if g.text.chars().count() == 1 && (0x40..0x80).contains(&c) => Some(c as u8),
+                None => None,
+            }
+        });
+        let pair = trail.map(|t| {
+            let bytes = [lead, t];
+            let (text, bad) = encoding_rs::GBK.decode_without_bom_handling(&bytes);
+            (text.into_owned(), bad)
+        });
+        match pair {
+            Some((text, false)) => {
+                glyphs[i].text = text;
+                glyphs[i + 1].text = String::new();
+                glyphs[i].end = glyphs[i + 1].end;
+                i += 2;
+                // These writers pad each character with a space byte, the
+                // other half of its full-width cell.
+                if glyphs.get(i).is_some_and(|g| g.text == " ") {
+                    glyphs[i].text = String::new();
+                    i += 1;
+                }
+            }
+            _ => {
+                glyphs[i].text = "\u{FFFD}".to_string();
+                i += 1;
+            }
         }
     }
 }
@@ -182,12 +248,21 @@ impl<'a> Device<'a> for Collector {
 /// positions call for has no glyph.
 fn reading(glyphs: &[Glyph]) -> Vec<(char, Option<usize>)> {
     let mut out: Vec<(char, Option<usize>)> = Vec::new();
+    // The last glyph with text: one whose text another glyph of its cluster
+    // carries is passed over.
+    let mut last: Option<&Glyph> = None;
     for (i, glyph) in glyphs.iter().enumerate() {
-        if let Some(last) = i.checked_sub(1).map(|p| &glyphs[p]) {
+        if glyph.text.is_empty() {
+            continue;
+        }
+        if let Some(last) = last {
             let blank = out.last().is_none_or(|(c, _)| c.is_whitespace());
+            // Chinese and Japanese put no spaces between words.
+            let close = out.last().is_some_and(|(c, _)| is_cjk(*c))
+                && glyph.text.chars().next().is_some_and(is_cjk);
             if !last.same_line(glyph) {
                 out.push(('\n', None));
-            } else if !blank && !glyph.is_blank() {
+            } else if !blank && !glyph.is_blank() && !close {
                 let (along, _) = last.step_to(glyph);
                 if along > last.size().max(glyph.size()) * WORD_GAP {
                     out.push((' ', None));
@@ -195,8 +270,77 @@ fn reading(glyphs: &[Glyph]) -> Vec<(char, Option<usize>)> {
             }
         }
         out.extend(glyph.text.chars().map(|c| (c, Some(i))));
+        last = Some(glyph);
     }
+    logical_order(&mut out, glyphs);
     out
+}
+
+fn is_rtl(c: char) -> bool {
+    matches!(c, '\u{0590}'..='\u{08FF}' | '\u{FB1D}'..='\u{FDFF}' | '\u{FE70}'..='\u{FEFF}')
+        && !c.is_ascii_digit()
+        && !('\u{0660}'..='\u{0669}').contains(&c)
+}
+
+/// Right-to-left letters drawn one glyph each, left to right as they show,
+/// are read in the reverse order: a stretch of them, with the spaces and
+/// punctuation between, is turned round glyph by glyph. Text whose glyphs
+/// name whole words is already in reading order and stays.
+fn logical_order(out: &mut [(char, Option<usize>)], glyphs: &[Glyph]) {
+    // One letter, or a ligature of a few.
+    let letter = |g: Option<usize>| {
+        g.is_some_and(|i| {
+            let t = &glyphs[i].text;
+            t.chars().count() <= 4 && t.chars().all(is_rtl)
+        })
+    };
+    let mut i = 0;
+    while i < out.len() {
+        if !(is_rtl(out[i].0) && letter(out[i].1)) {
+            i += 1;
+            continue;
+        }
+        let mut end = i + 1;
+        let mut last = i;
+        while end < out.len() && out[end].0 != '\n' {
+            let (c, g) = out[end];
+            if is_rtl(c) && letter(g) {
+                last = end;
+            } else if c.is_alphanumeric() || (g.is_some() && !c.is_whitespace() && !letter(g)) {
+                break;
+            }
+            end += 1;
+        }
+        // Drawn right to left, the glyphs are in reading order already.
+        let (Some(a), Some(b)) = (out[i].1, out[last].1) else {
+            i = last + 1;
+            continue;
+        };
+        let rightward = (glyphs[b].start - glyphs[a].start).dot(glyphs[a].direction()) > 0.0;
+        if !rightward {
+            i = last + 1;
+            continue;
+        }
+        // Turn the glyphs round, each keeping its own characters in order.
+        let mut groups: Vec<Vec<(char, Option<usize>)>> = Vec::new();
+        for entry in &out[i..=last] {
+            match groups.last_mut() {
+                Some(group) if entry.1.is_some() && group[0].1 == entry.1 => group.push(*entry),
+                _ => groups.push(vec![*entry]),
+            }
+        }
+        let turned: Vec<(char, Option<usize>)> = groups.into_iter().rev().flatten().collect();
+        out[i..=last].copy_from_slice(&turned);
+        i = last + 1;
+    }
+}
+
+/// Han, kana, Hangul and the full-width forms set among them.
+fn is_cjk(c: char) -> bool {
+    matches!(c,
+        '\u{3000}'..='\u{30FF}' | '\u{3400}'..='\u{4DBF}' | '\u{4E00}'..='\u{9FFF}'
+        | '\u{AC00}'..='\u{D7AF}' | '\u{F900}'..='\u{FAFF}' | '\u{FF00}'..='\u{FFEF}'
+        | '\u{2026}')
 }
 
 /// Where a match starting at `from` ends. The line break after a hyphen in `wraps`
@@ -231,7 +375,8 @@ fn match_at(
 /// The text of one page.
 pub struct PageText {
     pub glyphs: Vec<Glyph>,
-    /// The height of the page as shown.
+    /// The size of the page as shown.
+    pub width: f64,
     pub height: f64,
 }
 
@@ -386,7 +531,7 @@ impl Renderer {
                 Rect::new(0.0, 0.0, width as f64, height as f64),
                 &cache,
                 page.xref(),
-                InterpreterSettings::default(),
+                crate::fonts::interpreter_settings(),
             );
             let mut found = Collector::default();
             interpret_page(page, &mut context, &mut found);
@@ -394,6 +539,7 @@ impl Renderer {
                 i,
                 PageText {
                     glyphs: found.glyphs,
+                    width: width as f64,
                     height: height as f64,
                 },
             );
@@ -410,11 +556,7 @@ impl Renderer {
 
 /// A reader for a document in memory.
 pub fn reader(doc: &Document) -> Result<Renderer> {
-    let mut out = Vec::new();
-    doc.clone()
-        .save_to(&mut out)
-        .map_err(|e| err(ErrorCode::Internal, format!("reading PDF: {e}")))?;
-    Renderer::new(&out)
+    Renderer::of(doc)
 }
 
 /// The share of `text` that could not be decoded, from 0 to 1.

@@ -7,7 +7,8 @@ pub static OP: Op = Op {
     id: "pdf.fill",
     summary: "Fill a form from JSON: --data values.json",
     details: &[
-        "The JSON is {\"field name\": value}. Checkboxes take true or false; radios an option.",
+        "The JSON is {\"field name\": value}. Checkboxes take true or false; radios an option;",
+        "a multi-select list a list of options.",
         "Field names come from deft pdf fields; a short name works when it is unique.",
     ],
     input: Input::each(&[Format::Pdf], "pdf"),
@@ -23,7 +24,7 @@ pub static OP: Op = Op {
     ],
     tags: &["form", "acroform", "fill in", "tax form", "application"],
     result: &["filled"],
-    errors: &[ErrorCode::BadValue],
+    errors: &[ErrorCode::BadValue, ErrorCode::InputUnsupported],
     suffix: Some("filled"),
     run,
     ..Op::DEFAULT
