@@ -55,6 +55,7 @@ pub fn read(bytes: &[u8]) -> Document {
     let mut paragraphs: Vec<Vec<Span>> = vec![vec![]];
     let mut i = 0;
     let mut pending_skip = 0usize;
+    let mut high_half: Option<u32> = None;
     let push_char = |paragraphs: &mut Vec<Vec<Span>>, c: char, s: State| {
         let para = paragraphs.last_mut().expect("one paragraph");
         match para.last_mut() {
@@ -121,8 +122,23 @@ pub fn read(bytes: &[u8]) -> Document {
                         "u" if !top.skip => {
                             let v = value.unwrap_or(0);
                             let code = if v < 0 { v + 65536 } else { v } as u32;
-                            push_char(&mut paragraphs, char::from_u32(code).unwrap_or('?'), state);
                             pending_skip = state.unicode_skip.max(1);
+                            // Beyond U+FFFF, RTF writes two halves of a pair.
+                            if (0xD800..0xDC00).contains(&code) {
+                                high_half = Some(code);
+                                continue;
+                            }
+                            let joined = match high_half.take() {
+                                Some(high) if (0xDC00..0xE000).contains(&code) => {
+                                    0x10000 + ((high - 0xD800) << 10) + (code - 0xDC00)
+                                }
+                                _ => code,
+                            };
+                            push_char(
+                                &mut paragraphs,
+                                char::from_u32(joined).unwrap_or('?'),
+                                state,
+                            );
                         }
                         w if IGNORED.contains(&w) => top.skip = true,
                         _ => {}

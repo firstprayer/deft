@@ -20,15 +20,27 @@ pub struct Span {
     pub bold: bool,
     pub italic: bool,
     pub code: bool,
+    pub strike: bool,
     pub link: Option<String>,
     /// Name of an image in `Document::images`, instead of text.
     pub image: Option<String>,
+    /// A note marker: `[1]` in the text, `[1]:` where the note itself starts.
+    pub note: bool,
 }
 
 impl Span {
     pub fn plain(text: impl Into<String>) -> Span {
         Span {
             text: text.into(),
+            ..Default::default()
+        }
+    }
+
+    /// A note marker, see `Span::note`.
+    pub fn note(text: impl Into<String>) -> Span {
+        Span {
+            text: text.into(),
+            note: true,
             ..Default::default()
         }
     }

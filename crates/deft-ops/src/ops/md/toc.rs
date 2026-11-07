@@ -3,7 +3,10 @@ use deft_core::prelude::*;
 pub static OP: Op = Op {
     id: "md.toc",
     summary: "Insert a table of contents from the headings",
-    details: &["It replaces a <!-- toc --> line, or goes after the first heading."],
+    details: &[
+        "It replaces a <!-- toc --> line, or goes after the title.",
+        "Running it again replaces the list.",
+    ],
     input: Input::each(&[Format::Md], "md"),
     output: Output::one(&[Format::Md], "md"),
     params: &[param(
@@ -32,60 +35,75 @@ fn slug(text: &str) -> String {
         .collect()
 }
 
-fn run(job: &Job) -> Result<OpResult> {
-    let md = String::from_utf8_lossy(job.input().bytes()?).to_string();
-    let depth = job.params.int("depth") as usize;
-    let mut entries = Vec::new();
-    let mut first = None;
-    let mut fenced = false;
+const OPEN: &str = "<!-- toc -->";
+const CLOSE: &str = "<!-- /toc -->";
+
+/// The list of entries for these headings. GitHub numbers repeats across all
+/// headings, listed or not, so every heading is counted.
+fn entries(headings: &[deft_tools_doc::markdown::Heading], depth: usize) -> Vec<String> {
     let mut seen = std::collections::HashMap::new();
-    for (n, line) in md.lines().enumerate() {
-        if line.trim_start().starts_with("```") {
-            fenced = !fenced;
-        }
-        let level = line.bytes().take_while(|b| *b == b'#').count();
-        if fenced || level == 0 || level > 6 || line.as_bytes().get(level) != Some(&b' ') {
-            continue;
-        }
-        let text = line[level..].trim().trim_end_matches('#').trim();
-        if first.is_none() {
-            first = Some(n);
-            if level == 1 {
-                continue;
-            }
-        }
-        if level <= depth {
-            let base = slug(text);
-            let count: &mut usize = seen.entry(base.clone()).or_default();
-            let anchor = if *count == 0 {
-                base
-            } else {
-                format!("{base}-{count}")
-            };
-            *count += 1;
-            entries.push(format!(
-                "{}- [{text}](#{anchor})",
-                "  ".repeat(level.saturating_sub(2))
+    let mut out = Vec::new();
+    for (i, h) in headings.iter().enumerate() {
+        let base = slug(&h.plain);
+        let count: &mut usize = seen.entry(base.clone()).or_default();
+        let anchor = if *count == 0 {
+            base
+        } else {
+            format!("{base}-{count}")
+        };
+        *count += 1;
+        // A leading title names the document, so it is not an entry.
+        let is_title = i == 0 && h.level == 1;
+        if !is_title && h.level <= depth {
+            out.push(format!(
+                "{}- [{}](#{anchor})",
+                "  ".repeat(h.level.saturating_sub(2)),
+                h.label
             ));
         }
     }
-    if entries.is_empty() {
+    out
+}
+
+fn run(job: &Job) -> Result<OpResult> {
+    let md = String::from_utf8_lossy(job.input().bytes()?).to_string();
+    let depth = job.params.int("depth") as usize;
+    let headings = deft_tools_doc::markdown::headings(&md);
+    let list = entries(&headings, depth);
+    if list.is_empty() {
         return Ok(OpResult::one(Produced::bytes(md.into_bytes(), Format::Md))
             .fact("entries", 0)
             .warn("no headings to list"));
     }
-    let toc = entries.join("\n");
+    let block = format!("{OPEN}\n{}\n{CLOSE}", list.join("\n"));
     let mut lines: Vec<String> = md.lines().map(String::from).collect();
-    if let Some(i) = lines
-        .iter()
-        .position(|l| l.trim().eq_ignore_ascii_case("<!-- toc -->"))
-    {
-        lines[i] = toc;
+    let marker = |text: &str, l: &String| l.trim().eq_ignore_ascii_case(text);
+    if let Some(i) = lines.iter().position(|l| marker(OPEN, l)) {
+        // A closing marker means an earlier run: replace all it wrote.
+        let end = lines[i..]
+            .iter()
+            .position(|l| marker(CLOSE, l))
+            .map_or(i, |n| i + n);
+        lines.splice(i..=end, [block]);
     } else {
-        let at = first.map_or(0, |n| n + 1);
-        lines.insert(at, format!("\n{toc}"));
+        let first = &headings[0];
+        // Under a title, or above the first section when there is no title.
+        let at = if first.level == 1 {
+            first.end_line + 1
+        } else {
+            first.line
+        };
+        let at = at.min(lines.len());
+        lines.insert(
+            at,
+            if first.level == 1 {
+                format!("\n{block}")
+            } else {
+                format!("{block}\n")
+            },
+        );
     }
-    let n = entries.len();
+    let n = list.len();
     let mut out = lines.join("\n");
     out.push('\n');
     Ok(OpResult::one(Produced::bytes(out.into_bytes(), Format::Md))

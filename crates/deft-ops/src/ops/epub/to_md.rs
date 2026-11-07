@@ -26,10 +26,9 @@ fn run(job: &Job) -> Result<OpResult> {
     let dir = job.params.opt_path("images");
     if let Some(d) = &dir {
         for image in &b.images {
-            md = md.replace(
-                &format!("]({})", image.name),
-                &format!("]({}/{})", d.display(), image.name),
-            );
+            // Links keep the book's URL form, so a space is still %20.
+            let link = image.name.replace(' ', "%20");
+            md = md.replace(&format!("]({link})"), &format!("]({}/{link})", d.display()));
         }
     }
     let warning = save_images(&b.images, dir)?;

@@ -38,7 +38,7 @@ fn run(job: &Job) -> Result<OpResult> {
     let md = String::from_utf8_lossy(input.bytes()?).to_string();
     let base = input.path.as_ref().and_then(|x| x.parent());
     let mut blocks = deft_tools_doc::markdown::parse(&md);
-    let images = load_images(&mut blocks, base);
+    let (images, warnings) = load_images(&mut blocks, base);
     let doc = Document {
         title: p.opt_text("title").or_else(|| deft_tools_text::title(&md)),
         author: p.opt_text("author"),
@@ -46,10 +46,12 @@ fn run(job: &Job) -> Result<OpResult> {
         images,
     };
     let words = doc.words();
-    Ok(OpResult::one(Produced::bytes(
+    let mut res = OpResult::one(Produced::bytes(
         deft_tools_doc::docx::write(&doc)?,
         Format::Docx,
     ))
     .fact("words", words)
-    .note(format!("{words} words")))
+    .note(format!("{words} words"));
+    res.warnings = warnings;
+    Ok(res)
 }

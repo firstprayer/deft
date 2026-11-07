@@ -3,7 +3,7 @@ use deft_core::prelude::*;
 pub static OP: Op = Op {
     id: "doc.replace",
     summary: "Find and replace text in Word, keeping the formatting",
-    details: &["Exact, case-sensitive match. Covers the body, headers and footers."],
+    details: &["Exact, case-sensitive match. Covers the body, headers, footers and notes."],
     input: Input::each(&[Format::Docx], "docx"),
     output: Output::one(&[Format::Docx], "docx"),
     params: &[

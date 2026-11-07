@@ -2,7 +2,8 @@
 
 use crate::zipped::{Package, join};
 use crate::{Image, bad, html};
-use deft_core::error::Result;
+use deft_core::error::{ErrorCode, Result, err};
+use deft_core::value::percent_decode;
 use roxmltree::Document as Xml;
 use std::collections::HashMap;
 use std::io::Write;
@@ -29,6 +30,32 @@ fn opf_path(pkg: &Package) -> Result<String> {
         .ok_or_else(|| bad("epub", "no rootfile"))
 }
 
+/// Whether a chapter is markup at all. Encrypted bytes are not, even when
+/// the book does not say so. UTF-16 marks itself with a byte order mark.
+fn is_markup(bytes: &[u8]) -> bool {
+    if bytes.starts_with(&[0xFF, 0xFE]) || bytes.starts_with(&[0xFE, 0xFF]) {
+        return true;
+    }
+    let text = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes);
+    text.iter().find(|b| !b.is_ascii_whitespace()) == Some(&b'<')
+}
+
+/// Parts listed as encrypted. Fonts are often listed too, only to obfuscate
+/// them, and that does not stop a book being read.
+fn encrypted_parts(pkg: &Package) -> Vec<String> {
+    let Some(text) = pkg.text("META-INF/encryption.xml") else {
+        return vec![];
+    };
+    let Ok(doc) = Xml::parse(&text) else {
+        return vec![];
+    };
+    doc.descendants()
+        .filter(|n| n.tag_name().name() == "CipherReference")
+        .filter_map(|n| n.attribute("URI"))
+        .map(percent_decode)
+        .collect()
+}
+
 pub fn read(bytes: &[u8]) -> Result<Book> {
     let pkg = Package::open(bytes)?;
     let opf = opf_path(&pkg)?;
@@ -47,30 +74,54 @@ pub fn read(bytes: &[u8]) -> Result<Book> {
         let (Some(id), Some(href)) = (item.attribute("id"), item.attribute("href")) else {
             continue;
         };
-        let path = join(&opf, href);
+        // An href is a URL, so a space in a file name arrives as %20.
+        let raw = join(&opf, href);
+        let path = if pkg.has(&raw) {
+            raw
+        } else {
+            join(&opf, &percent_decode(href))
+        };
         if item
             .attribute("media-type")
             .is_some_and(|t| t.starts_with("image/"))
             && let Some(bytes) = pkg.read(&path)
         {
-            let name = href.rsplit('/').next().unwrap_or(href).to_string();
+            let name = path.rsplit('/').next().unwrap_or(&path).to_string();
             images.push(Image { name, bytes });
         }
         manifest.insert(id.to_string(), path);
     }
+    let encrypted = encrypted_parts(&pkg);
     let mut chapters = Vec::new();
     for r in doc
         .descendants()
         .filter(|n| n.tag_name().name() == "itemref")
     {
+        let path = r.attribute("idref").and_then(|id| manifest.get(id));
+        if path.is_some_and(|p| encrypted.contains(p)) {
+            return Err(err(
+                ErrorCode::InputEncrypted,
+                "epub: the book is protected by DRM, so its chapters cannot be read",
+            ));
+        }
         if r.attribute("linear") == Some("no") {
             continue;
         }
-        if let Some(html) = r
-            .attribute("idref")
-            .and_then(|id| manifest.get(id))
-            .and_then(|path| pkg.text(path))
-        {
+        let Some(path) = path else { continue };
+        if pkg.read(path).is_some_and(|bytes| !is_markup(&bytes)) {
+            let protection = ["encryption", "rights", "sinf"]
+                .iter()
+                .any(|f| pkg.has(&format!("META-INF/{f}.xml")));
+            return Err(if protection {
+                err(
+                    ErrorCode::InputEncrypted,
+                    format!("epub: {path} is encrypted, so the book cannot be read"),
+                )
+            } else {
+                bad("epub", format!("{path} is not a text chapter"))
+            });
+        }
+        if let Some(html) = pkg.text(path) {
             chapters.push(html);
         }
     }
@@ -97,7 +148,11 @@ impl Book {
         // Images sit in folders inside the book; keep only their file names.
         let re = regex::Regex::new(r"!\[([^\]]*)\]\((?:[^)/]*/)*([^)/]+)\)")
             .map_err(|e| bad("regex", e))?;
-        Ok(re.replace_all(&out, "![$1]($2)").to_string())
+        let out = re.replace_all(&out, "![$1]($2)");
+        // Links between chapters lead nowhere once the book is one file.
+        let inner = regex::Regex::new(r"(^|[^!])\[([^\]]*)\]\([^):\s]*\.x?html?(?:#[^)\s]*)?\)")
+            .map_err(|e| bad("regex", e))?;
+        Ok(inner.replace_all(&out, "$1$2").to_string())
     }
 }
 
@@ -133,6 +188,15 @@ fn media_type(name: &str) -> &'static str {
     }
 }
 
+/// Close void tags from raw HTML, which XHTML readers otherwise refuse.
+fn closed_void_tags(html: &str) -> Result<String> {
+    let re = regex::Regex::new(
+        r"(?i)<(area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)\b([^>]*?)/?>",
+    )
+    .map_err(|e| bad("regex", e))?;
+    Ok(re.replace_all(html, "<$1$2/>").to_string())
+}
+
 /// Write an EPUB 3 file, stable from one run to the next.
 pub fn write(book: &NewBook) -> Result<Vec<u8>> {
     let mut manifest = String::new();
@@ -153,6 +217,7 @@ pub fn write(book: &NewBook) -> Result<Vec<u8>> {
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE html>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xml:lang=\"{lang}\"><head><title>{t}</title></head><body>\n{body}</body></html>\n",
             lang = xml_text(book.language),
             t = xml_text(title),
+            body = closed_void_tags(body)?,
         );
         files.push((format!("OEBPS/{name}"), page.into_bytes()));
     }

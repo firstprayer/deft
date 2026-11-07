@@ -19,7 +19,7 @@ Groups:
 - `data`: JSON/YAML/TOML/XML: convert, format, merge, diff, validate
 - `sheet`: Excel/CSV/ODS tables: SQL query, pivot, merge, split, convert
 - `md`: Markdown to PDF, HTML, Word, EPUB; table of contents
-- `html`: HTML to Markdown, text, Word, PDF; screenshots
+- `html`: HTML to Markdown, text, Word and PDF
 - `epub`: E-books: info, to text, Markdown and PDF
 - `email`: EML files: text and attachments
 - `contact`: VCF address books: to and from CSV

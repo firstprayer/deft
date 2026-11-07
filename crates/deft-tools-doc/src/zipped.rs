@@ -23,6 +23,10 @@ impl Package {
         self.zip.borrow().file_names().map(String::from).collect()
     }
 
+    pub fn has(&self, name: &str) -> bool {
+        self.zip.borrow().index_for_name(name).is_some()
+    }
+
     pub fn read(&self, name: &str) -> Option<Vec<u8>> {
         let mut zip = self.zip.borrow_mut();
         let file = zip.by_name(name).ok()?;

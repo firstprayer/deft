@@ -12,16 +12,23 @@ Deft follows semantic versioning. Before 1.0, a minor version may change command
 - `pdf extract-sheets`: each table in a PDF as its own CSV, or as a sheet in one XLSX.
 - `video frames --interval` and `--from`.
 - `deft find` says when no command does a job.
+- `html to-docx --main` and `html to-pdf --main`.
+- `calendar to-csv` adds `status` and `except` columns, and `calendar from-csv` reads them.
 
 ### Changed
 
 - `video stabilize` uses two passes where ffmpeg has vidstab, which removes far more shake.
 - `video compress --target-size` uses two passes and the whole size budget.
 - YAML output quotes strings such as `yes`, `on` and dates, which older parsers misread.
+- Word readers keep footnotes, endnotes, text boxes, nested tables, content controls and list levels, and `doc replace` reaches notes.
+- `doc to-html` embeds pictures. Pictures in PDFs keep their natural size.
+- `calendar to-csv` shows the last day of an all-day event, not the day after it.
+- `gps info` and `gps convert` treat track segments separately, and `climb_m` ignores rises under 2 m.
 
 ### Removed
 
 - The `archive` and `subtitle` groups, and `audio waveform`.
+- `html screenshot` and `html to-pdf --browser`. Deft no longer uses Chrome.
 - The `youtube` group, `deft engine install` and `update`, `--offline` and `--install-engines`. Deft no longer touches the network.
 - Commands an agent does in one ordinary line: `file hash`, `base64`, `split`, `join`, `rename` and `organize`; `video crop`, `resize`, `rotate`, `mute`, `fade`, `repeat`, `reverse`, `stack`, `thumbnail`, `extract-audio` and `extract-subtitles`; `audio chunk`, `compress`, `fade`, `merge`, `reverse`, `speed`, `strip` and `volume`; `image diff`, `invert` and `sharpen`; `pdf grayscale` and `repair`; `data query`; `sheet transpose`; `email info`, `contact info` and `calendar info`.
 - `sheet filter`, `sort`, `select`, `group`, `dedupe` and `join`: `sheet query` does all of them in SQL.

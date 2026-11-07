@@ -14,10 +14,28 @@ pub struct Attachment {
 pub struct Message {
     pub from: String,
     pub to: String,
+    pub cc: String,
     pub subject: String,
     pub date: String,
     pub body: String,
     pub attachments: Vec<Attachment>,
+}
+
+/// A file extension for an attachment that came without a name.
+fn extension(mime: &str) -> &'static str {
+    match mime {
+        "application/pdf" => ".pdf",
+        "application/zip" => ".zip",
+        "image/gif" => ".gif",
+        "image/jpeg" => ".jpg",
+        "image/png" => ".png",
+        "message/rfc822" => ".eml",
+        "text/calendar" => ".ics",
+        "text/csv" => ".csv",
+        "text/html" => ".html",
+        "text/plain" => ".txt",
+        _ => "",
+    }
 }
 
 fn walk(
@@ -44,7 +62,10 @@ fn walk(
     ) || name.is_some();
     if is_attachment {
         if let Ok(bytes) = part.get_body_raw() {
-            let name = name.unwrap_or_else(|| format!("attachment-{}", out.len() + 1));
+            let name = name.unwrap_or_else(|| {
+                let kind = extension(&part.ctype.mimetype);
+                format!("attachment-{}{kind}", out.len() + 1)
+            });
             out.push(Attachment { name, bytes });
         }
         return;
@@ -72,6 +93,7 @@ pub fn read(bytes: &[u8]) -> Result<Message> {
     Ok(Message {
         from: get("From"),
         to: get("To"),
+        cc: get("Cc"),
         subject: get("Subject"),
         date: get("Date"),
         body,

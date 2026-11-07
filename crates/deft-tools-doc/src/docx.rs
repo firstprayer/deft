@@ -17,6 +17,49 @@ fn w<'a, 'i>(node: Node<'a, 'i>, name: &str) -> Option<Node<'a, 'i>> {
     })
 }
 
+/// Text boxes directly in a paragraph. Word writes each one twice, in
+/// `mc:Choice` and again in `mc:Fallback`, so the fallback is skipped.
+fn text_boxes<'a, 'i>(p: Node<'a, 'i>) -> Vec<Node<'a, 'i>> {
+    p.descendants()
+        .filter(|d| d.tag_name().name() == "txbxContent")
+        .filter(|d| {
+            d.ancestors()
+                .skip(1)
+                .take_while(|a| *a != p)
+                .all(|a| !matches!(a.tag_name().name(), "txbxContent" | "Fallback"))
+        })
+        .collect()
+}
+
+/// Every paragraph under a node: through nested tables, content controls and
+/// text boxes, in reading order.
+fn paragraphs_in<'a, 'i>(node: Node<'a, 'i>) -> Vec<Node<'a, 'i>> {
+    node.descendants()
+        .filter(|d| d.tag_name().name() == "p" && d.tag_name().namespace() == Some(W))
+        .filter(|d| !d.ancestors().any(|a| a.tag_name().name() == "Fallback"))
+        .collect()
+}
+
+/// Add a list item `level` lists deep, under the last item of the list above.
+fn add_item(list: &mut Vec<Block>, level: usize, ordered: bool, item: Vec<Block>) {
+    if level > 0
+        && let Some(Block::List { items, .. }) = list.last_mut()
+        && let Some(parent) = items.last_mut()
+    {
+        return add_item(parent, level - 1, ordered, item);
+    }
+    if let Some(Block::List { ordered: o, items }) = list.last_mut()
+        && *o == ordered
+    {
+        items.push(item);
+        return;
+    }
+    list.push(Block::List {
+        ordered,
+        items: vec![item],
+    });
+}
+
 fn flag(rpr: Option<Node>, name: &str) -> bool {
     rpr.and_then(|p| w(p, name))
         .is_some_and(|n| !matches!(n.attribute((W, "val")), Some("0" | "false" | "none")))
@@ -44,10 +87,12 @@ struct Reader<'a> {
     pkg: &'a Package,
     rels: HashMap<String, (String, bool)>,
     styles: HashMap<String, u8>,
-    /// numId -> ordered, from numbering.xml.
-    ordered: HashMap<String, bool>,
+    /// numId -> ordered at each level, from numbering.xml.
+    ordered: HashMap<String, Vec<bool>>,
     images: Vec<Image>,
     seen: HashMap<String, String>,
+    /// Notes referred to so far, as (element name, id), in reading order.
+    notes: Vec<(String, String)>,
 }
 
 impl Reader<'_> {
@@ -69,84 +114,207 @@ impl Reader<'_> {
 
     fn run(&mut self, r: Node, link: Option<&str>, out: &mut Vec<Span>) {
         let rpr = w(r, "rPr");
-        let (bold, italic) = (flag(rpr, "b"), flag(rpr, "i"));
+        let (bold, italic, strike) = (flag(rpr, "b"), flag(rpr, "i"), flag(rpr, "strike"));
         let code = rpr
             .and_then(|p| w(p, "rFonts"))
             .and_then(|f| f.attribute((W, "ascii")))
             .is_some_and(|f| f.contains("Courier") || f.contains("Consolas") || f.contains("Mono"));
+        let style = (bold, italic, code, strike);
         let mut text = String::new();
         for c in r.children().filter(Node::is_element) {
             match c.tag_name().name() {
                 "t" => text.push_str(c.text().unwrap_or("")),
                 "tab" => text.push('\t'),
                 "br" if c.attribute((W, "type")) != Some("page") => text.push('\n'),
-                "drawing" | "pict" => {
-                    let rid = c
-                        .descendants()
-                        .find(|d| {
-                            d.tag_name().name() == "blip" && d.tag_name().namespace() == Some(A)
-                        })
-                        .and_then(|b| b.attribute((R, "embed")));
-                    if let Some(name) = rid.and_then(|id| self.image(id)) {
-                        out.push(Span {
-                            image: Some(name),
-                            ..Default::default()
-                        });
+                "drawing" | "pict" => self.pictures(c, out),
+                // Word writes the same thing twice here; the first is enough.
+                "AlternateContent" => {
+                    let choice = c.children().find(|x| x.tag_name().name() == "Choice");
+                    let chosen = choice
+                        .filter(|x| x.descendants().any(|d| d.tag_name().name() == "drawing"));
+                    let chosen =
+                        chosen.or(c.children().find(|x| x.tag_name().name() == "Fallback"));
+                    for d in chosen.iter().flat_map(|x| x.children()) {
+                        if matches!(d.tag_name().name(), "drawing" | "pict") {
+                            self.pictures(d, out);
+                        }
+                    }
+                }
+                kind @ ("footnoteReference" | "endnoteReference") => {
+                    if let Some(id) = c.attribute((W, "id")) {
+                        // Whatever came before the marker stays before it.
+                        self.flush(&mut text, &style, link, out);
+                        let name = kind.trim_end_matches("Reference").to_string();
+                        self.notes.push((name, id.to_string()));
+                        out.push(Span::note(format!("[{}]", self.notes.len())));
                     }
                 }
                 _ => {}
             }
         }
+        self.flush(&mut text, &style, link, out);
+    }
+
+    /// End the current piece of a run's text.
+    fn flush(
+        &self,
+        text: &mut String,
+        style: &(bool, bool, bool, bool),
+        link: Option<&str>,
+        out: &mut Vec<Span>,
+    ) {
         if !text.is_empty() {
             out.push(Span {
-                text,
-                bold,
-                italic,
-                code,
+                text: std::mem::take(text),
+                bold: style.0,
+                italic: style.1,
+                code: style.2,
+                strike: style.3,
                 link: link.map(String::from),
-                image: None,
+                ..Default::default()
             });
         }
     }
 
-    fn spans(&mut self, p: Node) -> Vec<Span> {
-        let mut out: Vec<Span> = Vec::new();
-        for c in p.children().filter(Node::is_element) {
+    /// The pictures of a drawing, leaving those inside its text boxes, which
+    /// are read as paragraphs of their own.
+    fn pictures(&mut self, drawing: Node, out: &mut Vec<Span>) {
+        let ids: Vec<&str> = drawing
+            .descendants()
+            .filter(|d| !d.ancestors().any(|a| a.tag_name().name() == "txbxContent"))
+            .filter_map(|d| match d.tag_name().name() {
+                "blip" if d.tag_name().namespace() == Some(A) => d.attribute((R, "embed")),
+                "imagedata" => d.attribute((R, "id")),
+                _ => None,
+            })
+            .collect();
+        for id in ids {
+            if let Some(name) = self.image(id) {
+                out.push(Span {
+                    image: Some(name),
+                    ..Default::default()
+                });
+            }
+        }
+    }
+
+    /// Inline content, through the containers that may wrap runs.
+    fn inline(&mut self, parent: Node, link: Option<&str>, out: &mut Vec<Span>) {
+        for c in parent.children().filter(Node::is_element) {
             match c.tag_name().name() {
-                "r" => self.run(c, None, &mut out),
+                "r" => self.run(c, link, out),
                 "hyperlink" => {
                     let target = c
                         .attribute((R, "id"))
                         .and_then(|id| self.rels.get(id))
                         .map(|(t, _)| t.clone());
-                    for r in c.children().filter(|x| x.tag_name().name() == "r") {
-                        self.run(r, target.as_deref(), &mut out);
-                    }
+                    self.inline(c, target.as_deref().or(link), out);
                 }
-                "ins" | "smartTag" | "sdt" | "sdtContent" | "fldSimple" => {
-                    for r in c.descendants().filter(|x| x.tag_name().name() == "r") {
-                        self.run(r, None, &mut out);
-                    }
+                "ins" | "moveTo" | "smartTag" | "sdt" | "sdtContent" | "fldSimple" => {
+                    self.inline(c, link, out);
                 }
+                _ => {}
+            }
+        }
+    }
+
+    fn spans(&mut self, p: Node) -> Vec<Span> {
+        let mut out = Vec::new();
+        self.inline(p, None, &mut out);
+        out
+    }
+
+    /// All the text under a node as one line, for a table cell or a note.
+    fn flat(&mut self, node: Node) -> Vec<Span> {
+        let mut out = Vec::new();
+        for p in paragraphs_in(node) {
+            let spans = self.spans(p);
+            if spans.is_empty() {
+                continue;
+            }
+            if !out.is_empty() {
+                out.push(Span::plain(" "));
+            }
+            out.extend(spans);
+        }
+        out
+    }
+
+    /// Rows of a table or cells of a row, also when a content control wraps them.
+    fn parts_of<'a, 'i>(&self, parent: Node<'a, 'i>, name: &str) -> Vec<Node<'a, 'i>> {
+        let mut out = Vec::new();
+        for c in parent.children().filter(Node::is_element) {
+            match c.tag_name().name() {
+                "sdt" | "sdtContent" => out.extend(self.parts_of(c, name)),
+                n if n == name => out.push(c),
                 _ => {}
             }
         }
         out
     }
 
+    /// Block content: the body, a content control or a text box.
+    fn blocks(&mut self, parent: Node, out: &mut Vec<Block>) {
+        for node in parent.children().filter(Node::is_element) {
+            match node.tag_name().name() {
+                "p" => self.paragraph(node, out),
+                "tbl" => {
+                    let t = self.table(node);
+                    out.push(t);
+                }
+                "sdt" | "sdtContent" | "customXml" => self.blocks(node, out),
+                _ => {}
+            }
+        }
+    }
+
+    /// The notes referred to, after a rule. The list can grow as it is read,
+    /// because a note may refer to another.
+    fn notes(&mut self, blocks: &mut Vec<Block>) {
+        if self.notes.is_empty() {
+            return;
+        }
+        let read = |part: &str| self.pkg.text(part).unwrap_or_default();
+        let (foot, end) = (read("word/footnotes.xml"), read("word/endnotes.xml"));
+        let (foot_xml, end_xml) = (Xml::parse(&foot).ok(), Xml::parse(&end).ok());
+        let mut part = "";
+        let mut at = 0;
+        blocks.push(Block::Rule);
+        while at < self.notes.len() {
+            let (kind, id) = self.notes[at].clone();
+            at += 1;
+            let (name, xml) = if kind == "footnote" {
+                ("word/footnotes.xml", &foot_xml)
+            } else {
+                ("word/endnotes.xml", &end_xml)
+            };
+            if part != name {
+                part = name;
+                self.rels = relationships(self.pkg, name);
+            }
+            let found = xml.as_ref().and_then(|x| {
+                x.descendants().find(|n| {
+                    n.tag_name().name() == kind && n.attribute((W, "id")) == Some(id.as_str())
+                })
+            });
+            let Some(note) = found else { continue };
+            let mut spans = vec![Span::note(format!("[{at}]:")), Span::plain(" ")];
+            let mut body = self.flat(note);
+            // Word starts a note with a space after its number.
+            if let Some(first) = body.first_mut() {
+                first.text = first.text.trim_start().to_string();
+            }
+            spans.extend(body);
+            blocks.push(Block::Paragraph(spans));
+        }
+    }
+
     fn table(&mut self, t: Node) -> Block {
         let mut rows = Vec::new();
-        for tr in t.children().filter(|c| c.tag_name().name() == "tr") {
+        for tr in self.parts_of(t, "tr") {
             let mut row = Vec::new();
-            for tc in tr.children().filter(|c| c.tag_name().name() == "tc") {
-                let mut cell = Vec::new();
-                for p in tc.children().filter(|c| c.tag_name().name() == "p") {
-                    if !cell.is_empty() {
-                        cell.push(Span::plain(" "));
-                    }
-                    cell.extend(self.spans(p));
-                }
-                row.push(cell);
+            for tc in self.parts_of(tr, "tc") {
+                row.push(self.flat(tc));
             }
             rows.push(row);
         }
@@ -154,6 +322,13 @@ impl Reader<'_> {
     }
 
     fn paragraph(&mut self, p: Node, blocks: &mut Vec<Block>) {
+        self.own_text(p, blocks);
+        for text_box in text_boxes(p) {
+            self.blocks(text_box, blocks);
+        }
+    }
+
+    fn own_text(&mut self, p: Node, blocks: &mut Vec<Block>) {
         let ppr = w(p, "pPr");
         let style = ppr
             .and_then(|x| w(x, "pStyle"))
@@ -182,18 +357,16 @@ impl Reader<'_> {
             let id = w(n, "numId")
                 .and_then(|x| x.attribute((W, "val")))
                 .unwrap_or("");
-            let ordered = self.ordered.get(id).copied().unwrap_or(false);
-            let item = vec![Block::Paragraph(spans)];
-            if let Some(Block::List { ordered: o, items }) = blocks.last_mut()
-                && *o == ordered
-            {
-                items.push(item);
-                return;
-            }
-            blocks.push(Block::List {
-                ordered,
-                items: vec![item],
-            });
+            let level = w(n, "ilvl")
+                .and_then(|x| x.attribute((W, "val")))
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0);
+            let levels = self.ordered.get(id);
+            let ordered = levels
+                .and_then(|l| l.get(level).or(l.first()))
+                .copied()
+                .unwrap_or(false);
+            add_item(blocks, level, ordered, vec![Block::Paragraph(spans)]);
             return;
         }
         let lower = style.to_lowercase();
@@ -242,8 +415,8 @@ fn heading_styles(pkg: &Package) -> HashMap<String, u8> {
     out
 }
 
-/// numId -> ordered, following numId -> abstractNum -> level 0 format.
-fn numbering(pkg: &Package) -> HashMap<String, bool> {
+/// numId -> ordered at each level, following numId -> abstractNum -> formats.
+fn numbering(pkg: &Package) -> HashMap<String, Vec<bool>> {
     let mut out = HashMap::new();
     let Some(text) = pkg.text("word/numbering.xml") else {
         return out;
@@ -257,13 +430,17 @@ fn numbering(pkg: &Package) -> HashMap<String, bool> {
         .filter(|n| n.tag_name().name() == "abstractNum")
     {
         let id = a.attribute((W, "abstractNumId")).unwrap_or("");
-        let format = a
+        let levels: Vec<bool> = a
             .children()
-            .find(|c| c.tag_name().name() == "lvl")
-            .and_then(|l| w(l, "numFmt"))
-            .and_then(|f| f.attribute((W, "val")))
-            .unwrap_or("bullet");
-        abstract_ordered.insert(id.to_string(), format != "bullet");
+            .filter(|c| c.tag_name().name() == "lvl")
+            .map(|l| {
+                w(l, "numFmt")
+                    .and_then(|f| f.attribute((W, "val")))
+                    .unwrap_or("bullet")
+                    != "bullet"
+            })
+            .collect();
+        abstract_ordered.insert(id.to_string(), levels);
     }
     for n in doc.descendants().filter(|n| n.tag_name().name() == "num") {
         let id = n.attribute((W, "numId")).unwrap_or("");
@@ -272,7 +449,7 @@ fn numbering(pkg: &Package) -> HashMap<String, bool> {
             .unwrap_or("");
         out.insert(
             id.to_string(),
-            abstract_ordered.get(abs).copied().unwrap_or(false),
+            abstract_ordered.get(abs).cloned().unwrap_or_default(),
         );
     }
     out
@@ -310,25 +487,11 @@ pub fn read(bytes: &[u8]) -> Result<Document> {
         ordered: numbering(&pkg),
         images: vec![],
         seen: HashMap::new(),
+        notes: vec![],
     };
     let mut blocks = Vec::new();
-    for node in body.children().filter(Node::is_element) {
-        match node.tag_name().name() {
-            "p" => reader.paragraph(node, &mut blocks),
-            "tbl" => {
-                let t = reader.table(node);
-                blocks.push(t);
-            }
-            "sdt" => {
-                if let Some(content) = w(node, "sdtContent") {
-                    for p in content.children().filter(|c| c.tag_name().name() == "p") {
-                        reader.paragraph(p, &mut blocks);
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
+    reader.blocks(body, &mut blocks);
+    reader.notes(&mut blocks);
     let mut out = Document {
         blocks,
         images: reader.images,
@@ -348,6 +511,8 @@ pub fn replace(bytes: &[u8], find: &str, with: &str) -> Result<(Vec<u8>, usize)>
     for name in pkg.names() {
         let is_text_part = name == "word/document.xml"
             || (name.starts_with("word/header") && name.ends_with(".xml"))
+            || name == "word/footnotes.xml"
+            || name == "word/endnotes.xml"
             || (name.starts_with("word/footer") && name.ends_with(".xml"));
         if !is_text_part {
             continue;
@@ -390,74 +555,81 @@ fn unescape(s: &str) -> String {
         .replace("&amp;", "&")
 }
 
-/// Find `<w:t ...>text</w:t>` spans paragraph by paragraph; a match spanning
-/// runs lands in the first of them and is removed from the others.
+/// Replace paragraph by paragraph. Paragraphs nest, because a text box sits
+/// inside one, so each stretch between two paragraph tags is taken alone;
+/// otherwise the text after a text box would be missed.
 fn replace_part(xml: &str, find: &str, with: &str) -> Result<(String, usize)> {
     let t =
         regex::Regex::new(r"(<w:t(?:\s[^>]*)?>)([^<]*)(</w:t>)").map_err(|e| bad("regex", e))?;
-    let para = regex::Regex::new(r"(?s)<w:p[ >].*?</w:p>").map_err(|e| bad("regex", e))?;
+    let edge = regex::Regex::new(r"<w:p(?:\s[^>]*)?/?>|</w:p>").map_err(|e| bad("regex", e))?;
     let mut total = 0;
     let mut out = String::with_capacity(xml.len());
     let mut last = 0;
-    for m in para.find_iter(xml) {
-        out.push_str(&xml[last..m.start()]);
-        last = m.end();
-        let p = m.as_str();
-        let pieces: Vec<(usize, usize, String)> = t
-            .captures_iter(p)
-            .map(|c| {
-                let g = c.get(2).expect("group");
-                (g.start(), g.end(), unescape(g.as_str()))
-            })
-            .collect();
-        let joined: String = pieces.iter().map(|x| x.2.as_str()).collect();
-        let n = joined.matches(find).count();
-        if n == 0 {
-            out.push_str(p);
-            continue;
-        }
+    for m in edge.find_iter(xml) {
+        let (text, n) = replace_stretch(&xml[last..m.start()], &t, find, with);
+        out.push_str(&text);
+        out.push_str(m.as_str());
         total += n;
-        // Walk the matches, mapping them back onto the pieces.
-        let mut new_text: Vec<String> = pieces.iter().map(|x| x.2.clone()).collect();
-        let starts: Vec<usize> = pieces
-            .iter()
-            .scan(0, |at, x| {
-                let s = *at;
-                *at += x.2.len();
-                Some(s)
-            })
-            .collect();
-        let hits: Vec<usize> = joined.match_indices(find).map(|(i, _)| i).collect();
-        for &hit in hits.iter().rev() {
-            let end = hit + find.len();
-            let mut placed = false;
-            for i in (0..pieces.len()).rev() {
-                let (s, e) = (starts[i], starts[i] + pieces[i].2.len());
-                if e <= hit || s >= end {
-                    continue;
-                }
-                let (from, to) = (hit.max(s) - s, end.min(e) - s);
-                let is_first = hit >= s;
-                let piece = &mut new_text[i];
-                let replacement = if is_first { with } else { "" };
-                piece.replace_range(from..to, replacement);
-                placed |= is_first;
-            }
-            debug_assert!(placed);
-        }
-        let mut rebuilt = String::with_capacity(p.len());
-        let mut at = 0;
-        for (i, (s, e, _)) in pieces.iter().enumerate() {
-            rebuilt.push_str(&p[at..*s]);
-            rebuilt.push_str(&escape(&new_text[i]));
-            at = *e;
-        }
-        rebuilt.push_str(&p[at..]);
-        // Spaces at the edge of a run vanish without this attribute.
-        out.push_str(&rebuilt.replace("<w:t>", "<w:t xml:space=\"preserve\">"));
+        last = m.end();
     }
-    out.push_str(&xml[last..]);
-    Ok((out, total))
+    let (text, n) = replace_stretch(&xml[last..], &t, find, with);
+    out.push_str(&text);
+    Ok((out, total + n))
+}
+
+/// Find `<w:t ...>text</w:t>` spans in one stretch of a paragraph; a match
+/// spanning runs lands in the first of them and is removed from the others.
+fn replace_stretch(p: &str, t: &regex::Regex, find: &str, with: &str) -> (String, usize) {
+    let pieces: Vec<(usize, usize, String)> = t
+        .captures_iter(p)
+        .map(|c| {
+            let g = c.get(2).expect("group");
+            (g.start(), g.end(), unescape(g.as_str()))
+        })
+        .collect();
+    let joined: String = pieces.iter().map(|x| x.2.as_str()).collect();
+    let n = joined.matches(find).count();
+    if n == 0 {
+        return (p.to_string(), 0);
+    }
+    // Walk the matches, mapping them back onto the pieces.
+    let mut new_text: Vec<String> = pieces.iter().map(|x| x.2.clone()).collect();
+    let starts: Vec<usize> = pieces
+        .iter()
+        .scan(0, |at, x| {
+            let s = *at;
+            *at += x.2.len();
+            Some(s)
+        })
+        .collect();
+    let hits: Vec<usize> = joined.match_indices(find).map(|(i, _)| i).collect();
+    for &hit in hits.iter().rev() {
+        let end = hit + find.len();
+        let mut placed = false;
+        for i in (0..pieces.len()).rev() {
+            let (s, e) = (starts[i], starts[i] + pieces[i].2.len());
+            if e <= hit || s >= end {
+                continue;
+            }
+            let (from, to) = (hit.max(s) - s, end.min(e) - s);
+            let is_first = hit >= s;
+            let piece = &mut new_text[i];
+            let replacement = if is_first { with } else { "" };
+            piece.replace_range(from..to, replacement);
+            placed |= is_first;
+        }
+        debug_assert!(placed);
+    }
+    let mut rebuilt = String::with_capacity(p.len());
+    let mut at = 0;
+    for (i, (s, e, _)) in pieces.iter().enumerate() {
+        rebuilt.push_str(&p[at..*s]);
+        rebuilt.push_str(&escape(&new_text[i]));
+        at = *e;
+    }
+    rebuilt.push_str(&p[at..]);
+    // Spaces at the edge of a run vanish without this attribute.
+    (rebuilt.replace("<w:t>", "<w:t xml:space=\"preserve\">"), n)
 }
 
 // ------------------------------------------------------------------ writer
@@ -497,6 +669,9 @@ impl Writer<'_> {
         if s.italic {
             props.push_str("<w:i/>");
         }
+        if s.strike {
+            props.push_str("<w:strike/>");
+        }
         if s.code {
             props.push_str(
                 "<w:rFonts w:ascii=\"Consolas\" w:hAnsi=\"Consolas\" w:cs=\"Consolas\"/>",
@@ -523,7 +698,10 @@ impl Writer<'_> {
         let file = name.rsplit('/').next().unwrap_or(name).to_string();
         let target = format!("media/{file}");
         let rid = self.rel("image", &target, false);
-        self.media.push((file.clone(), &image.bytes));
+        // A picture used twice is one file with two references.
+        if !self.media.iter().any(|(name, _)| *name == file) {
+            self.media.push((file.clone(), &image.bytes));
+        }
         self.picture += 1;
         let (w, h) = image_size(&image.bytes).unwrap_or((640, 480));
         // 96 dpi to EMU, limited to the text width of a 6.5 inch column.

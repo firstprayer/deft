@@ -1,4 +1,4 @@
-use super::_common::{IN, text};
+use super::_common::{IN, MAIN, content, text};
 use crate::generated::md::_common::load_images;
 use deft_core::prelude::*;
 use deft_tools_doc::Document;
@@ -9,6 +9,7 @@ pub static OP: Op = Op {
     input: Input::each(IN, "html"),
     output: Output::one(&[Format::Docx], "docx"),
     mounts: &["doc from-html"],
+    params: &[MAIN],
     converts: &[Edge {
         from: IN,
         to: &[Format::Docx],
@@ -21,19 +22,20 @@ pub static OP: Op = Op {
 };
 
 fn run(job: &Job) -> Result<OpResult> {
-    let html = text(job.input())?;
-    let md = deft_tools_doc::html::to_markdown(&html)?;
+    let md = deft_tools_doc::html::to_markdown(&content(job)?)?;
     let mut blocks = deft_tools_doc::markdown::parse(&md);
     let base = job.input().path.as_ref().and_then(|p| p.parent());
-    let images = load_images(&mut blocks, base);
+    let (images, warnings) = load_images(&mut blocks, base);
     let doc = Document {
-        title: deft_tools_doc::html::title(&html),
+        title: deft_tools_doc::html::title(&text(job.input())?),
         blocks,
         images,
         ..Default::default()
     };
-    Ok(OpResult::one(Produced::bytes(
+    let mut res = OpResult::one(Produced::bytes(
         deft_tools_doc::docx::write(&doc)?,
         Format::Docx,
-    )))
+    ));
+    res.warnings = warnings;
+    Ok(res)
 }

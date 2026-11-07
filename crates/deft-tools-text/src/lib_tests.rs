@@ -44,3 +44,13 @@ fn output_is_reproducible() {
     let b = to_pdf(SAMPLE, None, &PdfStyle::default()).unwrap();
     assert_eq!(a.bytes, b.bytes);
 }
+
+#[test]
+fn long_text_gets_places_to_break() {
+    let url = format!("https://example.com/{}", "a".repeat(100));
+    let out = breakable(&url);
+    assert_eq!(out.matches('\u{200B}').count(), 3);
+    assert_eq!(out.replace('\u{200B}', ""), url);
+    let plain = "short words stay as they are";
+    assert_eq!(breakable(plain), plain);
+}
