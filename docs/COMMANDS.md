@@ -106,7 +106,7 @@ Trim, merge, convert, compress, subtitles, GIF, frames (ffmpeg)
 
 ## audio
 
-Convert, trim, tag, normalize, denoise, cut silence (ffmpeg)
+Convert, trim, normalize, denoise, cut silence (ffmpeg)
 
 | Command | What it does | Needs | Example |
 |---|---|---|---|
@@ -116,7 +116,6 @@ Convert, trim, tag, normalize, denoise, cut silence (ffmpeg)
 | `deft audio normalize` | Even out loudness (EBU R128) | ffmpeg, ffprobe | `deft audio normalize tone.mp3 -o level.mp3` |
 | `deft audio remove-silence` | Cut silent parts: --threshold -40 --min-silence 0.5 | ffmpeg, ffprobe | `deft audio remove-silence gaps.wav -o tight.wav` |
 | `deft audio split` | Cut out a part: --from 0:10 --to-time 0:25 | ffmpeg, ffprobe | `deft audio split tone.mp3 --from 0:00 --to-time 0:01 -o part.mp3` |
-| `deft audio tag` | Set tags: --title --artist --album --year, cover --image | ffmpeg, ffprobe | `deft audio tag tone.mp3 --title Hello --artist Ada --year 2026 -o tagged.mp3` |
 
 ## doc
 
@@ -216,24 +215,6 @@ EML files: text and attachments
 |---|---|---|---|
 | `deft email attachments` | Save the attached files |  | `deft email attachments message.eml -o files/` |
 | `deft email to-text` | The message as text, with its headers |  | `deft email to-text message.eml -o message.txt` |
-
-## contact
-
-VCF address books: to and from CSV
-
-| Command | What it does | Needs | Example |
-|---|---|---|---|
-| `deft contact from-csv` | Make a VCF address book from a table |  | `deft contact from-csv addresses.csv -o book.vcf` |
-| `deft contact to-csv` | Turn a VCF address book into a table |  | `deft contact to-csv contacts.vcf -o contacts.csv` |
-
-## calendar
-
-ICS calendars: to and from CSV
-
-| Command | What it does | Needs | Example |
-|---|---|---|---|
-| `deft calendar from-csv` | Make an ICS calendar from a table |  | `deft calendar from-csv schedule.csv -o plan.ics` |
-| `deft calendar to-csv` | Turn an ICS calendar into a table, by start time |  | `deft calendar to-csv events.ics -o events.csv` |
 
 ## gps
 

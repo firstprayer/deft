@@ -8,7 +8,7 @@ Groups:
   pdf      Merge, split, compress, encrypt, forms, OCR, compare, convert
   image    Resize, crop, convert, compress, adjust, montage, OCR
   video    Trim, merge, convert, compress, subtitles, GIF, frames (ffmpeg)
-  audio    Convert, trim, tag, normalize, denoise, cut silence (ffmpeg)
+  audio    Convert, trim, normalize, denoise, cut silence (ffmpeg)
   doc      Word/ODT/RTF: to text, Markdown, HTML, PDF; find and replace
   slides   PowerPoint: extract text, Markdown outline
   data     JSON/YAML/TOML/XML: convert, format, merge, diff, validate
@@ -17,8 +17,6 @@ Groups:
   html     HTML to Markdown, text, Word and PDF
   epub     E-books: info, to text, Markdown and PDF
   email    EML files: text and attachments
-  contact  VCF address books: to and from CSV
-  calendar ICS calendars: to and from CSV
   gps      GPX and KML tracks: convert, distance and time
   file     Any file: find duplicates, fix text encoding
   qr       Create QR codes and barcodes; read QR codes

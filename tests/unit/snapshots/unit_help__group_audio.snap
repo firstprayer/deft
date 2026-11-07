@@ -9,5 +9,4 @@ deft audio - commands (input -> output)
   normalize       audio -> audio   Even out loudness (EBU R128)
   remove-silence  audio -> audio   Cut silent parts: --threshold -40 --min-silence 0.5
   split           audio -> audio   Cut out a part: --from 0:10 --to-time 0:25
-  tag             audio -> audio   Set tags: --title --artist --album --year, cover --image
 More: deft audio <command> --help

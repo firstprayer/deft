@@ -25,7 +25,6 @@ make this recording louder | audio normalize
 make all my podcast episodes the same volume | audio normalize
 cut out the silent parts | audio remove-silence
 convert wav to mp3 | audio convert
-set the artist and album on an mp3 | audio tag
 shrink this pdf | pdf compress
 my pdf is too big to email | pdf compress
 combine these pdfs into one | pdf merge
@@ -57,11 +56,6 @@ translate this pdf to french | -
 transcribe this audio | -
 sign a pdf | -
 speech to text | -
-vcf to csv | contact to-csv
-export my contacts to excel | contact to-csv
-csv to vcf | contact from-csv
-ics to csv | calendar to-csv
-turn this spreadsheet into calendar events | calendar from-csv
 gpx to kml | gps convert
 how far was this ride | gps info
 extract all the tables from a pdf | pdf extract-sheets

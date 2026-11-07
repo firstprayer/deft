@@ -6,10 +6,7 @@ use deft_core::format::Format;
 use serde_json::{Map, Value, json};
 
 pub mod geo;
-pub mod ical;
-mod lines;
 mod query;
-pub mod vcard;
 mod xml;
 
 pub use query::query;
