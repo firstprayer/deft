@@ -29,6 +29,12 @@ Deft follows semantic versioning. Before 1.0, a minor version may change command
 
 ### Fixed
 
+- `sheet query` runs on SQLite compiled into deft, so it no longer needs the `sqlite3` program. Numbers keep every digit, identifiers such as 007 stay text, empty cells are NULL, every sheet of a workbook is a table, repeated headers work and `--sheet` is new. A SQLite file is opened read-only.
+- Report commands write their result as JSON with `-o name.json` instead of ignoring `-o`.
+- Text options keep their spaces, so `doc replace --find ' '` works.
+- `sheet merge` lines columns up by header. `sheet extract --range` counts from A1 when a sheet starts later. Comma decimals in semicolon files are numbers, and ids such as 12E3 stay text.
+- UTF-16 text is no longer taken for MP3. `deft info` identifies locked PDFs and directories.
+- `deft convert` writes every page into a directory. `data format` keeps YAML documents apart and warns about comments.
 - `video from-images` keeps every picture. Pictures of different sizes in one format could be dropped, so a slideshow came out too short.
 - `video chunk` cuts equal parts. A part could run on to the next cut, giving 6, 3 and 1 seconds instead of 3, 3, 3 and 1.
 

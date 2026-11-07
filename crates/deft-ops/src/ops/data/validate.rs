@@ -6,7 +6,11 @@ pub static OP: Op = Op {
     summary: "Check syntax, or a JSON Schema with --schema",
     input: Input::each(IN, "data"),
     output: Output::report(),
-    params: &[param("schema", Kind::Path, "JSON Schema file")],
+    params: &[param(
+        "schema",
+        Kind::Path,
+        "JSON Schema file, in JSON or YAML",
+    )],
     examples: &[
         "deft data validate config.yaml settings.toml",
         "deft data validate config.yaml --schema server.schema.json",
@@ -23,7 +27,8 @@ fn run(job: &Job) -> Result<OpResult> {
     if let Some(path) = job.params.opt_path("schema") {
         let bytes = std::fs::read(&path)
             .map_err(|e| bad_value("schema", format!("{}: {e}", path.display())))?;
-        let schema = deft_tools_data::parse(&bytes, Format::Json)?;
+        let format = Format::from_path(&path).unwrap_or(Format::Json);
+        let schema = deft_tools_data::parse(&bytes, format)?;
         let problems = deft_tools_data::validate_schema(&value, &schema)?;
         if !problems.is_empty() {
             return Err(err(

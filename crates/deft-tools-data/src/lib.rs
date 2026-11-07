@@ -46,7 +46,8 @@ pub fn parse(bytes: &[u8], format: Format) -> Result<Value> {
     }
 }
 
-fn parse_yaml(bytes: &[u8]) -> Result<Value> {
+/// Every document of a YAML file.
+pub fn yaml_documents(bytes: &[u8]) -> Result<Vec<Value>> {
     use serde::Deserialize;
     let mut docs = Vec::new();
     for doc in serde_yaml::Deserializer::from_slice(bytes) {
@@ -54,6 +55,11 @@ fn parse_yaml(bytes: &[u8]) -> Result<Value> {
         v.apply_merge().map_err(|e| bad(Format::Yaml, e))?;
         docs.push(from_yaml(v));
     }
+    Ok(docs)
+}
+
+fn parse_yaml(bytes: &[u8]) -> Result<Value> {
+    let mut docs = yaml_documents(bytes)?;
     Ok(match docs.len() {
         0 => Value::Null,
         1 => docs.remove(0),
@@ -96,6 +102,50 @@ fn from_toml(v: toml::Value) -> Value {
         T::Array(a) => Value::Array(a.into_iter().map(from_toml).collect()),
         T::Table(t) => Value::Object(t.into_iter().map(|(k, v)| (k, from_toml(v))).collect()),
     }
+}
+
+/// True when a line of YAML or TOML has a comment, outside quotes.
+fn has_comment(line: &str) -> bool {
+    let mut quote = None;
+    let mut before = ' ';
+    for c in line.chars() {
+        match quote {
+            Some(q) if c == q => quote = None,
+            Some(_) => {}
+            None if c == '"' || c == '\'' => quote = Some(c),
+            None if c == '#' && before.is_whitespace() => return true,
+            None => {}
+        }
+        before = c;
+    }
+    false
+}
+
+/// A YAML value such as 1.10, which reads as the number 1.1.
+fn has_trailing_zero(line: &str) -> bool {
+    let value = line.rsplit([':', '-']).next().unwrap_or_default().trim();
+    let number = value.split_once('.').is_some_and(|(a, b)| {
+        !a.is_empty() && a.bytes().chain(b.bytes()).all(|c| c.is_ascii_digit())
+    });
+    number && value.ends_with('0')
+}
+
+/// What reading a document drops, because the value model cannot hold it.
+pub fn lost_on_reading(bytes: &[u8], format: Format) -> Vec<String> {
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return vec![];
+    };
+    let mut lost = Vec::new();
+    if matches!(format, Format::Yaml | Format::Toml) && text.lines().any(has_comment) {
+        lost.push("comments are not kept".to_string());
+    }
+    if format == Format::Yaml && text.lines().any(has_trailing_zero) {
+        lost.push("a number such as 1.10 is written 1.1; quote it to keep the zero".to_string());
+    }
+    if format == Format::Xml {
+        lost.extend(xml::lost(text));
+    }
+    lost
 }
 
 /// How `render` lays out a document.
@@ -347,8 +397,10 @@ fn walk_diff(path: &str, a: &Value, b: &Value, out: &mut Vec<Change>) {
             }
         }
         (Value::Array(x), Value::Array(y)) => {
+            // jq needs the dot when the document itself is a list.
+            let base = if path.is_empty() { "." } else { path };
             for i in 0..x.len().max(y.len()) {
-                let p = format!("{path}[{i}]");
+                let p = format!("{base}[{i}]");
                 match (x.get(i), y.get(i)) {
                     (Some(va), Some(vb)) => walk_diff(&p, va, vb, out),
                     (Some(va), None) => out.push(Change {

@@ -1,4 +1,4 @@
-use super::_common::{IN, OUT, load, target, write};
+use super::_common::{IN, OUT, load, write};
 use deft_core::prelude::*;
 
 pub static OP: Op = Op {
@@ -36,5 +36,5 @@ fn run(job: &Job) -> Result<OpResult> {
     for next in all {
         deft_tools_data::merge(&mut value, next?, append);
     }
-    write(&value, target(job), Default::default())
+    write(job, &value, Default::default())
 }
