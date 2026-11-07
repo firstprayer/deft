@@ -218,7 +218,7 @@ pub fn read_csv(bytes: &[u8], name: &str) -> Result<Table> {
     for rec in r.records() {
         let rec = rec.map_err(|e| match e.kind() {
             csv::ErrorKind::Utf8 { .. } => err(ErrorCode::InputCorrupt, "csv: not UTF-8 text")
-                .hint("convert it first: deft file encoding <file> -o utf8.csv"),
+                .hint("convert it to UTF-8 first, for example with iconv"),
             _ => err(ErrorCode::InputCorrupt, format!("csv: {e}")),
         })?;
         rows.push(

@@ -49,9 +49,8 @@ read the text in this screenshot | image ocr
 convert csv to excel | sheet convert
 make a pivot table | sheet pivot
 turn markdown into a pdf | md to-pdf
-find duplicate files | file duplicates
 make a qr code | qr create
-convert yaml to json | data convert
+convert yaml to json | yaml convert
 translate this pdf to french | -
 transcribe this audio | -
 sign a pdf | -

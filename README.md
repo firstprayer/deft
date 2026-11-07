@@ -48,7 +48,7 @@ deft video add-subtitles talk.mp4 --subtitles talk.srt -o subtitled.mp4
 deft md to-pdf notes.md
 deft convert notes.md -o notes.pdf
 deft sheet query sales.xlsx --sql "select city, sum(amount) from sales group by city" -o totals.csv
-deft data convert config.yaml --to json -o config.json
+deft yaml convert config.yaml --to json -o config.json
 deft pdf fill form.pdf --data values.json --flatten -o filled.pdf
 ```
 

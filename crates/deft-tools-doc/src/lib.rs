@@ -4,7 +4,6 @@
 use deft_core::error::{ErrorCode, err};
 
 pub mod docx;
-pub mod email;
 pub mod epub;
 pub mod html;
 pub mod markdown;

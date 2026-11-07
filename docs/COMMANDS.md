@@ -142,17 +142,17 @@ PowerPoint: extract text, Markdown outline
 | `deft slides to-md` | Outline in Markdown: a heading per slide, bullets, images |  | `deft slides to-md deck.pptx -o deck.md` |
 | `deft slides to-text` | Extract the text of every slide, form feed between slides |  | `deft slides to-text deck.pptx --notes -o deck.txt` |
 
-## data
+## json
 
-JSON/YAML/TOML/XML: convert, format, merge, diff, validate
+JSON: convert, format, merge, diff, validate
 
 | Command | What it does | Needs | Example |
 |---|---|---|---|
-| `deft data convert` | Change format: --to json\|yaml\|toml\|xml\|jsonl |  | `deft data convert config.yaml -o settings.json` |
-| `deft data diff` | Compare two documents by structure, across formats |  | `deft data diff config.yaml override.yaml` |
-| `deft data format` | Pretty-print or minify: --compact, --sort-keys |  | `deft data format messy.json -o tidy.json` |
-| `deft data merge` | Deep-merge documents; later files win |  | `deft data merge config.yaml override.yaml -o merged.yaml` |
-| `deft data validate` | Check syntax, or a JSON Schema with --schema |  | `deft data validate config.yaml settings.toml` |
+| `deft json convert` | Change format: --to json\|jsonl\|yaml\|toml\|xml |  | `deft json convert messy.json --to yaml -o out.yaml` |
+| `deft json diff` | Compare two files by structure |  | `deft json diff messy.json override.json` |
+| `deft json format` | Pretty-print or minify: --compact, --sort-keys |  | `deft json format messy.json -o tidy.json` |
+| `deft json merge` | Deep-merge files; later files win |  | `deft json merge messy.json override.json -o merged.json` |
+| `deft json validate` | Check syntax, or a JSON Schema with --schema |  | `deft json validate messy.json` |
 
 ## sheet
 
@@ -169,6 +169,42 @@ Excel/CSV/ODS tables: SQL query, pivot, merge, split, convert
 | `deft sheet split` | Split up: --sheets, --columns city or --every 1000 |  | `deft sheet split book.xlsx --sheets -o parts/` |
 | `deft sheet stats` | Per-column counts, empties, min, max, mean, sum |  | `deft sheet stats people.csv` |
 | `deft sheet to-md` | Markdown table (first row is the header) |  | `deft sheet to-md people.csv -o people.md` |
+
+## yaml
+
+YAML: convert, format, merge, diff, validate
+
+| Command | What it does | Needs | Example |
+|---|---|---|---|
+| `deft yaml convert` | Change format: --to json\|toml\|xml\|jsonl |  | `deft yaml convert config.yaml --to json -o out.json` |
+| `deft yaml diff` | Compare two files by structure |  | `deft yaml diff config.yaml override.yaml` |
+| `deft yaml format` | Tidy a file: --sort-keys |  | `deft yaml format config.yaml -o tidy.yaml` |
+| `deft yaml merge` | Deep-merge files; later files win |  | `deft yaml merge config.yaml override.yaml -o merged.yaml` |
+| `deft yaml validate` | Check syntax, or a JSON Schema with --schema |  | `deft yaml validate config.yaml` |
+
+## toml
+
+TOML: convert, format, merge, diff, validate
+
+| Command | What it does | Needs | Example |
+|---|---|---|---|
+| `deft toml convert` | Change format: --to json\|yaml\|xml\|jsonl |  | `deft toml convert settings.toml --to json -o out.json` |
+| `deft toml diff` | Compare two files by structure |  | `deft toml diff settings.toml override.toml` |
+| `deft toml format` | Tidy a file: --sort-keys |  | `deft toml format settings.toml -o tidy.toml` |
+| `deft toml merge` | Deep-merge files; later files win |  | `deft toml merge settings.toml override.toml -o merged.toml` |
+| `deft toml validate` | Check syntax, or a JSON Schema with --schema |  | `deft toml validate settings.toml` |
+
+## xml
+
+XML: convert, format, merge, diff, validate
+
+| Command | What it does | Needs | Example |
+|---|---|---|---|
+| `deft xml convert` | Change format: --to json\|yaml\|toml\|jsonl |  | `deft xml convert shop.xml --to json -o out.json` |
+| `deft xml diff` | Compare two files by structure |  | `deft xml diff shop.xml override.xml` |
+| `deft xml format` | Tidy a file: --sort-keys |  | `deft xml format shop.xml -o tidy.xml` |
+| `deft xml merge` | Deep-merge files; later files win |  | `deft xml merge shop.xml override.xml -o merged.xml` |
+| `deft xml validate` | Check syntax, or a JSON Schema with --schema |  | `deft xml validate shop.xml` |
 
 ## md
 
@@ -207,15 +243,6 @@ E-books: info, to text, Markdown and PDF
 | `deft epub to-pdf` | Typeset the book as PDF |  | `deft epub to-pdf book.epub -o book.pdf` |
 | `deft epub to-text` | Extract plain text in reading order |  | `deft epub to-text book.epub -o book.txt` |
 
-## email
-
-EML files: text and attachments
-
-| Command | What it does | Needs | Example |
-|---|---|---|---|
-| `deft email attachments` | Save the attached files |  | `deft email attachments message.eml -o files/` |
-| `deft email to-text` | The message as text, with its headers |  | `deft email to-text message.eml -o message.txt` |
-
 ## gps
 
 GPX and KML tracks: convert, distance and time
@@ -224,15 +251,6 @@ GPX and KML tracks: convert, distance and time
 |---|---|---|---|
 | `deft gps info` | Distance, time, climb and point counts |  | `deft gps info ride.gpx` |
 | `deft gps convert` | Change format: --to gpx\|kml\|csv |  | `deft gps convert ride.gpx -o ride.kml` |
-
-## file
-
-Any file: find duplicates, fix text encoding
-
-| Command | What it does | Needs | Example |
-|---|---|---|---|
-| `deft file duplicates` | Find files with identical content; deletes nothing |  | `deft file duplicates . --json` |
-| `deft file encoding` | Convert text encoding, normally to UTF-8; fixes line endings |  | `deft file encoding latin1.txt -o fixed.txt` |
 
 ## qr
 

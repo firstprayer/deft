@@ -30,6 +30,7 @@ Deft follows semantic versioning. Before 1.0, a minor version may change command
 - The `youtube` group, `deft engine install` and `update`, `--offline` and `--install-engines`. Deft no longer touches the network.
 - Commands an agent does in one ordinary line: `file hash`, `base64`, `split`, `join`, `rename` and `organize`; `video crop`, `resize`, `rotate`, `mute`, `fade`, `repeat`, `reverse`, `stack`, `thumbnail`, `extract-audio` and `extract-subtitles`; `audio chunk`, `compress`, `fade`, `merge`, `reverse`, `speed`, `strip` and `volume`; `image diff`, `invert` and `sharpen`; `pdf grayscale` and `repair`; `data query`; `sheet transpose`; `audio tag`; `email info`.
 - `sheet filter`, `sort`, `select`, `group`, `dedupe` and `join`: `sheet query` does all of them in SQL.
+- The `email` and `file` groups.
 - Commands whose output was not good enough: `pdf to-docx`, `to-md`, `to-sheet` and `to-pdfa`; `slides to-pdf`; `md to-pptx`; `audio mix`.
 
 ### Fixed

@@ -13,4 +13,3 @@ roxmltree.workspace = true
 htmd.workspace = true
 pulldown-cmark.workspace = true
 regex.workspace = true
-mailparse.workspace = true

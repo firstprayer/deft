@@ -1,0 +1,11 @@
+---
+source: crates/deft-cli/../../tests/unit/help.rs
+expression: "help::group(g.name)"
+---
+deft yaml - commands (input -> output)
+  convert   yaml -> data       Change format: --to json|toml|xml|jsonl
+  diff      yaml... -> report  Compare two files by structure
+  format    yaml -> yaml       Tidy a file: --sort-keys
+  merge     yaml... -> yaml    Deep-merge files; later files win
+  validate  yaml -> report     Check syntax, or a JSON Schema with --schema
+More: deft yaml <command> --help

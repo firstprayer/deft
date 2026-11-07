@@ -6,5 +6,6 @@ pub mod generated {
 }
 pub mod registry;
 pub mod runtime;
+pub mod structured;
 
 pub use registry::registry;

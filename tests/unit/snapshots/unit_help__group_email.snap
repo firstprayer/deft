@@ -1,8 +1,0 @@
----
-source: crates/deft-cli/../../tests/unit/help.rs
-expression: "help::group(g.name)"
----
-deft email - commands (input -> output)
-  attachments  eml -> files...  Save the attached files
-  to-text      eml -> txt       The message as text, with its headers
-More: deft email <command> --help

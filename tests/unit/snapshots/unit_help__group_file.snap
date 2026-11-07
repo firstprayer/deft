@@ -1,8 +1,0 @@
----
-source: crates/deft-cli/../../tests/unit/help.rs
-expression: "help::group(g.name)"
----
-deft file - commands (input -> output)
-  duplicates  file... -> report  Find files with identical content; deletes nothing
-  encoding    text -> text       Convert text encoding, normally to UTF-8; fixes line endings
-More: deft file <command> --help

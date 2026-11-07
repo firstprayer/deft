@@ -1,0 +1,11 @@
+---
+source: crates/deft-cli/../../tests/unit/help.rs
+expression: "help::group(g.name)"
+---
+deft toml - commands (input -> output)
+  convert   toml -> data       Change format: --to json|yaml|xml|jsonl
+  diff      toml... -> report  Compare two files by structure
+  format    toml -> toml       Tidy a file: --sort-keys
+  merge     toml... -> toml    Deep-merge files; later files win
+  validate  toml -> report     Check syntax, or a JSON Schema with --schema
+More: deft toml <command> --help

@@ -16,14 +16,15 @@ Groups:
 - `audio`: Convert, trim, normalize, denoise, cut silence (ffmpeg)
 - `doc`: Word/ODT/RTF: to text, Markdown, HTML, PDF; find and replace
 - `slides`: PowerPoint: extract text, Markdown outline
-- `data`: JSON/YAML/TOML/XML: convert, format, merge, diff, validate
+- `json`: JSON: convert, format, merge, diff, validate
 - `sheet`: Excel/CSV/ODS tables: SQL query, pivot, merge, split, convert
+- `yaml`: YAML: convert, format, merge, diff, validate
+- `toml`: TOML: convert, format, merge, diff, validate
+- `xml`: XML: convert, format, merge, diff, validate
 - `md`: Markdown to PDF, HTML, Word, EPUB; table of contents
 - `html`: HTML to Markdown, text, Word and PDF
 - `epub`: E-books: info, to text, Markdown and PDF
-- `email`: EML files: text and attachments
 - `gps`: GPX and KML tracks: convert, distance and time
-- `file`: Any file: find duplicates, fix text encoding
 - `qr`: Create QR codes and barcodes; read QR codes
 
 How to use it:
