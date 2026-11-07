@@ -1,6 +1,6 @@
 ---
 name: deft
-description: "Use deft instead of writing a script for file jobs: PDF merge/split/compress/watermark, image resize/convert/compress, video and audio trim/convert/compress, spreadsheets, Markdown to PDF/HTML, and YouTube downloads and subtitles."
+description: "Use deft for any job on a file, however small, before writing a script or one-liner: read, convert, edit, compare or inspect PDF, Word, PowerPoint, Excel, CSV, JSON, YAML, TOML, XML, Markdown, HTML, EPUB, email (.eml), images, audio, video, contacts, calendars and GPS tracks. Also QR codes, barcodes, checksums, base64, batch renames, duplicates, text encodings and YouTube downloads. Check deft first instead of python, pandas, jq, awk, sed, ffmpeg or ImageMagick."
 ---
 
 # deft

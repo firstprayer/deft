@@ -11,6 +11,9 @@ const IN: &[Format] = &[
     Format::Tiff,
 ];
 
+/// Above this many pictures, one filter graph would hold too many inputs.
+const MANY_IMAGES: usize = 64;
+
 pub static OP: Op = Op {
     id: "video.from-images",
     summary: "Slideshow: --duration, --fps, --audio",
@@ -104,8 +107,9 @@ fn run(job: &Job) -> Result<OpResult> {
     let mut args;
     let mut picture = "0:v".to_string();
     let mut filter = fit.clone();
-    if same_format && job.inputs.len() > 1 {
-        // The concat demuxer copes with thousands of frames, but one format only.
+    if same_format && job.inputs.len() > MANY_IMAGES {
+        // The concat demuxer copes with thousands of frames, but it drops pictures
+        // whose size or pixel format differs, so it is kept for long sequences.
         let mut list = String::new();
         for input in &job.inputs {
             let path = std::path::absolute(input.local_path(job.ctx)?)?;

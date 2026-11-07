@@ -25,6 +25,7 @@ Deft follows semantic versioning. Before 1.0, a minor version may change command
 
 ### Fixed
 
+- `video from-images` keeps every picture. Pictures of different sizes in one format could be dropped, so a slideshow came out too short.
 - `video chunk` cuts equal parts. A part could run on to the next cut, giving 6, 3 and 1 seconds instead of 3, 3, 3 and 1.
 
 ## 0.1.0
