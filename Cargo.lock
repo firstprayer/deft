@@ -956,6 +956,7 @@ dependencies = [
  "hayro 0.8.0",
  "image",
  "lopdf",
+ "roxmltree 0.21.2",
  "serde_json",
  "similar",
  "unicode-normalization",

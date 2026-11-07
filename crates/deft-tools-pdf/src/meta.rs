@@ -4,7 +4,8 @@ use crate::{deref, text_string};
 use deft_core::error::{ErrorCode, Result, err};
 use lopdf::encryption::crypt_filters::{Aes256CryptFilter, CryptFilter};
 use lopdf::{
-    Dictionary, Document, EncryptionState, EncryptionVersion, Object, Permissions, StringFormat,
+    Dictionary, Document, EncryptionState, EncryptionVersion, Object, ObjectId, Permissions,
+    StringFormat,
 };
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -20,7 +21,8 @@ pub const FIELDS: &[(&str, &[u8])] = &[
     ("modified", b"ModDate"),
 ];
 
-/// The document information dictionary as (name, value) pairs.
+/// The document's metadata as (name, value) pairs: the information
+/// dictionary, and the XMP packet for what the dictionary lacks.
 pub fn read(doc: &Document) -> Vec<(&'static str, String)> {
     let info = doc
         .trailer
@@ -28,16 +30,32 @@ pub fn read(doc: &Document) -> Vec<(&'static str, String)> {
         .ok()
         .map(|o| deref(doc, o))
         .and_then(|o| o.as_dict().ok());
-    let Some(info) = info else {
-        return vec![];
-    };
+    let packet = xmp_packet(doc).map(|p| p.1);
     FIELDS
         .iter()
         .filter_map(|(name, key)| {
-            let text = text_string(doc, info.get(key).ok()?)?;
-            (!text.trim().is_empty()).then_some((*name, text))
+            let text = info
+                .and_then(|i| text_string(doc, i.get(key).ok()?))
+                .filter(|t| !t.trim().is_empty())
+                .or_else(|| crate::xmp::read(packet.as_deref()?, key))?;
+            Some((*name, text))
         })
         .collect()
+}
+
+/// The catalog's XMP packet, as text.
+fn xmp_packet(doc: &Document) -> Option<(ObjectId, String)> {
+    let id = doc
+        .catalog()
+        .ok()?
+        .get(b"Metadata")
+        .ok()?
+        .as_reference()
+        .ok()?;
+    let stream = doc.get_object(id).ok()?.as_stream().ok()?;
+    let bytes = stream.get_plain_content().ok()?;
+    let text = String::from_utf8(bytes).ok()?;
+    Some((id, text.trim_start_matches('\u{FEFF}').to_string()))
 }
 
 /// A text string: PDFDocEncoding for ASCII, UTF-16 for anything else.
@@ -60,9 +78,9 @@ fn drop_xmp(doc: &mut Document) {
     crate::prune(doc);
 }
 
-/// Set fields, leaving the others alone. An XMP packet would contradict the
-/// new values, so it goes.
-pub fn write(doc: &mut Document, fields: &[(&[u8], String)]) -> Result<()> {
+/// Set fields, leaving the others alone, in the information dictionary and
+/// the XMP packet. Returns warnings.
+pub fn write(doc: &mut Document, fields: &[(&[u8], String)]) -> Result<Vec<String>> {
     let info_id = match doc.trailer.get(b"Info").and_then(Object::as_reference) {
         Ok(id) => id,
         Err(_) => {
@@ -77,8 +95,28 @@ pub fn write(doc: &mut Document, fields: &[(&[u8], String)]) -> Result<()> {
     for (key, value) in fields {
         info.set(key.to_vec(), text_object(value));
     }
-    drop_xmp(doc);
-    Ok(())
+    let Some((id, packet)) = xmp_packet(doc) else {
+        return Ok(vec![]);
+    };
+    match crate::xmp::update(&packet, fields) {
+        Some(updated) => {
+            if let Ok(Object::Stream(s)) = doc.get_object_mut(id) {
+                s.dict.remove(b"Filter");
+                s.dict.remove(b"DecodeParms");
+                s.set_content(updated.into_bytes());
+                // Metadata stays readable as plain text.
+                s.allows_compression = false;
+            }
+            Ok(vec![])
+        }
+        None => {
+            // A packet that contradicts the new values must not stay.
+            drop_xmp(doc);
+            Ok(vec![
+                "the XMP metadata could not be read, so it was removed".to_string(),
+            ])
+        }
+    }
 }
 
 /// Remove the information dictionary, every XMP packet and the XFA copy of a

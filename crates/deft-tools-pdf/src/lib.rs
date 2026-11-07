@@ -15,6 +15,7 @@ pub mod meta;
 mod outline;
 pub mod pages;
 pub mod text;
+mod xmp;
 
 pub use lopdf;
 
