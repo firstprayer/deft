@@ -226,41 +226,35 @@ pub fn encrypt(
     };
     let state = EncryptionState::try_from(version)
         .map_err(|e| err(ErrorCode::Internal, format!("encryption: {e}")))?;
-    doc.encrypt(&state)
-        .map_err(|e| err(ErrorCode::Internal, format!("encryption: {e}")))?;
-    state_key_length(doc);
+    // Encrypted when saved, by `save_protected`.
+    doc.encryption_state = Some(state);
     // AES-256 needs a newer file version than many inputs declare.
     if doc.version.as_str() < "1.7" {
         doc.version = "1.7".to_string();
     }
-    // Encrypted strings must not move into object streams.
     Ok(())
 }
 
-/// PDFKit opens a file whose crypt filter has no key length, then shows blank
-/// pages. lopdf leaves it out. It is in bytes here.
-fn state_key_length(doc: &mut Document) {
-    let Ok(id) = doc.trailer.get(b"Encrypt").and_then(Object::as_reference) else {
-        return;
-    };
-    let Ok(filters) = doc
-        .get_dictionary_mut(id)
-        .and_then(|d| d.get_mut(b"CF"))
-        .and_then(Object::as_dict_mut)
-    else {
-        return;
-    };
-    for (_, filter) in filters.iter_mut() {
-        let Ok(filter) = filter.as_dict_mut() else {
-            continue;
-        };
-        let length = match filter.get(b"CFM").and_then(Object::as_name) {
-            Ok(b"AESV3") => 32,
-            Ok(b"AESV2") => 16,
-            _ => continue,
-        };
-        filter.set("Length", length);
+/// The encryption dictionary. PDFKit opens a file whose crypt filter has no
+/// key length, then shows blank pages; lopdf leaves it out. It is in bytes.
+fn encryption_dictionary(state: &EncryptionState) -> Result<Dictionary> {
+    let mut dict = state
+        .encode()
+        .map_err(|e| err(ErrorCode::Internal, format!("encryption: {e}")))?;
+    if let Ok(filters) = dict.get_mut(b"CF").and_then(Object::as_dict_mut) {
+        for (_, filter) in filters.iter_mut() {
+            let Ok(filter) = filter.as_dict_mut() else {
+                continue;
+            };
+            let length = match filter.get(b"CFM").and_then(Object::as_name) {
+                Ok(b"AESV3") => 32,
+                Ok(b"AESV2") => 16,
+                _ => continue,
+            };
+            filter.set("Length", length);
+        }
     }
+    Ok(dict)
 }
 
 /// Whether the input was password-protected (and opened with its password).
@@ -268,25 +262,15 @@ pub fn is_protected(doc: &Document) -> bool {
     doc.encryption_state.is_some()
 }
 
-/// Serialise, protected again with the input's own passwords and permissions
-/// when it had them. Only decryption should take a password away.
+/// Serialise, protected with the document's encryption: the input's own
+/// passwords and permissions, or those `encrypt` set. Only decryption should
+/// take a password away. Object streams are kept, as in an open file.
 pub fn save_protected(doc: &mut Document) -> Result<Vec<u8>> {
-    let Some(state) = doc.encryption_state.take() else {
+    let Some(state) = doc.encryption_state.clone() else {
         return crate::save(doc);
     };
     // The same file key and password entries make the same passwords open it.
-    doc.encrypt(&state)
-        .map_err(|e| err(ErrorCode::Internal, format!("encryption: {e}")))?;
-    state_key_length(doc);
-    save_encrypted(doc)
-}
-
-/// Serialise an encrypted document, which cannot use object streams.
-pub fn save_encrypted(doc: &mut Document) -> Result<Vec<u8>> {
-    let mut out = Vec::new();
-    doc.save_to(&mut out)
-        .map_err(|e| err(ErrorCode::Internal, format!("writing PDF: {e}")))?;
-    Ok(out)
+    crate::writer::write_encrypted(doc, &state, encryption_dictionary(&state)?)
 }
 
 #[cfg(test)]

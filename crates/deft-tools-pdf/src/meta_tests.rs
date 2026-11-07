@@ -35,7 +35,7 @@ fn plain_pdf(pages: usize) -> Document {
 fn aes_locked() -> Vec<u8> {
     let mut doc = plain_pdf(2);
     encrypt(&mut doc, "user", Some("owner"), true, false).unwrap();
-    save_encrypted(&mut doc).unwrap()
+    save_protected(&mut doc).unwrap()
 }
 
 /// RC4 with a 128-bit key, whose file key depends on the file ID.
@@ -49,8 +49,8 @@ fn rc4_locked() -> Vec<u8> {
         permissions: Permissions::all() - Permissions::MODIFIABLE,
     })
     .unwrap();
-    doc.encrypt(&state).unwrap();
-    save_encrypted(&mut doc).unwrap()
+    doc.encryption_state = Some(state);
+    save_protected(&mut doc).unwrap()
 }
 
 /// The /P entry of the encryption dictionary, read from the file text.
@@ -110,4 +110,27 @@ fn an_unprotected_input_is_saved_as_it_was() {
     assert!(!is_protected(&doc));
     let out = save_protected(&mut doc).unwrap();
     assert!(load(&out, None).is_ok());
+}
+
+#[test]
+fn a_protected_file_keeps_its_object_streams() {
+    let mut doc = plain_pdf(200);
+    let open = save(&mut doc).unwrap();
+    encrypt(&mut doc, "user", None, false, false).unwrap();
+    let locked = save_protected(&mut doc).unwrap();
+    // Encrypted, but about the size of the open file.
+    assert!(
+        locked.len() < open.len() * 3 / 2,
+        "{} against {}",
+        locked.len(),
+        open.len()
+    );
+    let doc = load(&locked, Some("user")).unwrap();
+    assert_eq!(page_ids(&doc).len(), 200);
+    assert!(
+        crate::extract_text(&doc, &[199])
+            .unwrap()
+            .contains("secret 199")
+    );
+    assert!(load(&locked, None).is_err());
 }
