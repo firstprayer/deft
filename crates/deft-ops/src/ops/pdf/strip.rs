@@ -16,6 +16,10 @@ pub static OP: Op = Op {
 
 fn run(job: &Job) -> Result<OpResult> {
     let mut doc = open(job.input(), job.params)?;
-    deft_tools_pdf::meta::strip(&mut doc);
-    Ok(OpResult::one(write(&mut doc)?))
+    let clean = deft_tools_pdf::meta::strip(&mut doc);
+    let mut res = OpResult::one(write(&mut doc)?);
+    if !clean {
+        res = res.warn("this XFA form keeps its own details; they are the form itself");
+    }
+    Ok(res)
 }

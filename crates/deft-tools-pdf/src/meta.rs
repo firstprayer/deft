@@ -52,10 +52,12 @@ pub(crate) fn text_object(text: &str) -> Object {
     Object::String(bytes, StringFormat::Hexadecimal)
 }
 
+/// The object goes too: lopdf writes unreferenced objects, packet and all.
 fn drop_xmp(doc: &mut Document) {
     if let Ok(catalog) = doc.catalog_mut() {
         catalog.remove(b"Metadata");
     }
+    crate::prune(doc);
 }
 
 /// Set fields, leaving the others alone. An XMP packet would contradict the
@@ -79,13 +81,78 @@ pub fn write(doc: &mut Document, fields: &[(&[u8], String)]) -> Result<()> {
     Ok(())
 }
 
-/// Remove the information dictionary and XMP metadata.
-pub fn strip(doc: &mut Document) {
+/// Remove the information dictionary, every XMP packet and the XFA copy of a
+/// form. Returns false when the form is XFA alone, whose packet has to stay.
+pub fn strip(doc: &mut Document) -> bool {
     if let Ok(id) = doc.trailer.get(b"Info").and_then(Object::as_reference) {
         doc.objects.remove(&id);
     }
     doc.trailer.remove(b"Info");
-    drop_xmp(doc);
+    for object in doc.objects.values_mut() {
+        let dict = match object {
+            Object::Dictionary(d) => d,
+            Object::Stream(s) => &mut s.dict,
+            _ => continue,
+        };
+        dict.remove(b"Metadata");
+        dict.remove(b"PieceInfo");
+    }
+    let clean = crate::forms::drop_xfa(doc);
+    crate::prune(doc);
+    clean
+}
+
+/// Take `word` out of what repeats page text outside the pages: the information
+/// dictionary, the XMP packet and bookmark titles. Returns how many places held it.
+pub fn scrub(doc: &mut Document, word: &str) -> usize {
+    let wanted = word.to_lowercase();
+    let holds = |text: &str| text.to_lowercase().contains(&wanted);
+    let mut found = 0;
+    let info = doc.trailer.get(b"Info").and_then(Object::as_reference);
+    if let Ok(id) = info {
+        let keys: Vec<Vec<u8>> = doc
+            .get_dictionary(id)
+            .map(|d| {
+                d.iter()
+                    .filter(|(_, v)| text_string(doc, v).is_some_and(|t| holds(&t)))
+                    .map(|(k, _)| k.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        found += keys.len();
+        if let Ok(d) = doc.get_dictionary_mut(id) {
+            keys.iter().for_each(|k| {
+                d.remove(k);
+            });
+        }
+    }
+    let packet = doc
+        .catalog()
+        .ok()
+        .and_then(|c| c.get(b"Metadata").ok())
+        .and_then(|o| deref(doc, o).as_stream().ok())
+        .map(|s| {
+            s.decompressed_content()
+                .unwrap_or_else(|_| s.content.clone())
+        });
+    if packet.is_some_and(|p| holds(&String::from_utf8_lossy(&p))) {
+        found += 1;
+        drop_xmp(doc);
+    }
+    for id in crate::outline::all_items(doc) {
+        let title = doc
+            .get_dictionary(id)
+            .ok()
+            .and_then(|d| d.get(b"Title").ok())
+            .and_then(|o| text_string(doc, o));
+        if title.is_some_and(|t| holds(&t))
+            && let Ok(d) = doc.get_dictionary_mut(id)
+        {
+            d.set("Title", text_object("Redacted"));
+            found += 1;
+        }
+    }
+    found
 }
 
 /// Encrypt with AES-256. `owner` falls back to `user`; printing and copying

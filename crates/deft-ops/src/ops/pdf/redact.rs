@@ -98,11 +98,24 @@ fn run(job: &Job) -> Result<OpResult> {
         );
         deft_tools_pdf::pages::replace_with_image(&mut doc, ids[i], &pic, w, h)?;
     }
+    let mut scrubbed = 0;
+    if redacted > 0 {
+        if let Some(t) = &words {
+            scrubbed = deft_tools_pdf::meta::scrub(&mut doc, t);
+        }
+        deft_tools_pdf::pages::seal_redactions(&mut doc);
+    }
     let mut res = OpResult::one(super::_common::write(&mut doc)?)
         .fact("redacted", redacted)
         .note(plural(redacted, "page"));
     if redacted == 0 {
         res = res.warn("nothing matched, so nothing was redacted");
+    }
+    if scrubbed > 0 {
+        res = res.warn(format!(
+            "also removed it from {} in the metadata or bookmarks",
+            plural(scrubbed, "place")
+        ));
     }
     Ok(res)
 }

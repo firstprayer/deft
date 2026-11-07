@@ -245,7 +245,7 @@ fn set_page_tree(doc: &mut Document, pages: &[ObjectId]) -> Result<()> {
 
 /// Drop objects unreachable from the trailer. lopdf's `prune_objects` scans a
 /// list once per object, which takes seconds on long documents.
-fn prune(doc: &mut Document) {
+pub(crate) fn prune(doc: &mut Document) {
     fn refs(o: &Object, out: &mut Vec<ObjectId>) {
         match o {
             Object::Reference(id) => out.push(*id),

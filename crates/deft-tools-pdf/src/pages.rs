@@ -261,9 +261,24 @@ pub fn replace_with_image(
         .map_err(|e| err(ErrorCode::InputCorrupt, e.to_string()))?;
     d.set("Contents", Object::Reference(stream));
     d.set("Resources", Object::Dictionary(resources));
-    d.remove(b"Annots");
-    d.remove(b"Rotate");
+    let keep: [&[u8]; 4] = [b"Type", b"Parent", b"Contents", b"Resources"];
+    d.as_hashmap_mut()
+        .retain(|k, _| keep.contains(&k.as_slice()));
     set_box(doc, page, [0.0, 0.0, w, h])
+}
+
+/// After pages became pictures, cut what still repeats them: their form fields,
+/// the XFA copy of the values and the structure tree's alternate text. Then the
+/// old content itself, which lopdf would write even with nothing pointing at it.
+pub fn seal_redactions(doc: &mut Document) {
+    let pages = crate::page_ids(doc);
+    crate::forms::keep_fields_on(doc, &pages);
+    crate::forms::remove_xfa(doc);
+    if let Ok(catalog) = doc.catalog_mut() {
+        catalog.remove(b"StructTreeRoot");
+        catalog.remove(b"MarkInfo");
+    }
+    crate::prune(doc);
 }
 
 /// The rectangle of an annotation.
