@@ -231,7 +231,8 @@ fn match_at(
 /// The text of one page.
 pub struct PageText {
     pub glyphs: Vec<Glyph>,
-    /// The height of the page as shown.
+    /// The size of the page as shown.
+    pub width: f64,
     pub height: f64,
 }
 
@@ -394,6 +395,7 @@ impl Renderer {
                 i,
                 PageText {
                     glyphs: found.glyphs,
+                    width: width as f64,
                     height: height as f64,
                 },
             );

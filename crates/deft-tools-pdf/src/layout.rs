@@ -198,13 +198,112 @@ fn is_equation(block: &[Vec<Run>]) -> bool {
         inner.is_some_and(|t| !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit()))
     };
     let formula = |r: &Run| r.text.contains(['∑', '∫', '∏']);
-    block.iter().flatten().any(formula) || block.iter().any(|l| l.last().is_some_and(numbered))
+    // Pieces of formulas: operators, arrows, brackets and equations. Matrices
+    // and cases set out in columns line up like tables.
+    let math = |r: &Run| {
+        let t = r.text.trim();
+        t.chars().any(|c| {
+            matches!(c, '\u{2190}'..='\u{22FF}' | '\u{27E8}'..='\u{27EF}' | '\u{3008}'..='\u{3009}' | '\u{FE30}'..='\u{FE4F}')
+        }) || t.starts_with('=')
+            || t.ends_with('=')
+            || t.contains(" = ")
+            || (t.chars().count() <= 2 && !t.chars().any(char::is_alphanumeric))
+    };
+    let all = block.iter().flatten().count();
+    let maths = block.iter().flatten().filter(|r| math(r)).count();
+    block.iter().flatten().any(formula)
+        || block.iter().any(|l| l.last().is_some_and(numbered))
+        || maths * 100 >= all * 35
+}
+
+/// A page number at the end of a line: 12 or xiii.
+fn page_number(text: &str) -> Option<usize> {
+    let word = text
+        .trim_end_matches([',', '.'])
+        .rsplit([' ', '.'])
+        .next()?;
+    if let Ok(n) = word.parse::<usize>() {
+        return Some(n);
+    }
+    let roman = |c: char| match c {
+        'i' => Some(1),
+        'v' => Some(5),
+        'x' => Some(10),
+        'l' => Some(50),
+        'c' => Some(100),
+        _ => None,
+    };
+    let values: Vec<usize> = word.chars().map(roman).collect::<Option<_>>()?;
+    let mut total = 0;
+    for (i, v) in values.iter().enumerate() {
+        match values.get(i + 1) {
+            Some(next) if next > v => total -= *v as isize,
+            _ => total += *v as isize,
+        }
+    }
+    // Front matter comes before page 1.
+    (!values.is_empty() && total > 0).then_some(0)
+}
+
+/// A table of contents: titles that end in page numbers going up the page.
+fn is_contents(block: &[Vec<Run>], spans: &[(f64, f64)]) -> bool {
+    if spans.len() > 3 {
+        return false;
+    }
+    let numbers: Vec<usize> = block
+        .iter()
+        .filter_map(|l| page_number(&l.last()?.text))
+        .collect();
+    let rising = numbers.windows(2).filter(|w| w[0] <= w[1]).count();
+    numbers.len() >= 4
+        && numbers.len() * 10 >= block.len() * 7
+        && rising * 10 >= (numbers.len() - 1) * 9
+}
+
+/// A numbered or bulleted list: a column of markers before a column of text.
+fn is_list(block: &[Vec<Run>], spans: &[(f64, f64)]) -> bool {
+    let marker = |t: &str| {
+        let t = t.trim();
+        let inner = t
+            .strip_suffix(['.', ')'])
+            .map(|i| i.trim_start_matches('('));
+        let numbered = inner.is_some_and(|i| {
+            !i.is_empty()
+                && i.len() <= 3
+                && (i.bytes().all(|b| b.is_ascii_digit())
+                    || i.bytes().all(|b| b.is_ascii_lowercase()))
+        });
+        numbered || matches!(t, "•" | "–" | "-" | "*" | "·")
+    };
+    let rows: Vec<&Vec<Run>> = block.iter().filter(|l| l.len() >= 2).collect();
+    let marked = rows.iter().filter(|l| marker(&l[0].text)).count();
+    spans.len() == 2 && marked * 10 >= rows.len() * 8
+}
+
+/// Two columns of running text, such as an index: cells in both are long.
+fn is_text_columns(block: &[Vec<Run>], spans: &[(f64, f64)]) -> bool {
+    if spans.len() != 2 {
+        return false;
+    }
+    let mut length = [(0usize, 0usize); 2];
+    for run in block.iter().flatten() {
+        let side = &mut length[column_of(run, spans)];
+        side.0 += run.text.chars().count();
+        side.1 += 1;
+    }
+    length.iter().all(|(chars, n)| *n > 0 && *chars > n * 15)
 }
 
 /// Whether these lines read as a table: most rows fill the columns, and cells are
 /// short. Two columns of prose line up too, but their cells are long.
 fn is_table(block: &[Vec<Run>], spans: &[(f64, f64)]) -> bool {
-    if block.len() < 3 || spans.len() < 2 || is_equation(block) {
+    if block.len() < 3
+        || spans.len() < 2
+        || is_equation(block)
+        || is_contents(block, spans)
+        || is_list(block, spans)
+        || is_text_columns(block, spans)
+    {
         return false;
     }
     let all: Vec<&Run> = block.iter().flatten().collect();
@@ -388,8 +487,79 @@ fn page_tables(lines: &[Vec<Run>]) -> Vec<Found> {
 
 /// Each table on a page, kept apart. Unlike `table`, text outside tables is left out.
 pub fn tables(page: &PageText) -> Vec<Found> {
-    let lines: Vec<Vec<Run>> = rows(page.runs()).iter().map(|l| cells(l)).collect();
+    runs_tables(page.runs(), page.width, page.height)
+}
+
+/// The tables in these runs of a page of this size.
+fn runs_tables(runs: Vec<Run>, width: f64, height: f64) -> Vec<Found> {
+    // Text off the page, such as a printer's line numbers and pass marks
+    // beside the trimmed page, is not shown and not part of any table.
+    let runs: Vec<Run> = runs
+        .into_iter()
+        .filter(|r| r.x + r.width > 0.0 && r.x < width && r.y > 0.0 && r.y < height)
+        .collect();
+    match gutter(&runs) {
+        Some(x) => {
+            let (left, right): (Vec<Run>, Vec<Run>) =
+                runs.into_iter().partition(|r| r.x + r.width <= x);
+            let mut found = column_tables(left);
+            found.extend(column_tables(right));
+            found
+        }
+        None => column_tables(runs),
+    }
+}
+
+fn column_tables(runs: Vec<Run>) -> Vec<Found> {
+    let lines: Vec<Vec<Run>> = rows(runs).iter().map(|l| cells(l)).collect();
     page_tables(&lines)
+}
+
+/// The gap between two columns of text, when the page is set in two columns
+/// that each hold their own lines. A wide gap inside one table does not
+/// count: there nearly every line on one side has a partner at the same
+/// height on the other.
+fn gutter(runs: &[Run]) -> Option<f64> {
+    let left = runs.iter().map(|r| r.x).fold(f64::MAX, f64::min);
+    let right = runs.iter().map(|r| r.x + r.width).fold(f64::MIN, f64::max);
+    if runs.len() < 20 || right <= left {
+        return None;
+    }
+    let mut spans: Vec<(f64, f64)> = runs.iter().map(|r| (r.x, r.x + r.width)).collect();
+    spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+    // The widest uncovered stretch in the middle half of the text.
+    let (low, high) = (left + (right - left) * 0.25, left + (right - left) * 0.75);
+    let mut best: Option<(f64, f64)> = None;
+    let mut reach = spans[0].1;
+    for s in &spans[1..] {
+        let (a, b) = (reach, s.0);
+        if b - a >= 6.0 && a >= low && b <= high && best.is_none_or(|g| b - a > g.1 - g.0) {
+            best = Some((a, b));
+        }
+        reach = reach.max(s.1);
+    }
+    let (a, b) = best?;
+    let x = (a + b) / 2.0;
+    let side = |left: bool| -> Vec<Vec<Run>> {
+        rows(
+            runs.iter()
+                .filter(|r| (r.x + r.width <= x) == left)
+                .cloned()
+                .collect(),
+        )
+    };
+    let (l, r) = (side(true), side(false));
+    if l.len() < 5 || r.len() < 5 {
+        return None;
+    }
+    let alone = |these: &[Vec<Run>], other: &[Vec<Run>]| {
+        these
+            .iter()
+            .filter(|line| other.iter().all(|o| (o[0].y - line[0].y).abs() > 2.0))
+            .count()
+    };
+    let enough = |n: usize, of: usize| n >= 3 && n * 100 >= of * 15;
+    (enough(alone(&l, &r), l.len()) && enough(alone(&r, &l), r.len())).then_some(x)
 }
 
 /// Joins tables that carry on from one page to the next: the same columns, with

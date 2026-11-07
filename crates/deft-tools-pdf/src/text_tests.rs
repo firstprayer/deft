@@ -13,6 +13,7 @@ fn glyph(text: &str, x: f64, width: f64, run: usize) -> Glyph {
 fn page(glyphs: Vec<Glyph>) -> PageText {
     PageText {
         glyphs,
+        width: 612.0,
         height: 792.0,
     }
 }
