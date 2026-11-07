@@ -512,6 +512,22 @@ impl Translator<'_> {
     }
 }
 
+/// Whether the first letter with a direction reads right to left, or
+/// `None` when the text has no such letter.
+fn first_strong_is_rtl(text: &str) -> Option<bool> {
+    text.chars().find_map(|c| {
+        let rtl = matches!(c as u32,
+            0x0590..=0x08FF | 0xFB1D..=0xFDFF | 0xFE70..=0xFEFF | 0x10800..=0x10FFF | 0x1E800..=0x1EFFF);
+        if rtl {
+            Some(true)
+        } else if c.is_alphabetic() {
+            Some(false)
+        } else {
+            None
+        }
+    })
+}
+
 /// Typst paper widths in points.
 fn paper_width(paper: &str) -> f64 {
     match paper {
@@ -541,7 +557,46 @@ fn translate(md: &str, base: Option<&Path>, style: &PdfStyle) -> Translation {
     let mut image_alt: Option<(String, String)> = None; // (url, alt)
     let mut aligns: Vec<Alignment> = Vec::new();
     let mut in_head = false;
+    // Each top-level block takes the direction of its first strong letter,
+    // as a browser does for dir="auto": Arabic and Hebrew read right to left.
+    let mut depth = 0usize;
+    let mut block_start = 0;
+    let mut direction: Option<bool> = None;
     for ev in Parser::new_ext(md, options()) {
+        let opens_block = matches!(
+            ev,
+            Event::Start(
+                Tag::Paragraph
+                    | Tag::Heading { .. }
+                    | Tag::BlockQuote(_)
+                    | Tag::List(_)
+                    | Tag::Table(_)
+                    | Tag::FootnoteDefinition(_)
+            )
+        );
+        let closes_block = matches!(
+            ev,
+            Event::End(
+                TagEnd::Paragraph
+                    | TagEnd::Heading(_)
+                    | TagEnd::BlockQuote(_)
+                    | TagEnd::List(_)
+                    | TagEnd::Table
+                    | TagEnd::FootnoteDefinition
+            )
+        );
+        if opens_block && code.is_none() && image_alt.is_none() && html_block.is_none() {
+            if depth == 0 {
+                block_start = out.len();
+                direction = None;
+            }
+            depth += 1;
+        }
+        if direction.is_none()
+            && let Event::Text(t) = &ev
+        {
+            direction = first_strong_is_rtl(t);
+        }
         if let Some((_, text)) = code.as_mut() {
             match ev {
                 Event::Text(t) => text.push_str(&t),
@@ -715,6 +770,13 @@ fn translate(md: &str, base: Option<&Path>, style: &PdfStyle) -> Translation {
                 t.warn("raw HTML is skipped in PDF output".to_string());
             }
             _ => {}
+        }
+        if closes_block {
+            depth = depth.saturating_sub(1);
+            if depth == 0 && direction == Some(true) {
+                let body = out.split_off(block_start);
+                out.push_str(&format!("#[#set text(dir: rtl)\n{body}]\n\n"));
+            }
         }
     }
     Translation {

@@ -91,3 +91,22 @@ fn pdf_survives_empty_links_and_unknown_pictures() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn right_to_left_blocks_are_set_right_to_left() {
+    let md = "Hello [world](https://a.example)\n\nإسبانيا ([الإسبانية](https://a.example): *España*)\n\n- שלום\n- עולם\n\n123 שלום\n";
+    let t = translate(md, None, &PdfStyle::default());
+    let blocks: Vec<&str> = t
+        .markup
+        .split("\n\n")
+        .filter(|b| !b.trim().is_empty())
+        .collect();
+    assert!(!blocks[0].contains("dir: rtl"), "{}", t.markup);
+    assert_eq!(
+        t.markup.matches("#[#set text(dir: rtl)").count(),
+        3,
+        "{}",
+        t.markup
+    );
+    assert!(to_pdf(md, None, &PdfStyle::default()).is_ok());
+}
