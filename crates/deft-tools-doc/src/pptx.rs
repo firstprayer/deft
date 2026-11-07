@@ -331,6 +331,7 @@ pub fn to_document(slides: &[Slide], images: Vec<Image>, notes: bool) -> Documen
         if !s.body.is_empty() {
             blocks.push(Block::List {
                 ordered: false,
+                start: 1,
                 items: s
                     .body
                     .iter()

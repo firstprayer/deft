@@ -21,9 +21,30 @@ pub fn link_name(name: &str) -> String {
         .replace(')', "%29")
 }
 
+/// Neighbours with the same style as one span, so that emphasis marks do
+/// not meet in the middle of a word.
+fn joined(spans: &[Span]) -> Vec<Span> {
+    let mut out: Vec<Span> = Vec::new();
+    for s in spans {
+        let plain = |x: &Span| x.image.is_none() && !x.note;
+        match out.last_mut() {
+            Some(last)
+                if plain(last)
+                    && plain(s)
+                    && (last.bold, last.italic, last.code, last.strike, &last.link)
+                        == (s.bold, s.italic, s.code, s.strike, &s.link) =>
+            {
+                last.text.push_str(&s.text)
+            }
+            _ => out.push(s.clone()),
+        }
+    }
+    out
+}
+
 fn inline(spans: &[Span]) -> String {
     let mut out = String::new();
-    for s in spans {
+    for s in &joined(spans) {
         if let Some(name) = &s.image {
             let picture = format!("![{}]({})", escape(&s.text), link_name(name));
             match &s.link {
@@ -111,10 +132,19 @@ fn write(blocks: &[Block], prefix: &str, in_item: bool, html: bool, out: &mut St
                     out.push('\n');
                 }
             }
-            Block::List { ordered, items } => {
+            Block::List {
+                ordered,
+                start,
+                items,
+            } => {
+                // Markdown joins two lists of the same kind into one.
+                if i > 0 && matches!(blocks[i - 1], Block::List { .. }) {
+                    out.push_str(prefix);
+                    out.push_str("<!-- -->\n\n");
+                }
                 for (n, item) in items.iter().enumerate() {
                     let marker = if *ordered {
-                        format!("{}. ", n + 1)
+                        format!("{}. ", *start + n as u64)
                     } else {
                         "- ".to_string()
                     };
@@ -261,7 +291,7 @@ fn span(text: &str, style: &Style, code: bool) -> Span {
 enum Frame {
     Top(Vec<Block>),
     Quote(Vec<Block>),
-    List(bool, Vec<Vec<Block>>),
+    List(Option<u64>, Vec<Vec<Block>>),
     Item(Vec<Block>),
     Note(String, Vec<Block>),
 }
@@ -401,11 +431,18 @@ pub fn parse(md: &str) -> Vec<Block> {
             Event::Start(Tag::List(first)) => {
                 // A tight item's text has no paragraph event to flush it.
                 flush(&mut stack, &mut spans);
-                stack.push(Frame::List(first.is_some(), vec![]));
+                stack.push(Frame::List(first, vec![]));
             }
             Event::End(TagEnd::List(_)) => {
-                if let Some(Frame::List(ordered, items)) = stack.pop() {
-                    push(&mut stack, Block::List { ordered, items });
+                if let Some(Frame::List(first, items)) = stack.pop() {
+                    push(
+                        &mut stack,
+                        Block::List {
+                            ordered: first.is_some(),
+                            start: first.unwrap_or(1),
+                            items,
+                        },
+                    );
                 }
             }
             Event::Start(Tag::Item) => stack.push(Frame::Item(vec![])),

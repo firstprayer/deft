@@ -252,7 +252,11 @@ impl Reader<'_> {
                         }
                     }
                     if !items.is_empty() {
-                        out.push(Block::List { ordered, items });
+                        out.push(Block::List {
+                            ordered,
+                            start: 1,
+                            items,
+                        });
                     }
                 }
                 "table" => {

@@ -22,6 +22,8 @@ fn word(body: &str, parts: &[(&str, &str)]) -> Vec<u8> {
         .map(|(name, xml)| {
             let root = if name.contains("foot") {
                 "footnotes"
+            } else if name.contains("numbering") {
+                "numbering"
             } else {
                 "endnotes"
             };
@@ -807,4 +809,60 @@ fn word_shows_svg_through_a_png() {
     let types = pkg.text("[Content_Types].xml").unwrap();
     assert!(types.contains("Extension=\"svg\""), "{types}");
     assert!(pkg.has("word/media/fig.svg") && pkg.has("word/media/fig.svg.png"));
+}
+
+#[test]
+fn word_list_numbers_follow_restarts_and_start_values() {
+    let numbering = "<w:abstractNum w:abstractNumId=\"0\"><w:lvl w:ilvl=\"0\"><w:start w:val=\"1\"/><w:numFmt w:val=\"decimal\"/></w:lvl></w:abstractNum>\
+<w:abstractNum w:abstractNumId=\"1\"><w:lvl w:ilvl=\"0\"><w:start w:val=\"10\"/><w:numFmt w:val=\"decimal\"/></w:lvl></w:abstractNum>\
+<w:num w:numId=\"1\"><w:abstractNumId w:val=\"0\"/></w:num>\
+<w:num w:numId=\"2\"><w:abstractNumId w:val=\"0\"/><w:lvlOverride w:ilvl=\"0\"><w:startOverride w:val=\"1\"/></w:lvlOverride></w:num>\
+<w:num w:numId=\"3\"><w:abstractNumId w:val=\"1\"/></w:num>";
+    let item = |num: u32, text: &str| {
+        format!(
+            "<w:p><w:pPr><w:numPr><w:ilvl w:val=\"0\"/><w:numId w:val=\"{num}\"/></w:numPr></w:pPr>{}</w:p>",
+            run(text)
+        )
+    };
+    let body = [
+        item(1, "one"),
+        item(1, "two"),
+        item(2, "restarted"),
+        item(3, "ten"),
+        para("between"),
+        item(3, "eleven"),
+        item(1, "three"),
+    ]
+    .concat();
+    let doc = docx::read(&word(&body, &[("word/numbering.xml", numbering)])).unwrap();
+    let md = markdown::render(&doc);
+    assert_eq!(
+        md,
+        "1. one\n2. two\n\n<!-- -->\n\n1. restarted\n\n<!-- -->\n\n10. ten\n\nbetween\n\n11. eleven\n\n<!-- -->\n\n3. three\n"
+    );
+}
+
+#[test]
+fn word_drop_caps_check_boxes_and_extra_bodies() {
+    let dropcap = format!(
+        "<w:p><w:pPr><w:framePr w:dropCap=\"drop\" w:lines=\"3\"/></w:pPr>{}</w:p>{}",
+        run("D"),
+        para("rop caps lead.")
+    );
+    let check = |state: &str| {
+        format!(
+            "<w:r><w:fldChar w:fldCharType=\"begin\"><w:ffData><w:checkBox>{state}</w:checkBox></w:ffData></w:fldChar></w:r><w:r><w:instrText> FORMCHECKBOX </w:instrText></w:r><w:r><w:fldChar w:fldCharType=\"end\"/></w:r>"
+        )
+    };
+    let boxes = format!(
+        "<w:p>{}{}{}{}</w:p>",
+        run("Off: "),
+        check("<w:default w:val=\"0\"/>"),
+        run(" On: "),
+        check("<w:default w:val=\"0\"/><w:checked/>")
+    );
+    // Three bodies are not valid, but they are written, and Word reads all.
+    let body = format!("{dropcap}{boxes}</w:body><w:body>{}", para("Second body."));
+    let text = docx::read(&word(&body, &[])).unwrap().text();
+    assert_eq!(text, "Drop caps lead.\n\nOff: ☐ On: ☒\n\nSecond body.\n");
 }

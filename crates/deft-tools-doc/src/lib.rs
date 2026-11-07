@@ -54,6 +54,8 @@ pub enum Block {
     /// Items, each a list of blocks.
     List {
         ordered: bool,
+        /// The number of the first item, for an ordered list.
+        start: u64,
         items: Vec<Vec<Block>>,
     },
     Quote(Vec<Block>),

@@ -41,21 +41,35 @@ fn paragraphs_in<'a, 'i>(node: Node<'a, 'i>) -> Vec<Node<'a, 'i>> {
 }
 
 /// Add a list item `level` lists deep, under the last item of the list above.
-pub(crate) fn add_item(list: &mut Vec<Block>, level: usize, ordered: bool, item: Vec<Block>) {
+/// `number` is the item's number, when the list is ordered; a number that
+/// does not follow on starts a new list.
+pub(crate) fn add_item(
+    list: &mut Vec<Block>,
+    level: usize,
+    ordered: bool,
+    number: Option<u64>,
+    item: Vec<Block>,
+) {
     if level > 0
         && let Some(Block::List { items, .. }) = list.last_mut()
         && let Some(parent) = items.last_mut()
     {
-        return add_item(parent, level - 1, ordered, item);
+        return add_item(parent, level - 1, ordered, number, item);
     }
-    if let Some(Block::List { ordered: o, items }) = list.last_mut()
+    if let Some(Block::List {
+        ordered: o,
+        start,
+        items,
+    }) = list.last_mut()
         && *o == ordered
+        && number.is_none_or(|n| n == *start + items.len() as u64)
     {
         items.push(item);
         return;
     }
     list.push(Block::List {
         ordered,
+        start: number.unwrap_or(1),
         items: vec![item],
     });
 }
@@ -87,12 +101,15 @@ struct Reader<'a> {
     pkg: &'a Package,
     rels: HashMap<String, (String, bool)>,
     styles: HashMap<String, u8>,
-    /// numId -> ordered at each level, from numbering.xml.
-    ordered: HashMap<String, Vec<bool>>,
+    numbering: Numbering,
+    /// Counters by numbering key, one per level.
+    counters: HashMap<String, Vec<u64>>,
     images: Vec<Image>,
     seen: HashMap<String, String>,
     /// Notes referred to so far, as (element name, id), in reading order.
     notes: Vec<(String, String)>,
+    /// A drop capital waiting for the paragraph it belongs to.
+    dropcap: Vec<Span>,
 }
 
 impl Reader<'_> {
@@ -110,6 +127,43 @@ impl Reader<'_> {
         });
         self.seen.insert(path, name.clone());
         Some(name)
+    }
+
+    /// Whether list `id` is numbered at `level`, and the number Word shows.
+    /// Lists sharing a format count on together, unless one restarts.
+    fn number(&mut self, id: &str, level: usize) -> (bool, u64) {
+        let Some((abs, levels)) = self.numbering.nums.get(id) else {
+            return (false, 1);
+        };
+        let lvl = levels
+            .get(level)
+            .or(levels.first())
+            .copied()
+            .unwrap_or_default();
+        let restart = self
+            .numbering
+            .restarts
+            .get(id)
+            .and_then(|r| r.get(&level))
+            .copied();
+        let key = if restart.is_some() {
+            format!("num {id}")
+        } else {
+            format!("abstract {abs}")
+        };
+        let counters = self.counters.entry(key).or_default();
+        if counters.len() <= level {
+            counters.resize(level + 1, 0);
+        }
+        let n = if counters[level] == 0 {
+            restart.unwrap_or(lvl.start)
+        } else {
+            counters[level] + 1
+        };
+        counters[level] = n;
+        // A deeper level starts again under each new item.
+        counters.truncate(level + 1);
+        (lvl.ordered, n)
     }
 
     fn run(&mut self, r: Node, link: Option<&str>, out: &mut Vec<Span>) {
@@ -138,6 +192,18 @@ impl Reader<'_> {
                         if matches!(d.tag_name().name(), "drawing" | "pict") {
                             self.pictures(d, out);
                         }
+                    }
+                }
+                // A legacy form check box shows its state.
+                "fldChar" => {
+                    if let Some(b) = c.descendants().find(|d| d.tag_name().name() == "checkBox") {
+                        let state = w(b, "checked").or_else(|| w(b, "default"));
+                        let on = state.is_some_and(|s| {
+                            !matches!(s.attribute((W, "val")), Some("0" | "false"))
+                                && (s.tag_name().name() == "checked"
+                                    || s.attribute((W, "val")).is_some())
+                        });
+                        text.push(if on { '☒' } else { '☐' });
                     }
                 }
                 kind @ ("footnoteReference" | "endnoteReference") => {
@@ -387,12 +453,26 @@ impl Reader<'_> {
         let breaks_page = p
             .descendants()
             .any(|d| d.tag_name().name() == "br" && d.attribute((W, "type")) == Some("page"));
-        let spans = self.spans(p);
+        let mut spans = self.spans(p);
         if breaks_page {
             blocks.push(Block::PageBreak);
         }
         if spans.is_empty() {
             return;
+        }
+        // A drop capital is a paragraph of its own: it starts the next one.
+        let dropcap = ppr
+            .and_then(|x| w(x, "framePr"))
+            .and_then(|f| f.attribute((W, "dropCap")))
+            .is_some_and(|d| d != "none");
+        if dropcap {
+            self.dropcap.extend(spans);
+            return;
+        }
+        if !self.dropcap.is_empty() {
+            let mut first = std::mem::take(&mut self.dropcap);
+            first.append(&mut spans);
+            spans = first;
         }
         if let Some(level) = self.styles.get(style) {
             if *level == 0 {
@@ -410,12 +490,14 @@ impl Reader<'_> {
                 .and_then(|x| x.attribute((W, "val")))
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(0);
-            let levels = self.ordered.get(id);
-            let ordered = levels
-                .and_then(|l| l.get(level).or(l.first()))
-                .copied()
-                .unwrap_or(false);
-            add_item(blocks, level, ordered, vec![Block::Paragraph(spans)]);
+            let (ordered, number) = self.number(id, level);
+            add_item(
+                blocks,
+                level,
+                ordered,
+                ordered.then_some(number),
+                vec![Block::Paragraph(spans)],
+            );
             return;
         }
         let lower = style.to_lowercase();
@@ -464,42 +546,76 @@ fn heading_styles(pkg: &Package) -> HashMap<String, u8> {
     out
 }
 
-/// numId -> ordered at each level, following numId -> abstractNum -> formats.
-fn numbering(pkg: &Package) -> HashMap<String, Vec<bool>> {
-    let mut out = HashMap::new();
+/// One level of a list format: numbered or not, and its first number.
+#[derive(Clone, Copy, Default)]
+struct Level {
+    ordered: bool,
+    start: u64,
+}
+
+/// Numbering definitions from numbering.xml.
+#[derive(Default)]
+struct Numbering {
+    /// numId -> (abstractNumId, levels).
+    nums: HashMap<String, (String, Vec<Level>)>,
+    /// numId -> level -> start value that restarts the list there.
+    restarts: HashMap<String, HashMap<usize, u64>>,
+}
+
+fn numbering(pkg: &Package) -> Numbering {
+    let mut out = Numbering::default();
     let Some(text) = pkg.text("word/numbering.xml") else {
         return out;
     };
     let Ok(doc) = Xml::parse(&text) else {
         return out;
     };
-    let mut abstract_ordered = HashMap::new();
+    let number = |n: Option<Node>| {
+        n.and_then(|x| x.attribute((W, "val")))
+            .and_then(|v| v.parse::<u64>().ok())
+    };
+    let mut abstracts = HashMap::new();
     for a in doc
         .descendants()
         .filter(|n| n.tag_name().name() == "abstractNum")
     {
         let id = a.attribute((W, "abstractNumId")).unwrap_or("");
-        let levels: Vec<bool> = a
+        let levels: Vec<Level> = a
             .children()
             .filter(|c| c.tag_name().name() == "lvl")
-            .map(|l| {
-                w(l, "numFmt")
+            .map(|l| Level {
+                ordered: w(l, "numFmt")
                     .and_then(|f| f.attribute((W, "val")))
                     .unwrap_or("bullet")
-                    != "bullet"
+                    != "bullet",
+                start: number(w(l, "start")).unwrap_or(1),
             })
             .collect();
-        abstract_ordered.insert(id.to_string(), levels);
+        abstracts.insert(id.to_string(), levels);
     }
     for n in doc.descendants().filter(|n| n.tag_name().name() == "num") {
-        let id = n.attribute((W, "numId")).unwrap_or("");
+        let id = n.attribute((W, "numId")).unwrap_or("").to_string();
         let abs = w(n, "abstractNumId")
             .and_then(|x| x.attribute((W, "val")))
-            .unwrap_or("");
-        out.insert(
-            id.to_string(),
-            abstract_ordered.get(abs).cloned().unwrap_or_default(),
-        );
+            .unwrap_or("")
+            .to_string();
+        let levels = abstracts.get(&abs).cloned().unwrap_or_default();
+        for o in n
+            .children()
+            .filter(|c| c.tag_name().name() == "lvlOverride")
+        {
+            let level = o
+                .attribute((W, "ilvl"))
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0usize);
+            if let Some(start) = number(w(o, "startOverride")) {
+                out.restarts
+                    .entry(id.clone())
+                    .or_default()
+                    .insert(level, start);
+            }
+        }
+        out.nums.insert(id, (abs, levels));
     }
     out
 }
@@ -528,18 +644,30 @@ pub fn read(bytes: &[u8]) -> Result<Document> {
         .text("word/document.xml")
         .ok_or_else(|| bad("docx", "no word/document.xml"))?;
     let doc = Xml::parse(&xml).map_err(|e| bad("docx", e))?;
-    let body = w(doc.root_element(), "body").ok_or_else(|| bad("docx", "no document body"))?;
+    // Only one body is valid, but some writers make several; Word reads all.
+    let bodies: Vec<Node> = doc
+        .root_element()
+        .children()
+        .filter(|c| c.tag_name().name() == "body" && c.tag_name().namespace() == Some(W))
+        .collect();
+    if bodies.is_empty() {
+        return Err(bad("docx", "no document body"));
+    }
     let mut reader = Reader {
         pkg: &pkg,
         rels: relationships(&pkg, "word/document.xml"),
         styles: heading_styles(&pkg),
-        ordered: numbering(&pkg),
+        numbering: numbering(&pkg),
+        counters: HashMap::new(),
         images: vec![],
         seen: HashMap::new(),
         notes: vec![],
+        dropcap: vec![],
     };
     let mut blocks = Vec::new();
-    reader.blocks(body, &mut blocks);
+    for body in bodies {
+        reader.blocks(body, &mut blocks);
+    }
     reader.notes(&mut blocks);
     let mut out = Document {
         blocks,
@@ -834,7 +962,7 @@ impl Writer<'_> {
                 let body = self.spans(spans);
                 out.push_str(&format!("<w:p><w:pPr>{indent}</w:pPr>{body}</w:p>"));
             }
-            Block::List { ordered, items } => {
+            Block::List { ordered, items, .. } => {
                 let id = if *ordered { 2 } else { 1 };
                 for item in items {
                     for (i, inner) in item.iter().enumerate() {

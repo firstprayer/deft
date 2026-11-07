@@ -286,6 +286,7 @@ impl Reader {
                 &mut self.blocks,
                 level,
                 ordered,
+                None,
                 vec![Block::Paragraph(spans)],
             );
         } else if let Some(level) = heading.filter(|l| (1..=6).contains(l)) {
