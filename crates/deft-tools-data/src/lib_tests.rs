@@ -138,3 +138,24 @@ fn events_keep_their_times_and_zones() {
     let back = ical::parse(&ical::write(&events).unwrap());
     assert_eq!(back, events);
 }
+
+#[test]
+fn losses_are_named() {
+    let lost = |t: &str, f| lost_on_reading(t.as_bytes(), f);
+    assert_eq!(lost("a: 1 # why\n", Format::Yaml).len(), 1);
+    assert!(lost("a: 'x # y'\nb: c#d\n", Format::Yaml).is_empty());
+    assert_eq!(lost("version: 1.10\n", Format::Yaml).len(), 1);
+    assert!(lost("version: 1.15\nname: v1.10a\n", Format::Yaml).is_empty());
+    assert!(lost("<a><b>x</b> <c>y</c></a>", Format::Xml).is_empty());
+    assert_eq!(lost("a: &b\n  x: 1\nc: *b\n", Format::Yaml).len(), 1);
+    assert!(lost("a: b & c\nd: 2 * 3\n", Format::Yaml).is_empty());
+    assert_eq!(lost("{\"n\":123456789012345678901}", Format::Json).len(), 1);
+    assert!(lost("{\"n\":\"123456789012345678901\"}", Format::Json).is_empty());
+    assert!(lost("{\"n\":12345678901234567890}", Format::Json).is_empty());
+}
+
+#[test]
+fn a_diff_of_lists_gives_jq_paths() {
+    let d = diff(&json!([{"id": 1}]), &json!([{"id": 2}]));
+    assert_eq!(d[0].path, ".[0].id");
+}

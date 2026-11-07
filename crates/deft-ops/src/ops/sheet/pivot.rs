@@ -1,4 +1,4 @@
-use super::_common::{IN, OUT, SHEET, TO, column, finish, input_table};
+use super::_common::{IN, OUT, SHEET, TO, column, finish, input_table, warned};
 use deft_core::prelude::*;
 use deft_tools_sheet::Agg;
 
@@ -31,7 +31,7 @@ pub static OP: Op = Op {
 
 fn run(job: &Job) -> Result<OpResult> {
     let p = job.params;
-    let t = input_table(job)?;
+    let (t, warning) = input_table(job)?;
     let row = column(&t, "rows", &p.text("rows"))?;
     let col = column(&t, "columns", &p.text("columns"))?;
     let value = match p.opt_text("values") {
@@ -39,5 +39,6 @@ fn run(job: &Job) -> Result<OpResult> {
         None => None,
     };
     let agg = Agg::parse(&p.text("agg"));
-    finish(job, &deft_tools_sheet::pivot(&t, row, col, value, agg))
+    let res = finish(job, &deft_tools_sheet::pivot(&t, row, col, value, agg))?;
+    Ok(warned(res, warning))
 }

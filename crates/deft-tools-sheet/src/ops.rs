@@ -1,8 +1,10 @@
 //! Table transforms. The first row of a table is its header.
 
 use crate::{Cell, Filter, Table};
+use regex::Regex;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::LazyLock;
 
 pub fn headers(t: &Table) -> Vec<String> {
     t.rows
@@ -39,6 +41,7 @@ fn with_rows(t: &Table, rows: Vec<Vec<Cell>>) -> Table {
     Table {
         name: t.name.clone(),
         rows,
+        ..Table::default()
     }
 }
 
@@ -267,9 +270,23 @@ impl Agg {
     }
 }
 
-fn numeric(c: &Cell) -> Option<f64> {
+/// The number in a cell, reading 1,200 as 1200. A comma anywhere else is not
+/// a thousands separator: 3,50 is not 350.
+pub(crate) fn numeric(c: &Cell) -> Option<f64> {
+    static GROUPED: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"^[-+]?[1-9][0-9]{0,2}(,[0-9]{3})+(\.[0-9]+)?$").expect("valid")
+    });
     c.number().or_else(|| match c {
-        Cell::Text(s) => s.trim().replace(',', "").parse().ok(),
+        Cell::Text(s) => {
+            let s = s.trim();
+            if s.contains(',') && !GROUPED.is_match(s) {
+                return None;
+            }
+            s.replace(',', "")
+                .parse()
+                .ok()
+                .filter(|n: &f64| n.is_finite())
+        }
         _ => None,
     })
 }
@@ -376,6 +393,8 @@ pub fn pivot(t: &Table, row: usize, column: usize, value: Option<usize>, agg: Ag
         let mut out = vec![labels[rk].clone()];
         for c in &cols {
             out.push(match cells.get(&(rk.clone(), c.clone())) {
+                // With no value column, every row counts, even one with a blank key.
+                Some(v) if value.is_none() => Cell::Number(v.len() as f64),
                 Some(v) => aggregate(v, agg),
                 None => Cell::Empty,
             });

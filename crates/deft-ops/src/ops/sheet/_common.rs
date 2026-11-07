@@ -23,22 +23,40 @@ pub fn tables(input: &InputFile) -> Result<Vec<Table>> {
     deft_tools_sheet::read(input.bytes()?, input.require_format()?, &input.stem())
 }
 
-/// Pick a sheet by name or 1-based number.
-pub fn pick(mut tables: Vec<Table>, wanted: Option<String>) -> Result<Table> {
-    let Some(w) = wanted else {
-        return Ok(tables.remove(0));
-    };
-    let names: Vec<String> = tables.iter().map(|t| t.name.clone()).collect();
-    let index = match w.parse::<usize>() {
-        Ok(n) if n >= 1 && n <= tables.len() => Some(n - 1),
-        _ => names.iter().position(|n| n.eq_ignore_ascii_case(&w)),
-    };
-    index.map(|i| tables.swap_remove(i)).ok_or_else(|| {
-        bad_value(
-            "sheet",
-            format!("no sheet {w:?}; sheets: {}", names.join(", ")),
+/// A warning when a workbook has sheets that a command will not look at.
+pub fn other_sheets(tables: &[Table], wanted: Option<&str>) -> Option<String> {
+    let rest: Vec<&str> = tables.iter().skip(1).map(|t| t.name.as_str()).collect();
+    (wanted.is_none() && !rest.is_empty()).then(|| {
+        format!(
+            "used the first sheet, {}; also in the file: {}",
+            tables[0].name,
+            rest.join(", ")
         )
     })
+}
+
+/// Find a sheet by name or 1-based number.
+pub fn sheet_index(tables: &[Table], wanted: &str) -> Result<usize> {
+    let names: Vec<&str> = tables.iter().map(|t| t.name.as_str()).collect();
+    let index = match wanted.parse::<usize>() {
+        Ok(n) if n >= 1 && n <= tables.len() => Some(n - 1),
+        _ => names.iter().position(|n| n.eq_ignore_ascii_case(wanted)),
+    };
+    index.ok_or_else(|| {
+        bad_value(
+            "sheet",
+            format!("no sheet {wanted:?}; sheets: {}", names.join(", ")),
+        )
+    })
+}
+
+/// Pick a sheet by name or 1-based number.
+pub fn pick(mut tables: Vec<Table>, wanted: Option<String>) -> Result<Table> {
+    let index = match wanted {
+        Some(w) => sheet_index(&tables, &w)?,
+        None => 0,
+    };
+    Ok(tables.swap_remove(index))
 }
 
 pub fn write(t: &Table, format: Format) -> Result<Produced> {
@@ -61,9 +79,21 @@ pub fn shape(t: &Table) -> String {
     format!("{} rows x {} columns", t.rows.len(), t.columns())
 }
 
-/// The table a one-input operation works on.
-pub fn input_table(job: &Job) -> Result<Table> {
-    pick(tables(job.input())?, job.params.opt_text("sheet"))
+/// The table a one-input operation works on, and a warning if the file has
+/// more sheets than the one taken.
+pub fn input_table(job: &Job) -> Result<(Table, Option<String>)> {
+    let sheets = tables(job.input())?;
+    let wanted = job.params.opt_text("sheet");
+    let warning = other_sheets(&sheets, wanted.as_deref()).map(|w| format!("{w} (see --sheet)"));
+    Ok((pick(sheets, wanted)?, warning))
+}
+
+/// Add a warning, if there is one.
+pub fn warned(res: OpResult, warning: Option<String>) -> OpResult {
+    match warning {
+        Some(w) => res.warn(w),
+        None => res,
+    }
 }
 
 /// Map a column lookup failure to the option that named the column.

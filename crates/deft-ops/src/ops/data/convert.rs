@@ -1,4 +1,4 @@
-use super::_common::{IN, OUT, load, target, write};
+use super::_common::{IN, OUT, load, write};
 use deft_core::prelude::*;
 
 pub static OP: Op = Op {
@@ -39,5 +39,5 @@ fn run(job: &Job) -> Result<OpResult> {
             "--to is required (or give -o name.ext)",
         ));
     }
-    write(&load(job.input())?, target(job), Default::default())
+    write(job, &load(job.input())?, Default::default())
 }

@@ -56,6 +56,7 @@ fn run(job: &Job) -> Result<OpResult> {
                 .iter()
                 .map(|row| row.iter().map(|c| table_cell(c)).collect())
                 .collect(),
+            ..Table::default()
         })
         .collect();
     let count = tables.len();

@@ -225,6 +225,8 @@ pub fn sniff(head: &[u8], path: Option<&Path>) -> Option<Format> {
         || (head.len() > 1
             && head[0] == 0xFF
             && head[1] & 0xE0 == 0xE0
+            // FF FE is the byte order mark of UTF-16 text.
+            && head[1] != 0xFE
             && by_ext != Some(Format::M4a))
     {
         return Some(Format::Mp3);

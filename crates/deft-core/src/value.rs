@@ -77,6 +77,8 @@ impl Kind {
     }
 
     pub fn parse(&self, option: &str, raw: &str) -> Result<Value> {
+        // Free text keeps its spaces: one may be the very thing to look for.
+        let text = raw;
         let raw = raw.trim();
         Ok(match self {
             Kind::Flag => Value::Flag(
@@ -100,7 +102,7 @@ impl Kind {
                 }
                 Value::Float(n)
             }
-            Kind::Text => Value::Text(raw.to_string()),
+            Kind::Text => Value::Text(text.to_string()),
             Kind::Choice(choices) => {
                 let lower = raw.to_ascii_lowercase();
                 match choices.iter().find(|c| **c == lower) {

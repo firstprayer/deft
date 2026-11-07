@@ -120,6 +120,8 @@ External programs such as ffmpeg are not part of Deft; they keep their own licen
 | errno 0.3.14 | MIT OR Apache-2.0 |
 | euclid 0.22.14 | MIT OR Apache-2.0 |
 | exr 1.74.2 | BSD-3-Clause |
+| fallible-iterator 0.3.0 | MIT/Apache-2.0 |
+| fallible-streaming-iterator 0.1.9 | MIT/Apache-2.0 |
 | fancy-regex 0.16.2 | MIT |
 | fast-float2 0.2.4 | MIT OR Apache-2.0 |
 | fast_image_resize 6.1.0 | MIT OR Apache-2.0 |
@@ -154,7 +156,9 @@ External programs such as ffmpeg are not part of Deft; they keep their own licen
 | guillotiere 0.7.0 | MIT/Apache-2.0 |
 | half 2.7.1 | MIT OR Apache-2.0 |
 | harfrust 0.12.0 | MIT |
+| hashbrown 0.16.1 | MIT OR Apache-2.0 |
 | hashbrown 0.17.1 | MIT OR Apache-2.0 |
+| hashlink 0.11.1 | MIT OR Apache-2.0 |
 | hayagriva 0.10.1 | MIT OR Apache-2.0 |
 | hayro 0.7.1 | Apache-2.0 OR MIT |
 | hayro 0.8.0 | Apache-2.0 OR MIT |
@@ -227,6 +231,7 @@ External programs such as ffmpeg are not part of Deft; they keep their own licen
 | libfuzzer-sys 0.4.13 | (MIT OR Apache-2.0) AND NCSA |
 | libm 0.2.16 | MIT |
 | libredox 0.1.25 | MIT |
+| libsqlite3-sys 0.36.0 | MIT |
 | linebender_resource_handle 0.1.1 | Apache-2.0 OR MIT |
 | linked-hash-map 0.5.6 | MIT/Apache-2.0 |
 | linux-raw-sys 0.12.1 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
@@ -343,6 +348,8 @@ External programs such as ffmpeg are not part of Deft; they keep their own licen
 | roxmltree 0.20.0 | MIT OR Apache-2.0 |
 | roxmltree 0.21.2 | MIT OR Apache-2.0 |
 | rqrr 0.11.0 | (MIT OR Apache-2.0) AND ISC |
+| rsqlite-vfs 0.1.1 | MIT |
+| rusqlite 0.38.0 | MIT |
 | rust_decimal 1.43.0 | MIT |
 | rust_xlsxwriter 0.99.1 | MIT OR Apache-2.0 |
 | rustc-hash 2.1.3 | Apache-2.0 OR MIT |
@@ -376,6 +383,7 @@ External programs such as ffmpeg are not part of Deft; they keep their own licen
 | slotmap 1.1.1 | Zlib |
 | smallvec 1.16.4 | MIT OR Apache-2.0 |
 | spin 0.9.9 | MIT |
+| sqlite-wasm-rs 0.5.5 | MIT |
 | stable_deref_trait 1.2.1 | MIT OR Apache-2.0 |
 | stacker 0.1.25 | MIT OR Apache-2.0 |
 | strict-num 0.1.1 | MIT |
@@ -3934,7 +3942,7 @@ the License, but only in their entirety and only with respect to the Combined
 Software.
 ```
 
-### barcoders 2.0.0, bit_field 0.10.3, cobs 0.3.0, crc32fast 1.5.4, no_std_io2 0.9.4, quick-error 2.0.1, serde_spanned 0.6.9, stringprep 0.1.5, toml 0.8.23, toml_datetime 0.6.11, toml_edit 0.22.27, toml_write 0.1.2
+### barcoders 2.0.0, bit_field 0.10.3, cobs 0.3.0, crc32fast 1.5.4, fallible-iterator 0.3.0, fallible-streaming-iterator 0.1.9, no_std_io2 0.9.4, quick-error 2.0.1, serde_spanned 0.6.9, stringprep 0.1.5, toml 0.8.23, toml_datetime 0.6.11, toml_edit 0.22.27, toml_write 0.1.2
 
 ```text
 Apache License
@@ -6755,7 +6763,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-### ahash 0.8.12, aligned 0.4.3, arbitrary 1.5.0, arrayvec 0.7.8, as-slice 0.2.1, az 1.3.0, base64 0.22.1, base64 0.23.1, bitflags 1.3.2, bitflags 2.13.2, bitstream-io 4.10.0, bstr 1.13.1, bumpalo 3.20.3, by_address 1.2.1, cfg-if 1.0.5, core_detect 1.0.0, crossbeam-deque 0.8.8, crossbeam-epoch 0.9.21, crossbeam-utils 0.8.23, data-url 0.3.2, displaydoc 0.2.7, either 1.19.0, equivalent 1.0.3, errno 0.3.14, euclid 0.22.14, fastrand 2.5.0, flate2 1.1.10, fnv 1.0.7, form_urlencoded 1.2.2, gif 0.14.2, glob 0.3.4, hashbrown 0.17.1, heck 0.5.0, html5ever 0.38.0, idna 1.1.0, idna_adapter 1.2.2, indexmap 2.14.2, itertools 0.14.0, js-sys 0.3.107, libdeflate-sys 1.26.1, libdeflater 1.26.1, libfuzzer-sys 0.4.13, linux-raw-sys 0.12.1, lock_api 0.4.14, log 0.4.35, markup5ever 0.38.0, markup5ever_rcdom 0.38.0+unofficial, num-bigint 0.4.8, num-complex 0.4.6, num-derive 0.4.2, num-integer 0.1.47, num-rational 0.4.2, num-traits 0.2.19, once_cell 1.21.4, palette 0.7.7, palette_derive 0.7.7, palette_math 0.7.7, parking_lot 0.12.5, parking_lot_core 0.9.12, percent-encoding 2.3.2, png 0.18.1, postcard 1.1.3, proc-macro-hack 0.5.20+deprecated, rayon 1.12.0, rayon-core 1.13.0, regex 1.13.1, regex-automata 0.4.18, regex-bites 0.1.6, regex-syntax 0.8.11, roxmltree 0.20.0, roxmltree 0.21.2, rustix 1.1.6, scopeguard 1.2.0, similar 2.7.0, simplecss 0.2.2, smallvec 1.16.4, stable_deref_trait 1.2.1, stacker 0.1.25, string_cache 0.9.0, svgtypes 0.16.2, tempfile 3.27.0, tendril 0.5.1, ttf-parser 0.25.1, two-face 0.4.5, unic-langid 0.9.6, unic-langid-impl 0.9.6, unic-langid-macros 0.9.6, unic-langid-macros-impl 0.9.6, unicase 2.10.0, unicode-bidi 0.3.18, unicode-bidi-mirroring 0.4.0, unicode-ccc 0.4.0, unicode-normalization 0.1.26, unicode-properties 0.1.5, unicode-segmentation 1.13.3, unicode-vo 0.1.0, url 2.5.8, wasip2 1.0.4+wasi-0.2.12, wasm-bindgen 0.2.130, wasm-bindgen-macro 0.2.130, wasm-bindgen-macro-support 0.2.130, wasm-bindgen-shared 0.2.130, web_atoms 0.2.6, weezl 0.1.12, weezl 0.2.1, wit-bindgen 0.57.1, xml5ever 0.38.0, yaml-rust 0.4.5
+### ahash 0.8.12, aligned 0.4.3, arbitrary 1.5.0, arrayvec 0.7.8, as-slice 0.2.1, az 1.3.0, base64 0.22.1, base64 0.23.1, bitflags 1.3.2, bitflags 2.13.2, bitstream-io 4.10.0, bstr 1.13.1, bumpalo 3.20.3, by_address 1.2.1, cfg-if 1.0.5, core_detect 1.0.0, crossbeam-deque 0.8.8, crossbeam-epoch 0.9.21, crossbeam-utils 0.8.23, data-url 0.3.2, displaydoc 0.2.7, either 1.19.0, equivalent 1.0.3, errno 0.3.14, euclid 0.22.14, fastrand 2.5.0, flate2 1.1.10, fnv 1.0.7, form_urlencoded 1.2.2, gif 0.14.2, glob 0.3.4, hashbrown 0.16.1, hashbrown 0.17.1, heck 0.5.0, html5ever 0.38.0, idna 1.1.0, idna_adapter 1.2.2, indexmap 2.14.2, itertools 0.14.0, js-sys 0.3.107, libdeflate-sys 1.26.1, libdeflater 1.26.1, libfuzzer-sys 0.4.13, linux-raw-sys 0.12.1, lock_api 0.4.14, log 0.4.35, markup5ever 0.38.0, markup5ever_rcdom 0.38.0+unofficial, num-bigint 0.4.8, num-complex 0.4.6, num-derive 0.4.2, num-integer 0.1.47, num-rational 0.4.2, num-traits 0.2.19, once_cell 1.21.4, palette 0.7.7, palette_derive 0.7.7, palette_math 0.7.7, parking_lot 0.12.5, parking_lot_core 0.9.12, percent-encoding 2.3.2, png 0.18.1, postcard 1.1.3, proc-macro-hack 0.5.20+deprecated, rayon 1.12.0, rayon-core 1.13.0, regex 1.13.1, regex-automata 0.4.18, regex-bites 0.1.6, regex-syntax 0.8.11, roxmltree 0.20.0, roxmltree 0.21.2, rustix 1.1.6, scopeguard 1.2.0, similar 2.7.0, simplecss 0.2.2, smallvec 1.16.4, stable_deref_trait 1.2.1, stacker 0.1.25, string_cache 0.9.0, svgtypes 0.16.2, tempfile 3.27.0, tendril 0.5.1, ttf-parser 0.25.1, two-face 0.4.5, unic-langid 0.9.6, unic-langid-impl 0.9.6, unic-langid-macros 0.9.6, unic-langid-macros-impl 0.9.6, unicase 2.10.0, unicode-bidi 0.3.18, unicode-bidi-mirroring 0.4.0, unicode-ccc 0.4.0, unicode-normalization 0.1.26, unicode-properties 0.1.5, unicode-segmentation 1.13.3, unicode-vo 0.1.0, url 2.5.8, wasip2 1.0.4+wasi-0.2.12, wasm-bindgen 0.2.130, wasm-bindgen-macro 0.2.130, wasm-bindgen-macro-support 0.2.130, wasm-bindgen-shared 0.2.130, web_atoms 0.2.6, weezl 0.1.12, weezl 0.2.1, wit-bindgen 0.57.1, xml5ever 0.38.0, yaml-rust 0.4.5
 
 ```text
 Apache License
@@ -6961,7 +6969,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-### bit-set 0.8.0, bit-vec 0.8.0, defmt 1.2.0, defmt-macros 1.2.0, defmt-parser 1.1.0, linked-hash-map 0.5.6
+### bit-set 0.8.0, bit-vec 0.8.0, defmt 1.2.0, defmt-macros 1.2.0, defmt-parser 1.1.0, hashlink 0.11.1, linked-hash-map 0.5.6
 
 ```text
 Apache License
@@ -9651,6 +9659,30 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
+### libsqlite3-sys 0.36.0, rusqlite 0.38.0
+
+```text
+Copyright (c) 2014 The rusqlite developers
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
 ### nom 8.0.0
 
 ```text
@@ -10031,6 +10063,30 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+### fallible-iterator 0.3.0
+
+```text
+Copyright (c) 2015 The rust-openssl-verify Developers
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ### png 0.18.1
 
 ```text
@@ -10061,7 +10117,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### hashbrown 0.17.1
+### hashbrown 0.16.1, hashbrown 0.17.1
 
 ```text
 Copyright (c) 2016 Amanieu d'Antras
@@ -10136,6 +10192,30 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+```
+
+### fallible-streaming-iterator 0.1.9
+
+```text
+Copyright (c) 2016 The fallible-streaming-iterator Developers
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
 
 ### qrcode 0.14.1
@@ -15434,6 +15514,32 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+### sqlite-wasm-rs 0.5.5
+
+```text
+MIT License
+
+Copyright (c) 2024 Spxg
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ### simd-adler32 0.3.10
 
 ```text
@@ -17187,6 +17293,37 @@ This project is licensed under either of
 at your option.
 ```
 
+### hashlink 0.11.1
+
+```text
+This work is derived in part from the `linked-hash-map` crate, Copyright (c)
+2015 The Rust Project Developers
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+```
+
 ### unicode-ident 1.0.27, unicode-normalization 0.1.26
 
 ```text
@@ -17693,6 +17830,7 @@ These are covered by the license named in the table above.
 - r-efi 5.3.0
 - r-efi 6.0.0
 - roman-numerals-rs 3.1.0
+- rsqlite-vfs 0.1.1
 - simd_helpers 0.1.0
 - typst 0.15.1
 - typst-eval 0.15.1

@@ -43,7 +43,7 @@ fn dates_and_concat() {
     assert_eq!(serial_to_iso(45658.5), "2025-01-01 12:00:00");
     let a = read_csv(b"x,y\n1,2\n", "a").unwrap();
     let b = read_csv(b"x,y\n3,4\n", "b").unwrap();
-    assert_eq!(concat(&[a, b]).rows.len(), 3);
+    assert_eq!(concat(&[a, b]).0.rows.len(), 3);
 }
 
 #[test]
@@ -181,4 +181,79 @@ fn stats_and_splits() {
     assert_eq!(parts[2].0, "empty");
     assert_eq!(split_rows(&t, 3).len(), 2);
     assert_eq!(transpose(&t).rows.len(), 3);
+}
+
+#[test]
+fn identifiers_are_not_numbers() {
+    for s in ["007", "+1234", "-007", "12E3", "12345678901234567890"] {
+        assert_eq!(parse_scalar(s, false), Cell::Text(s.into()), "{s}");
+    }
+    assert_eq!(parse_scalar("1.5e-7", false).number(), Some(1.5e-7));
+    assert_eq!(parse_scalar("1E+5", false).number(), Some(1e5));
+    // Exactly what a double holds, so a large amount stays a number.
+    assert_eq!(
+        parse_scalar("15832800000000000", false).number(),
+        Some(15832800000000000.0)
+    );
+}
+
+#[test]
+fn comma_decimals_only_in_semicolon_files() {
+    assert_eq!(
+        parse_scalar("1.234,56", true),
+        Cell::Decimal(1234.56, "1.234,56".into())
+    );
+    assert_eq!(parse_scalar("3,50", false), Cell::Text("3,50".into()));
+    assert_eq!(parse_scalar("007,5", true), Cell::Text("007,5".into()));
+}
+
+#[test]
+fn delimiters_ignore_quotes_and_ties_go_to_the_comma() {
+    assert_eq!(detect_delimiter(b"\"a;b;c\",d\n"), b',');
+    assert_eq!(detect_delimiter(b"a|b,c\n"), b',');
+    assert_eq!(detect_delimiter(b"code\nA|B\n"), b',');
+    assert_eq!(detect_delimiter(b"a;b;c\n1,2;3;4\n"), b';');
+}
+
+#[test]
+fn numeric_reads_thousands_but_not_comma_decimals() {
+    assert_eq!(numeric(&Cell::Text("1,200.50".into())), Some(1200.5));
+    assert_eq!(numeric(&Cell::Text("3,50".into())), None);
+    assert_eq!(numeric(&Cell::Text("12,34,567".into())), None);
+    assert_eq!(numeric(&Cell::Text("nan".into())), None);
+}
+
+#[test]
+fn a_slice_counts_from_a1() {
+    let t = Table {
+        rows: vec![vec![Cell::Text("x".into())]],
+        origin: (2, 2),
+        ..Table::default()
+    };
+    assert_eq!(slice(&t, (2, 2, 2, 2)).rows, t.rows);
+    assert_eq!(slice(&t, (0, 0, 1, 1)).rows, vec![vec![Cell::Empty; 2]; 2]);
+}
+
+#[test]
+fn concat_aligns_by_header() {
+    let a = read_csv(b"id,name\n1,Ada\n", "a").unwrap();
+    let b = read_csv(b"name,id,age\nLin,2,30\n", "b").unwrap();
+    let (t, unrelated) = concat(&[a, b]);
+    assert!(!unrelated);
+    assert_eq!(write_csv(&t).unwrap(), b"id,name,age\n1,Ada,\n2,Lin,30\n");
+}
+
+#[test]
+fn json_keeps_long_whole_numbers_exact() {
+    let t = read_json(br#"[{"id":12345678901234567890,"v":1.5,"n":7}]"#, "t").unwrap();
+    assert_eq!(t.rows[1][0], Cell::Text("12345678901234567890".into()));
+    assert_eq!(t.rows[1][1], Cell::Number(1.5));
+    assert_eq!(t.rows[1][2], Cell::Number(7.0));
+}
+
+#[test]
+fn json_keeps_both_of_two_columns_with_one_name() {
+    let t = read_csv(b"a,a\n1,2\n", "t").unwrap();
+    let out: serde_json::Value = serde_json::from_slice(&write_json(&t).unwrap()).unwrap();
+    assert_eq!(out, serde_json::json!([{"a": 1, "a_2": 2}]));
 }

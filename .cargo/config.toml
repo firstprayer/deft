@@ -2,3 +2,7 @@
 xtask = "run --quiet --package xtask --"
 test-unit = "test --workspace --lib --bins --test unit_*"
 test-e2e = "test -p deftcli --test e2e_*"
+
+# sqrt, floor, pow and friends, which SQLite leaves out unless asked.
+[env]
+LIBSQLITE3_FLAGS = "-DSQLITE_ENABLE_MATH_FUNCTIONS"

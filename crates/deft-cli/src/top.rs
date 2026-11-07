@@ -76,6 +76,13 @@ pub fn info(rest: &[String], stdin: impl FnOnce() -> Vec<u8>) -> Result<Outcome>
             err(ErrorCode::BadOption, "deft info needs a file").hint("deft info report.pdf")
         );
     }
+    if parsed.output.is_some() {
+        return Err(err(
+            ErrorCode::BadOption,
+            "deft info prints its result; it has no -o",
+        )
+        .hint("deft info <file> --json > info.json"));
+    }
     let (json, quiet) = (parsed.json, parsed.quiet);
     let s = session(&parsed)?;
     let started = std::time::Instant::now();
@@ -90,6 +97,17 @@ pub fn info(rest: &[String], stdin: impl FnOnce() -> Vec<u8>) -> Result<Outcome>
                     ErrorCode::InputNotFound,
                     format!("{raw}: no such file or directory"),
                 )),
+                ..Default::default()
+            });
+            continue;
+        }
+        if path.is_dir() {
+            items.push(Item {
+                inputs: vec![raw.clone()],
+                note: "directory".into(),
+                facts: [("format".to_string(), json!("directory"))]
+                    .into_iter()
+                    .collect(),
                 ..Default::default()
             });
             continue;
@@ -124,6 +142,17 @@ pub fn info(rest: &[String], stdin: impl FnOnce() -> Vec<u8>) -> Result<Outcome>
                 ..Default::default()
             },
         };
+        // A locked file is still identified; only its contents are out of reach.
+        if item
+            .error
+            .as_ref()
+            .is_some_and(|e| e.code == ErrorCode::InputEncrypted)
+        {
+            item.error = None;
+            item.facts.insert("encrypted".into(), json!(true));
+            item.note =
+                format!("password-protected; for more: deft pdf info {raw} --password <text>");
+        }
         if item.error.is_none() {
             let label = format.map(|f| f.label()).unwrap_or("unknown");
             item.facts.insert("format".into(), json!(label));

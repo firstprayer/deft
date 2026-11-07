@@ -1,4 +1,4 @@
-use super::_common::{IN, OUT, SHEET, TO, column, input_table, tables, write};
+use super::_common::{IN, OUT, SHEET, TO, column, input_table, tables, warned, write};
 use deft_core::prelude::*;
 use deft_tools_sheet::Table;
 
@@ -42,13 +42,15 @@ pub static OP: Op = Op {
 fn run(job: &Job) -> Result<OpResult> {
     let p = job.params;
     let stem = job.input().stem();
+    let mut warning = None;
     let parts: Vec<(String, Table)> = if p.flag("sheets") {
         tables(job.input())?
             .into_iter()
             .map(|t| (t.name.clone(), t))
             .collect()
     } else {
-        let t = input_table(job)?;
+        let (t, other_sheets) = input_table(job)?;
+        warning = other_sheets;
         match (p.opt_text("columns"), p.opt_int("every")) {
             (Some(name), None) => {
                 let c = column(&t, "columns", &name)?;
@@ -81,7 +83,8 @@ fn run(job: &Job) -> Result<OpResult> {
         .into_iter()
         .map(|(name, t)| Ok(write(&t, format)?.named(format!("{name}.{}", format.ext()))))
         .collect::<Result<Vec<_>>>()?;
-    Ok(OpResult::many(outputs)
+    let res = OpResult::many(outputs)
         .fact("files", count)
-        .note(format!("{count} files")))
+        .note(format!("{count} files"));
+    Ok(warned(res, warning))
 }

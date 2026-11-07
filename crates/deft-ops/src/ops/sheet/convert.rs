@@ -1,4 +1,4 @@
-use super::_common::{IN, OUT, pick, shape, tables, write};
+use super::_common::{IN, OUT, input_table, shape, warned, write};
 use deft_core::prelude::*;
 
 pub static OP: Op = Op {
@@ -39,9 +39,10 @@ fn run(job: &Job) -> Result<OpResult> {
         )
     })?;
     let format = Format::from_name(&to).expect("choice");
-    let t = pick(tables(job.input())?, p.opt_text("sheet"))?;
-    Ok(OpResult::one(write(&t, format)?)
+    let (t, warning) = input_table(job)?;
+    let res = OpResult::one(write(&t, format)?)
         .fact("rows", t.rows.len())
         .fact("columns", t.columns())
-        .note(shape(&t)))
+        .note(shape(&t));
+    Ok(warned(res, warning))
 }

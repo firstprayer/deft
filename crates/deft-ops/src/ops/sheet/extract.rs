@@ -1,4 +1,4 @@
-use super::_common::{IN, OUT, pick, shape, tables, write};
+use super::_common::{IN, OUT, input_table, shape, warned, write};
 use deft_core::prelude::*;
 
 pub static OP: Op = Op {
@@ -29,15 +29,16 @@ pub static OP: Op = Op {
 
 fn run(job: &Job) -> Result<OpResult> {
     let p = job.params;
-    let mut t = pick(tables(job.input())?, p.opt_text("sheet"))?;
+    let (mut t, warning) = input_table(job)?;
     if let Some(r) = p.opt_text("range") {
         let range = deft_tools_sheet::parse_range(&r)
             .ok_or_else(|| bad_value("range", format!("{r:?} is not a range like A1:D20")))?;
         t = deft_tools_sheet::slice(&t, range);
     }
     let format = Format::from_name(&p.text("to")).expect("choice");
-    Ok(OpResult::one(write(&t, format)?)
+    let res = OpResult::one(write(&t, format)?)
         .fact("rows", t.rows.len())
         .fact("columns", t.columns())
-        .note(shape(&t)))
+        .note(shape(&t));
+    Ok(warned(res, warning))
 }

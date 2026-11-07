@@ -5,7 +5,7 @@ pub static OP: Op = Op {
     id: "file.encoding",
     summary: "Convert text encoding, normally to UTF-8; fixes line endings",
     details: &[
-        "The source encoding is detected unless --from names it (latin1, gbk, shift_jis...).",
+        "The source encoding is detected unless --from-encoding names it (latin1, gbk, shift_jis...).",
     ],
     input: Input {
         accept: Accept::AnyFile,
@@ -53,6 +53,13 @@ fn run(job: &Job) -> Result<OpResult> {
     let bytes = input.bytes()?;
     let from = match p.opt_text("from-encoding") {
         Some(n) => encoding("from-encoding", &n)?,
+        None if deft_tools_file::looks_binary(bytes) => {
+            return Err(err(
+                ErrorCode::InputUnsupported,
+                format!("{} is not text", input.display),
+            )
+            .hint("if it is, name its encoding with --from-encoding"));
+        }
         None => deft_tools_file::detect_encoding(bytes),
     };
     if p.flag("detect") {

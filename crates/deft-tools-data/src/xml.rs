@@ -15,6 +15,36 @@ pub fn parse(text: &str) -> Result<Value, String> {
     Ok(Value::Object(top))
 }
 
+/// What the value model cannot hold of this document.
+pub fn lost(text: &str) -> Vec<String> {
+    let options = roxmltree::ParsingOptions {
+        allow_dtd: true,
+        ..Default::default()
+    };
+    let Ok(doc) = roxmltree::Document::parse_with_options(text, options) else {
+        return vec![];
+    };
+    let filled = |n: &roxmltree::Node| n.is_text() && !n.text().unwrap_or("").trim().is_empty();
+    let elements = || doc.descendants().filter(roxmltree::Node::is_element);
+    let mixed = elements()
+        .any(|e| e.children().any(|c| filled(&c)) && e.children().any(|c| c.is_element()));
+    let clash = elements().any(|e| {
+        let mut seen = std::collections::HashMap::new();
+        e.children().filter(roxmltree::Node::is_element).any(|c| {
+            let name = c.tag_name();
+            *seen.entry(name.name()).or_insert(name.namespace()) != name.namespace()
+        })
+    });
+    let mut out = Vec::new();
+    if mixed {
+        out.push("text mixed with child elements loses its order".to_string());
+    }
+    if clash {
+        out.push("elements from two namespaces share a name and were merged".to_string());
+    }
+    out
+}
+
 fn element(node: roxmltree::Node) -> Value {
     let mut map = Map::new();
     for a in node.attributes() {

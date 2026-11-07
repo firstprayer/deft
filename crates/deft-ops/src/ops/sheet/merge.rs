@@ -1,4 +1,4 @@
-use super::_common::{IN, OUT, shape, tables, write};
+use super::_common::{IN, OUT, other_sheets, shape, tables, write};
 use deft_core::prelude::*;
 
 pub static OP: Op = Op {
@@ -22,13 +22,23 @@ pub static OP: Op = Op {
 
 fn run(job: &Job) -> Result<OpResult> {
     let mut all = Vec::new();
+    let mut warnings = Vec::new();
     for input in &job.inputs {
-        all.push(tables(input)?.remove(0));
+        let mut sheets = tables(input)?;
+        warnings.extend(other_sheets(&sheets, None));
+        all.push(sheets.remove(0));
     }
-    let t = deft_tools_sheet::concat(&all);
+    let (t, unrelated) = deft_tools_sheet::concat(&all);
     let format = Format::from_name(&job.params.text("to")).expect("choice");
-    Ok(OpResult::one(write(&t, format)?)
+    let mut res = OpResult::one(write(&t, format)?)
         .fact("rows", t.rows.len())
         .fact("columns", t.columns())
-        .note(shape(&t)))
+        .note(shape(&t));
+    if unrelated {
+        res = res.warn("the files share no column names, so rows were stacked as they are");
+    }
+    for w in warnings {
+        res = res.warn(w);
+    }
+    Ok(res)
 }
