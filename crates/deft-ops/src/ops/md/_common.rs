@@ -139,6 +139,35 @@ pub fn relink_images(md: &str, images: &[Image], folder: &str) -> String {
     md
 }
 
+/// PNG versions of the SVG pictures, for Word, which shows an SVG through
+/// one. Returns them by picture name, with a warning for each that failed.
+pub fn svg_fallbacks(
+    images: &[Image],
+) -> (std::collections::HashMap<String, Vec<u8>>, Vec<String>) {
+    let mut out = std::collections::HashMap::new();
+    let mut warnings = Vec::new();
+    for image in images {
+        let head =
+            String::from_utf8_lossy(&image.bytes[..image.bytes.len().min(1024)]).to_lowercase();
+        if !head.contains("<svg") {
+            continue;
+        }
+        let drawn = deft_tools_image::render_svg(&image.bytes, None).and_then(|small| {
+            // Twice the size, for sharp print, within a sane limit.
+            let width = (small.width() * 2).min(3000);
+            let img = deft_tools_image::render_svg(&image.bytes, Some(width))?;
+            deft_tools_image::encode(&img, Format::Png, Default::default())
+        });
+        match drawn {
+            Ok(png) => {
+                out.insert(image.name.clone(), png);
+            }
+            Err(e) => warnings.push(format!("{}: {}", image.name, e.message)),
+        }
+    }
+    (out, warnings)
+}
+
 /// The images found so far, and what could not be used.
 #[derive(Default)]
 struct Loaded {

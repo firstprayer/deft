@@ -777,3 +777,34 @@ fn word_merged_cells_become_spans() {
     // Plain Markdown pads instead.
     assert!(markdown::render(&doc).contains("| December 2007 |  |  |"));
 }
+
+#[test]
+fn word_shows_svg_through_a_png() {
+    let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+    png.extend(1920u32.to_be_bytes());
+    png.extend(1080u32.to_be_bytes());
+    png.extend([8, 6, 0, 0, 0]);
+    let mut doc = Document {
+        blocks: vec![Block::Paragraph(vec![Span {
+            image: Some("fig.svg".into()),
+            ..Default::default()
+        }])],
+        images: vec![Image {
+            name: "fig.svg".into(),
+            bytes: b"<svg viewBox=\"0 0 960 540\"/>".to_vec(),
+        }],
+        ..Default::default()
+    };
+    doc.fallbacks.insert("fig.svg".into(), png);
+    let pkg = zipped::Package::open(&docx::write(&doc).unwrap()).unwrap();
+    let body = pkg.text("word/document.xml").unwrap();
+    assert!(body.contains("<asvg:svgBlip"), "{body}");
+    // 960 x 540 CSS pixels, 16:9, within the column width.
+    assert!(
+        body.contains("<wp:extent cx=\"5943600\" cy=\"3343275\"/>"),
+        "{body}"
+    );
+    let types = pkg.text("[Content_Types].xml").unwrap();
+    assert!(types.contains("Extension=\"svg\""), "{types}");
+    assert!(pkg.has("word/media/fig.svg") && pkg.has("word/media/fig.svg.png"));
+}

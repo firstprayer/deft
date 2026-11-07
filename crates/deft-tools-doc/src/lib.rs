@@ -90,6 +90,9 @@ pub struct Document {
     pub images: Vec<Image>,
     /// What the reader could not keep, for the user to hear about.
     pub warnings: Vec<String>,
+    /// PNG versions of SVG pictures, by picture name, drawn at twice their
+    /// size, for writers whose readers need one.
+    pub fallbacks: std::collections::HashMap<String, Vec<u8>>,
 }
 
 fn spans_text(spans: &[Span], out: &mut String) {

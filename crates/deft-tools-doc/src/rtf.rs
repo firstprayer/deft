@@ -550,6 +550,7 @@ pub fn read(bytes: &[u8]) -> Document {
         } else {
             vec![]
         },
+        ..Default::default()
     }
 }
 

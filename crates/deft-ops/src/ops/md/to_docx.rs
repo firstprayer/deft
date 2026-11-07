@@ -1,4 +1,4 @@
-use super::_common::load_images;
+use super::_common::{load_images, svg_fallbacks};
 use deft_core::prelude::*;
 use deft_tools_doc::Document;
 
@@ -38,8 +38,11 @@ fn run(job: &Job) -> Result<OpResult> {
     let md = String::from_utf8_lossy(input.bytes()?).to_string();
     let base = input.path.as_ref().and_then(|x| x.parent());
     let mut blocks = deft_tools_doc::markdown::parse(&md);
-    let (images, warnings) = load_images(&mut blocks, base);
+    let (images, mut warnings) = load_images(&mut blocks, base);
+    let (fallbacks, problems) = svg_fallbacks(&images);
+    warnings.extend(problems);
     let doc = Document {
+        fallbacks,
         title: p.opt_text("title").or_else(|| deft_tools_text::title(&md)),
         author: p.opt_text("author"),
         blocks,
