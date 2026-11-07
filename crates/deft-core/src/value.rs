@@ -140,7 +140,9 @@ impl Kind {
 /// One-line syntax reference used by `deft help values` and in schemas.
 pub fn syntax_help(kind: &Kind) -> &'static str {
     match kind {
-        Kind::Pages => "1-3,5,8- (8 to end), last, -2 (second to last), odd, even, all",
+        Kind::Pages => {
+            "1-3,5,8- (8 to end), last, -2 (second to last), last-2 (last three), odd, even, all"
+        }
         Kind::Duration => "90, 1:30, 01:02:03.5, 1m30s, 500ms",
         Kind::Times => "comma-separated times: 0:05,0:10,1m",
         Kind::Size => "1920x1080, 800x (width, keep ratio), x600 (height), 50%",
@@ -246,57 +248,16 @@ impl PageSet {
     }
 
     pub fn parse(raw: &str) -> std::result::Result<PageSet, String> {
-        let bound = |s: &str| -> std::result::Result<Bound, String> {
-            let s = s.trim();
-            if s.eq_ignore_ascii_case("last") || s.eq_ignore_ascii_case("end") {
-                return Ok(Bound::FromEnd(1));
-            }
-            if let Some(rest) = s.strip_prefix('-') {
-                let n: usize = rest.parse().map_err(|_| format!("bad page {s:?}"))?;
-                return if n == 0 {
-                    Err("page -0 does not exist".into())
-                } else {
-                    Ok(Bound::FromEnd(n))
-                };
-            }
-            let n: usize = s.parse().map_err(|_| format!("bad page {s:?}"))?;
-            if n == 0 {
-                Err("pages start at 1".into())
-            } else {
-                Ok(Bound::Abs(n))
-            }
-        };
         let mut items = Vec::new();
         for part in raw.split(',').map(str::trim).filter(|p| !p.is_empty()) {
             let lower = part.to_ascii_lowercase();
-            match lower.as_str() {
-                "all" | "*" => items.push(PageItem::Range(None, None)),
-                "odd" => items.push(PageItem::Odd),
-                "even" => items.push(PageItem::Even),
-                _ if part.starts_with('-') && part[1..].chars().all(|c| c.is_ascii_digit()) => {
-                    let b = bound(part)?;
-                    items.push(PageItem::Range(Some(b), Some(b)));
-                }
-                _ => match part.split_once('-') {
-                    Some((a, b)) => {
-                        let start = if a.trim().is_empty() {
-                            None
-                        } else {
-                            Some(bound(a)?)
-                        };
-                        let end = if b.trim().is_empty() {
-                            None
-                        } else {
-                            Some(bound(b)?)
-                        };
-                        items.push(PageItem::Range(start, end));
-                    }
-                    None => {
-                        let b = bound(part)?;
-                        items.push(PageItem::Range(Some(b), Some(b)));
-                    }
-                },
-            }
+            let item = match lower.as_str() {
+                "all" | "*" => PageItem::Range(None, None),
+                "odd" => PageItem::Odd,
+                "even" => PageItem::Even,
+                _ => Self::range(&lower).ok_or_else(|| Self::why(&lower))?,
+            };
+            items.push(item);
         }
         if items.is_empty() {
             return Err("empty page selection".into());
@@ -305,6 +266,73 @@ impl PageSet {
             items,
             source: raw.to_string(),
         })
+    }
+
+    /// One page: 5, -2 (second to last), last, last-1 (second to last).
+    fn bound(s: &str) -> Option<Bound> {
+        let s = s.trim();
+        let back = |n: &str| -> Option<Bound> {
+            let n: usize = n.trim().parse().ok()?;
+            Some(Bound::FromEnd(n + 1))
+        };
+        for word in ["last", "end"] {
+            if s == word {
+                return Some(Bound::FromEnd(1));
+            }
+            if let Some(rest) = s
+                .strip_prefix(word)
+                .and_then(|r| r.trim().strip_prefix('-'))
+            {
+                return back(rest);
+            }
+        }
+        if let Some(rest) = s.strip_prefix('-') {
+            let n: usize = rest.parse().ok()?;
+            return (n > 0).then_some(Bound::FromEnd(n));
+        }
+        let n: usize = s.parse().ok()?;
+        (n > 0).then_some(Bound::Abs(n))
+    }
+
+    /// A page or a range. "last-2" reads as people write it: the last three
+    /// pages, from two before the last to the last.
+    fn range(part: &str) -> Option<PageItem> {
+        for word in ["last-", "end-"] {
+            if let Some(n) = part.strip_prefix(word)
+                && n.trim().chars().all(|c| c.is_ascii_digit())
+            {
+                let start = Self::bound(part)?;
+                return Some(PageItem::Range(Some(start), Some(Bound::FromEnd(1))));
+            }
+        }
+        if let Some(b) = Self::bound(part) {
+            return Some(PageItem::Range(Some(b), Some(b)));
+        }
+        // Split at the dash that leaves a page (or nothing) on both sides.
+        let side = |s: &str| -> Option<Option<Bound>> {
+            if s.trim().is_empty() {
+                Some(None)
+            } else {
+                Self::bound(s).map(Some)
+            }
+        };
+        part.match_indices('-').find_map(|(i, _)| {
+            let (a, b) = (side(&part[..i])?, side(&part[i + 1..])?);
+            Some(PageItem::Range(a, b))
+        })
+    }
+
+    fn why(part: &str) -> String {
+        let zero = part
+            .split('-')
+            .any(|p| p.trim().parse::<usize>().is_ok_and(|n| n == 0));
+        if zero && part.starts_with('-') && !part[1..].contains('-') {
+            "page -0 does not exist".into()
+        } else if zero {
+            "pages start at 1".into()
+        } else {
+            format!("bad page {part:?}")
+        }
     }
 
     /// Zero-based page indexes in the order written. Errors on pages past the end.

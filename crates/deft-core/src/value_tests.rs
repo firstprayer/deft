@@ -36,6 +36,27 @@ fn pages() {
 }
 
 #[test]
+fn last_minus_n_counts_back_from_the_end() {
+    let pages = |s: &str| PageSet::parse(s).unwrap().resolve(14).unwrap();
+    // As people read it: the last three pages, not 14 down to 2.
+    assert_eq!(pages("last-2"), vec![11, 12, 13]);
+    assert_eq!(pages("end-1"), vec![12, 13]);
+    assert_eq!(pages("2-last-1"), (1..13).collect::<Vec<_>>());
+    assert_eq!(pages("last-3-last-2"), vec![10, 11]);
+    // The last two pages as a range of negative numbers.
+    assert_eq!(pages("-2-"), vec![12, 13]);
+    assert_eq!(pages("-2--1"), vec![12, 13]);
+    assert_eq!(pages("-3"), vec![11]);
+    assert_eq!(pages("3-1"), vec![2, 1, 0]);
+    assert!(PageSet::parse("last-x").is_err());
+    let e = PageSet::parse("-2-x").unwrap_err();
+    assert!(e.contains("-2-x"), "{e}");
+    assert_eq!(PageSet::parse("-0").unwrap_err(), "page -0 does not exist");
+    assert_eq!(PageSet::parse("0-3").unwrap_err(), "pages start at 1");
+    assert!(PageSet::parse("last-20").unwrap().resolve(14).is_err());
+}
+
+#[test]
 fn durations() {
     assert_eq!(parse_duration("90").unwrap(), 90.0);
     assert_eq!(parse_duration("1:30").unwrap(), 90.0);
