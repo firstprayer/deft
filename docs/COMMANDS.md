@@ -40,7 +40,6 @@ Merge, split, compress, encrypt, forms, OCR, compare, convert
 | `deft pdf meta` | Read or set metadata and bookmarks |  | `deft pdf meta report.pdf --title 'Q3 report' --author Ada -o titled.pdf` |
 | `deft pdf number` | Add page numbers: --format |  | `deft pdf number three-pages.pdf -o numbered.pdf` |
 | `deft pdf ocr` | Make a scan searchable | tesseract | `deft pdf ocr scan.pdf -o searchable.pdf` |
-| `deft pdf redact` | Black out for good: --box or --text |  | `deft pdf redact report.pdf --box 50,60,300,40 --pages 1 -o safe.pdf` |
 | `deft pdf resize` | Fit pages to --page-size a4 |  | `deft pdf resize report.pdf --page-size letter -o letter.pdf` |
 | `deft pdf rotate` | Turn pages clockwise: --angle 90, --pages |  | `deft pdf rotate three-pages.pdf --angle 180 -o turned.pdf` |
 | `deft pdf search` | Find text: --text invoice |  | `deft pdf search report.pdf --text 'page 2'` |

@@ -27,6 +27,7 @@ Deft follows semantic versioning. Before 1.0, a minor version may change command
 - `html screenshot` and `html to-pdf --browser`. Deft no longer uses Chrome.
 - The `youtube` group, `deft engine install` and `update`, `--offline` and `--install-engines`. Deft no longer touches the network.
 - Commands an agent does in one ordinary line: `file hash`, `base64`, `split`, `join`, `rename` and `organize`; `video crop`, `resize`, `rotate`, `mute`, `fade`, `repeat`, `reverse`, `stack`, `thumbnail`, `extract-audio` and `extract-subtitles`; `image diff`, `invert` and `sharpen`; `pdf grayscale` and `repair`; `video split` (`ffmpeg -ss … -to …`); `data query`; `sheet transpose`; `email info`.
+- `pdf redact`: a redaction that misses a word is a leak, and on real files it missed text in attachments, comments and fonts it could not decode. Deft does not promise safety it cannot give.
 - `video add-audio`, `add-subtitles`, `chunk`, `compress`, `convert`, `frames`, `from-images`, `info`, `merge`, `speed`, `strip` and `to-gif`: on real files an agent did each as well with one ffmpeg line. `video` keeps `stabilize`, `pad` and `watermark`.
 - `sheet query`, `filter`, `sort`, `select`, `group`, `dedupe` and `join`: an agent does these in one line with sqlite3, DuckDB or pandas. Deft no longer includes SQLite.
 - The `email` and `file` groups.
@@ -34,7 +35,7 @@ Deft follows semantic versioning. Before 1.0, a minor version may change command
 
 ### Fixed
 
-- `pdf redact` removes the text and form values from the file, not just from the page, and `pdf strip` removes the XMP packet.
+- `pdf strip` removes the XMP packet.
 - `pdf encrypt` output opens in Apple's PDF readers. `pdf to-text` and `search` read fonts that came out as garbage before, and ligatures.
 - `pdf merge` keeps every form and bookmark. `extract-sheets` uses real glyph widths.
 - HEIC photos from phones come out whole and upright. `image strip` removes everything after a JPEG's end. `image info` finds GPS in every format. Display P3 colour survives.

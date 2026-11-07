@@ -2,7 +2,7 @@
 
 use crate::{Renderer, deref, display_matrix, display_size, page_box, rect_of};
 use deft_core::error::{ErrorCode, Result, err};
-use lopdf::{Dictionary, Document, Object, ObjectId, Stream, dictionary};
+use lopdf::{Dictionary, Document, Object, ObjectId, Stream};
 
 /// Apply a transform to a point.
 fn apply(m: [f64; 6], x: f64, y: f64) -> (f64, f64) {
@@ -252,72 +252,6 @@ pub fn overlay_page(doc: &mut Document, page: ObjectId, text_page: ObjectId) -> 
         .map_err(|e| err(ErrorCode::InputCorrupt, e.to_string()))?
         .set("Resources", Object::Dictionary(res));
     Ok(())
-}
-
-/// Black out regions by replacing the page with a picture of itself, so the
-/// text under the boxes is really gone. Regions are in points from the
-/// top-left of the page as shown. Returns the picture to embed.
-pub fn redacted_image(
-    r: &Renderer,
-    index: usize,
-    regions: &[[f64; 4]],
-    dpi: f64,
-    max_pixels: u64,
-) -> Result<image::RgbImage> {
-    let mut img = r.render(index, dpi, max_pixels)?;
-    let k = dpi / 72.0;
-    let (w, h) = img.dimensions();
-    for [x, y, rw, rh] in regions {
-        let (x0, y0) = ((x * k) as u32, (y * k) as u32);
-        let (x1, y1) = (
-            (((x + rw) * k).ceil() as u32).min(w),
-            (((y + rh) * k).ceil() as u32).min(h),
-        );
-        for py in y0..y1 {
-            for px in x0..x1 {
-                img.put_pixel(px, py, image::Rgb([0, 0, 0]));
-            }
-        }
-    }
-    Ok(img)
-}
-
-/// Replace a page's content with one full-page image. Only what the picture
-/// needs stays on the page: annotations, thumbnails and private data all go.
-pub fn replace_with_image(
-    doc: &mut Document,
-    page: ObjectId,
-    img: &crate::PdfImage,
-    w: f64,
-    h: f64,
-) -> Result<()> {
-    let id = crate::embed_image(doc, img);
-    let content = format!("q {w:.3} 0 0 {h:.3} 0 0 cm /DeftPage Do Q\n").into_bytes();
-    let stream = doc.add_object(Stream::new(Dictionary::new(), content));
-    let resources = dictionary! { "XObject" => dictionary! { "DeftPage" => id } };
-    let d = doc
-        .get_dictionary_mut(page)
-        .map_err(|e| err(ErrorCode::InputCorrupt, e.to_string()))?;
-    d.set("Contents", Object::Reference(stream));
-    d.set("Resources", Object::Dictionary(resources));
-    let keep: [&[u8]; 4] = [b"Type", b"Parent", b"Contents", b"Resources"];
-    d.as_hashmap_mut()
-        .retain(|k, _| keep.contains(&k.as_slice()));
-    set_box(doc, page, [0.0, 0.0, w, h])
-}
-
-/// After pages became pictures, cut what still repeats them: their form fields,
-/// the XFA copy of the values and the structure tree's alternate text. Then the
-/// old content itself, which lopdf would write even with nothing pointing at it.
-pub fn seal_redactions(doc: &mut Document) {
-    let pages = crate::page_ids(doc);
-    crate::forms::keep_fields_on(doc, &pages);
-    crate::forms::remove_xfa(doc);
-    if let Ok(catalog) = doc.catalog_mut() {
-        catalog.remove(b"StructTreeRoot");
-        catalog.remove(b"MarkInfo");
-    }
-    crate::prune(doc);
 }
 
 /// The rectangle of an annotation.
