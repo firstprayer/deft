@@ -316,29 +316,6 @@ pub(crate) fn keep_fields_on(doc: &mut Document, pages: &[ObjectId]) {
     }
 }
 
-/// Remove the XFA packet of a form that also has plain fields. Returns false when
-/// the XFA packet is the whole form and has to stay.
-pub(crate) fn drop_xfa(doc: &mut Document) -> bool {
-    let Some(form) = acro_form(doc) else {
-        return true;
-    };
-    if !form.has(b"XFA") {
-        return true;
-    }
-    if root_fields(doc, form).is_empty() {
-        return false;
-    }
-    remove_xfa(doc);
-    true
-}
-
-/// Remove the XFA packet, which holds its own copy of the field values.
-pub(crate) fn remove_xfa(doc: &mut Document) {
-    if let Some(form) = acro_form_mut(doc) {
-        form.remove(b"XFA");
-    }
-}
-
 fn field_name(doc: &Document, field: &Object) -> Option<String> {
     let dict = deref(doc, field).as_dict().ok()?;
     text_string(doc, dict.get(b"T").ok()?)

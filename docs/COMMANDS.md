@@ -45,7 +45,6 @@ Merge, split, compress, encrypt, forms, OCR, compare, convert
 | `deft pdf search` | Find text: --text invoice |  | `deft pdf search report.pdf --text 'page 2'` |
 | `deft pdf select` | Keep and reorder pages |  | `deft pdf select three-pages.pdf --pages 3,1-2 -o reordered.pdf` |
 | `deft pdf split` | Split: per page, --every N, --ranges |  | `deft pdf split three-pages.pdf -o pages/` |
-| `deft pdf strip` | Remove metadata |  | `deft pdf strip report.pdf -o clean.pdf` |
 | `deft pdf to-images` | Render pages: --dpi, --pages |  | `deft pdf to-images three-pages.pdf -o pages/` |
 | `deft pdf to-text` | Extract text |  | `deft pdf to-text report.pdf -o report.txt` |
 | `deft pdf watermark` | Stamp text or an image on pages |  | `deft pdf watermark three-pages.pdf --text DRAFT -o draft.pdf` |
@@ -137,8 +136,6 @@ JSON: convert, format, merge, diff, validate
 |---|---|---|---|
 | `deft json convert` | Change format: --to json\|jsonl\|yaml\|toml\|xml |  | `deft json convert messy.json --to yaml -o out.yaml` |
 | `deft json diff` | Compare two files by structure |  | `deft json diff messy.json override.json` |
-| `deft json format` | Pretty-print or minify: --compact, --sort-keys |  | `deft json format messy.json -o tidy.json` |
-| `deft json merge` | Deep-merge files; later files win |  | `deft json merge messy.json override.json -o merged.json` |
 | `deft json validate` | Check syntax, or a JSON Schema with --schema |  | `deft json validate messy.json` |
 
 ## toml

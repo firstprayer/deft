@@ -81,27 +81,6 @@ pub fn write(doc: &mut Document, fields: &[(&[u8], String)]) -> Result<()> {
     Ok(())
 }
 
-/// Remove the information dictionary, every XMP packet and the XFA copy of a
-/// form. Returns false when the form is XFA alone, whose packet has to stay.
-pub fn strip(doc: &mut Document) -> bool {
-    if let Ok(id) = doc.trailer.get(b"Info").and_then(Object::as_reference) {
-        doc.objects.remove(&id);
-    }
-    doc.trailer.remove(b"Info");
-    for object in doc.objects.values_mut() {
-        let dict = match object {
-            Object::Dictionary(d) => d,
-            Object::Stream(s) => &mut s.dict,
-            _ => continue,
-        };
-        dict.remove(b"Metadata");
-        dict.remove(b"PieceInfo");
-    }
-    let clean = crate::forms::drop_xfa(doc);
-    crate::prune(doc);
-    clean
-}
-
 /// Take `word` out of what repeats page text outside the pages: the information
 /// dictionary, the XMP packet and bookmark titles. Returns how many places held it.
 pub fn scrub(doc: &mut Document, word: &str) -> usize {

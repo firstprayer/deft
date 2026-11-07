@@ -26,7 +26,6 @@ deft pdf - commands (input -> output)
   search          pdf -> report       Find text: --text invoice
   select          pdf -> pdf          Keep and reorder pages
   split           pdf -> pdf...       Split: per page, --every N, --ranges
-  strip           pdf -> pdf          Remove metadata
   to-images       pdf -> png|jpg...   Render pages: --dpi, --pages
   to-text         pdf -> txt          Extract text
   watermark       pdf -> pdf          Stamp text or an image on pages
