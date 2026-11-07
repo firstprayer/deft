@@ -45,8 +45,7 @@ fn run(job: &Job) -> Result<OpResult> {
     let margin = p.opt_points("margin");
     let area = p.opt_text("box").map(|b| region(&b)).transpose()?;
     if p.flag("auto") {
-        let bytes = deft_tools_pdf::save(&mut doc.clone())?;
-        let r = deft_tools_pdf::Renderer::new(&bytes)?;
+        let r = deft_tools_pdf::Renderer::of(&doc)?;
         let pad = margin.unwrap_or(0.0);
         for &i in &indexes {
             let Some([x, y, w, h]) =

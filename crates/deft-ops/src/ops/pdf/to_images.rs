@@ -40,14 +40,14 @@ pub static OP: Op = Op {
 fn run(job: &Job) -> Result<OpResult> {
     let p = job.params;
     let input = job.input();
-    let mut doc = open(input, p)?;
+    let doc = open(input, p)?;
     let count = deft_tools_pdf::page_ids(&doc).len();
     let indexes = resolve(&p.pages("pages"), count)?;
     let format = Format::from_name(&p.text("to")).expect("choice");
     // The renderer cannot decrypt; give it the decrypted document when needed.
     let renderer = match deft_tools_pdf::Renderer::new(input.bytes()?) {
         Ok(r) if !p.has("password") => r,
-        _ => deft_tools_pdf::Renderer::new(&deft_tools_pdf::save(&mut doc)?)?,
+        _ => deft_tools_pdf::Renderer::of(&doc)?,
     };
     let stem = input.stem();
     let opt = deft_tools_image::Encode {

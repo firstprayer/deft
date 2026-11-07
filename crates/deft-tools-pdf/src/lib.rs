@@ -19,32 +19,13 @@ pub use lopdf;
 // ------------------------------------------------------------------ load / save
 
 /// Parse a PDF. Encrypted files open with an empty user password when
-/// possible; otherwise `password` is required.
+/// possible; otherwise `password` is required. A protected file keeps its
+/// encryption state, so `meta::save_protected` can protect the result again.
 pub fn load(bytes: &[u8], password: Option<&str>) -> Result<Document> {
-    let options = match password {
-        Some(p) => lopdf::LoadOptions::with_password(p),
-        None => lopdf::LoadOptions::default(),
+    let mut doc = match attachments_only(bytes) {
+        Some(doc) => doc,
+        None => load_decrypted(bytes, password)?,
     };
-    let mut doc = Document::load_mem_with_options(bytes, options).map_err(|e| match e {
-        lopdf::Error::InvalidPassword | lopdf::Error::Decryption(_) => {
-            encrypted_error(password.is_some())
-        }
-        other => err(
-            ErrorCode::InputCorrupt,
-            format!("not a readable PDF: {other}"),
-        ),
-    })?;
-    if doc.trailer.get(b"Encrypt").is_ok() {
-        if doc.encryption_state.is_none() {
-            return Err(encrypted_error(password.is_some()));
-        }
-        // Decrypted on load; write the result without encryption.
-        if let Ok(id) = doc.trailer.get(b"Encrypt").and_then(Object::as_reference) {
-            doc.objects.remove(&id);
-        }
-        doc.trailer.remove(b"Encrypt");
-        doc.encryption_state = None;
-    }
     recover_packed_objects(&mut doc);
     let pages = doc.get_pages();
     if pages.is_empty() {
@@ -134,6 +115,63 @@ fn blank_comments(data: &[u8]) -> Vec<u8> {
         i += 1;
     }
     out
+}
+
+fn load_decrypted(bytes: &[u8], password: Option<&str>) -> Result<Document> {
+    let options = match password {
+        Some(p) => lopdf::LoadOptions::with_password(p),
+        None => lopdf::LoadOptions::default(),
+    };
+    let doc = Document::load_mem_with_options(bytes, options).map_err(|e| match e {
+        lopdf::Error::InvalidPassword | lopdf::Error::Decryption(_) => {
+            encrypted_error(password.is_some())
+        }
+        other => err(
+            ErrorCode::InputCorrupt,
+            format!("not a readable PDF: {other}"),
+        ),
+    })?;
+    // lopdf leaves /Encrypt in place when no password opened the file.
+    if doc.trailer.get(b"Encrypt").is_ok() {
+        return Err(encrypted_error(password.is_some()));
+    }
+    Ok(doc)
+}
+
+/// A file where only the attachments are encrypted (Acrobat's "encrypt only
+/// file attachments"): strings and streams use the Identity filter, so the
+/// document reads without a password. lopdf would ask for one, or decrypt the
+/// plain text into noise. Read it as it is and keep /Encrypt for the
+/// attachments, which stay encrypted.
+fn attachments_only(bytes: &[u8]) -> Option<Document> {
+    if !bytes.windows(4).any(|w| w == b"/EFF") {
+        return None;
+    }
+    // Hide the trailer key so lopdf reads the objects as written.
+    let mut hidden = bytes.to_vec();
+    let mut i = 0;
+    while let Some(at) = hidden[i..].windows(8).position(|w| w == b"/Encrypt") {
+        let end = i + at + 8;
+        if hidden.get(end).is_some_and(|b| b.is_ascii_whitespace()) {
+            hidden[end - 1] = b'x';
+        }
+        i = end;
+    }
+    let mut doc = Document::load_mem(&hidden).ok()?;
+    let key = doc.trailer.remove(b"Encrypx")?;
+    let dict = deref(&doc, &key).as_dict().ok()?;
+    let version = dict.get(b"V").ok().and_then(num).unwrap_or(0.0);
+    let identity = |k: &[u8]| {
+        dict.get(k)
+            .ok()
+            .and_then(|o| o.as_name().ok())
+            .is_none_or(|n| n == b"Identity")
+    };
+    if version < 4.0 || !identity(b"StmF") || !identity(b"StrF") {
+        return None;
+    }
+    doc.trailer.set("Encrypt", key);
+    Some(doc)
 }
 
 fn encrypted_error(had_password: bool) -> deft_core::error::DeftError {
@@ -1295,6 +1333,19 @@ impl Renderer {
             ),
         })?;
         Ok(Renderer { pdf })
+    }
+
+    /// A renderer for a loaded document, which is already decrypted. What is
+    /// left of /Encrypt (attachments only) stays out, as the renderer would
+    /// ask for the password.
+    pub fn of(doc: &Document) -> Result<Renderer> {
+        let mut copy = doc.clone();
+        copy.encryption_state = None;
+        copy.trailer.remove(b"Encrypt");
+        let mut out = Vec::new();
+        copy.save_to(&mut out)
+            .map_err(|e| err(ErrorCode::Internal, format!("reading PDF: {e}")))?;
+        Renderer::new(&out)
     }
 
     pub fn page_count(&self) -> usize {

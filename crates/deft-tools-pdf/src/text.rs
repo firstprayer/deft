@@ -4,7 +4,7 @@
 
 use crate::Renderer;
 use crate::layout::Run;
-use deft_core::error::{ErrorCode, Result, err};
+use deft_core::error::Result;
 use hayro::hayro_interpret::font::{Glyph as Drawn, GlyphRun};
 use hayro::hayro_interpret::hayro_cmap::BfString;
 use hayro::hayro_interpret::util::TransformExt;
@@ -410,11 +410,7 @@ impl Renderer {
 
 /// A reader for a document in memory.
 pub fn reader(doc: &Document) -> Result<Renderer> {
-    let mut out = Vec::new();
-    doc.clone()
-        .save_to(&mut out)
-        .map_err(|e| err(ErrorCode::Internal, format!("reading PDF: {e}")))?;
-    Renderer::new(&out)
+    Renderer::of(doc)
 }
 
 /// The share of `text` that could not be decoded, from 0 to 1.

@@ -42,11 +42,10 @@ pub static OP: Op = Op {
 
 fn run(job: &Job) -> Result<OpResult> {
     let p = job.params;
-    let mut doc = open(job.input(), p)?;
-    let bytes = deft_tools_pdf::save(&mut doc)?;
+    let doc = open(job.input(), p)?;
     let count = deft_tools_pdf::page_ids(&doc).len();
     let indexes = resolve_set(&p.pages("pages"), count)?;
-    let renderer = deft_tools_pdf::Renderer::new(&bytes)?;
+    let renderer = deft_tools_pdf::Renderer::of(&doc)?;
     let lang = p.text("lang");
     let dpi = p.int("dpi");
     let target = job.target(Format::Pdf);

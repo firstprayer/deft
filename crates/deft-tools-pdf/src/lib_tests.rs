@@ -261,3 +261,35 @@ fn a_page_that_cannot_be_read_is_refused() {
     assert_eq!(e.code, ErrorCode::InputCorrupt);
     assert!(e.message.contains("page 1"), "{}", e.message);
 }
+
+/// Acrobat's "encrypt only file attachments": the document itself is plain.
+fn attachments_locked() -> Vec<u8> {
+    let mut doc = load(&text_pdf("open", 2), None).unwrap();
+    let bytes = |n: usize| Object::string_literal(vec![7u8; n]);
+    let filter = dictionary! { "Type" => "CryptFilter", "CFM" => "AESV3", "Length" => 32 };
+    let encrypt = doc.add_object(dictionary! {
+        "Filter" => "Standard", "V" => 5, "R" => 6, "Length" => 256, "P" => -4,
+        "CF" => dictionary! { "StdCF" => filter },
+        "StmF" => "Identity", "StrF" => "Identity", "EFF" => "StdCF",
+        "O" => bytes(48), "U" => bytes(48), "OE" => bytes(32), "UE" => bytes(32),
+        "Perms" => bytes(16),
+    });
+    doc.trailer.set("Encrypt", encrypt);
+    let mut out = Vec::new();
+    doc.save_to(&mut out).unwrap();
+    out
+}
+
+#[test]
+fn a_file_with_only_its_attachments_encrypted_opens() {
+    let locked = attachments_locked();
+    for password in [None, Some("wrong")] {
+        let mut doc = load(&locked, password).unwrap();
+        assert_eq!(page_ids(&doc).len(), 2);
+        assert!(extract_text(&doc, &[1]).unwrap().contains("open page 2"));
+        // The attachments stay encrypted, so the file keeps its /Encrypt.
+        let out = save(&mut doc).unwrap();
+        assert!(Document::load_mem(&out).unwrap().trailer.has(b"Encrypt"));
+        assert_eq!(page_ids(&load(&out, None).unwrap()).len(), 2);
+    }
+}

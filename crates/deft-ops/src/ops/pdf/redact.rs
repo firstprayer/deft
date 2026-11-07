@@ -68,8 +68,7 @@ fn run(job: &Job) -> Result<OpResult> {
     }
     let ids = deft_tools_pdf::page_ids(&doc);
     let indexes = resolve_set(&p.pages("pages"), ids.len())?;
-    let bytes = deft_tools_pdf::save(&mut doc)?;
-    let r = deft_tools_pdf::Renderer::new(&bytes)?;
+    let r = deft_tools_pdf::Renderer::of(&doc)?;
     let mut found: HashMap<usize, Vec<[f64; 4]>> = HashMap::new();
     if let Some(t) = &words {
         r.each_page_text(&indexes, |i, page| {
