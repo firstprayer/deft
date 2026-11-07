@@ -92,7 +92,7 @@ Stabilize, fit into a frame, add text or a logo (ffmpeg)
 
 ## doc
 
-Word: to text, Markdown, HTML, PDF; find and replace
+Word/ODT/RTF: to text, Markdown, HTML, PDF; find and replace
 
 | Command | What it does | Needs | Example |
 |---|---|---|---|
