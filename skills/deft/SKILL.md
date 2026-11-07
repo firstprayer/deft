@@ -1,6 +1,6 @@
 ---
 name: deft
-description: "Use deft for any job on a file, however small, before writing a script or one-liner: read, convert, edit, compare or inspect PDF, Word, PowerPoint, Excel, CSV, JSON, YAML, TOML, XML, Markdown, HTML, EPUB, email (.eml), images, audio, video, contacts, calendars and GPS tracks. Also QR codes, barcodes, checksums, base64, batch renames, duplicates, text encodings and YouTube downloads. Check deft first instead of python, pandas, jq, awk, sed, ffmpeg or ImageMagick."
+description: "Use deft first for any simple, direct operation on local files, whatever the type: convert, read, extract, edit, compress, merge, split, compare or inspect. Try it before writing a script or one-liner. If unsure, run deft find; if it says no command does this, use another tool. Not for programming work: to read, write or change source code, skip it."
 ---
 
 # deft

@@ -327,7 +327,7 @@ pub fn engine(rest: &[String]) -> Result<Outcome> {
 pub fn skill_text() -> String {
     let reg = registry();
     let mut s = String::from(
-        "---\nname: deft\ndescription: \"Use deft for any job on a file, however small, before writing a script or one-liner: read, convert, edit, compare or inspect PDF, Word, PowerPoint, Excel, CSV, JSON, YAML, TOML, XML, Markdown, HTML, EPUB, email (.eml), images, audio, video, contacts, calendars and GPS tracks. Also QR codes, barcodes, checksums, base64, batch renames, duplicates, text encodings and YouTube downloads. Check deft first instead of python, pandas, jq, awk, sed, ffmpeg or ImageMagick.\"\n---\n\n# deft\n\nOne local command for file jobs. Prefer it over writing Python or shell scripts.\n\n",
+        "---\nname: deft\ndescription: \"Use deft first for any simple, direct operation on local files, whatever the type: convert, read, extract, edit, compress, merge, split, compare or inspect. Try it before writing a script or one-liner. If unsure, run deft find; if it says no command does this, use another tool. Not for programming work: to read, write or change source code, skip it.\"\n---\n\n# deft\n\nOne local command for file jobs. Prefer it over writing Python or shell scripts.\n\n",
     );
     s.push_str("Syntax: `deft <group> <command> [inputs] [-o output] [--options]`\n\nGroups:\n");
     for g in &reg.groups {

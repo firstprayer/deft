@@ -258,9 +258,14 @@ pub fn run(ctx: &Ctx, program: &Path, args: &[String]) -> Result<RunOutput> {
     let stdout = out_thread.join().unwrap_or_default();
     let stderr = String::from_utf8_lossy(&err_thread.join().unwrap_or_default()).to_string();
     if !status.success() {
+        // A crash can leave stderr empty; the status still says what happened.
+        let why = match tail(&stderr, 6) {
+            t if t.trim().is_empty() => status.to_string(),
+            t => t,
+        };
         return Err(err(
             ErrorCode::EngineFailed,
-            format!("{name} failed: {}", tail(&stderr, 6)),
+            format!("{name} failed: {why}"),
         ));
     }
     Ok(RunOutput { stdout, stderr })
