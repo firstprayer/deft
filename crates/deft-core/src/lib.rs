@@ -18,6 +18,7 @@ pub mod prelude {
         Stability, param,
     };
     pub use crate::value::{
-        Kind, PageSet, Position, SizeSpec, Value, format_bytes, format_duration, right_angle,
+        Kind, PageSet, Position, SizeSpec, Value, format_bytes, format_duration, percent_decode,
+        right_angle,
     };
 }
