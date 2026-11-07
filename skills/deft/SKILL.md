@@ -1,6 +1,6 @@
 ---
 name: deft
-description: "Use deft first for any simple, direct operation on local files, whatever the type: convert, read, extract, edit, compress, merge, split, compare or inspect. Try it before writing a script or one-liner. If unsure, run deft find; if it says no command does this, use another tool. Not for programming work: to read, write or change source code, skip it."
+description: "Use deft first for any simple, direct operation on local files, whatever the type: create, convert, read, query, extract, edit, compress, merge, split, compare or inspect. Try it before writing a script or one-liner. If unsure, run deft find; if it says no command does this, use another tool. Not for programming work: to read, write or change source code, skip it."
 ---
 
 # deft
