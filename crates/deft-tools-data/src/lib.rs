@@ -130,6 +130,36 @@ fn has_trailing_zero(line: &str) -> bool {
     number && value.ends_with('0')
 }
 
+/// A YAML anchor or alias, such as `base: &b` or `- *b`.
+fn has_anchor(line: &str) -> bool {
+    let marked = |s: &str| s.trim_start().starts_with(['&', '*']);
+    line.split_once(": ").is_some_and(|(_, v)| marked(v))
+        || line.trim_start().strip_prefix("- ").is_some_and(marked)
+}
+
+/// A whole number too long for 64 bits, outside any string. It is read as a
+/// floating-point number, which cannot hold every digit.
+fn has_huge_integer(text: &str) -> bool {
+    let (mut quoted, mut escaped, mut run) = (false, false, 0);
+    for c in text.chars() {
+        match c {
+            _ if escaped => escaped = false,
+            '\\' if quoted => escaped = true,
+            '"' => quoted = !quoted,
+            c if !quoted && c.is_ascii_digit() => {
+                run += 1;
+                if run > 20 {
+                    return true;
+                }
+                continue;
+            }
+            _ => {}
+        }
+        run = 0;
+    }
+    false
+}
+
 /// What reading a document drops, because the value model cannot hold it.
 pub fn lost_on_reading(bytes: &[u8], format: Format) -> Vec<String> {
     let Ok(text) = std::str::from_utf8(bytes) else {
@@ -141,6 +171,12 @@ pub fn lost_on_reading(bytes: &[u8], format: Format) -> Vec<String> {
     }
     if format == Format::Yaml && text.lines().any(has_trailing_zero) {
         lost.push("a number such as 1.10 is written 1.1; quote it to keep the zero".to_string());
+    }
+    if format == Format::Yaml && text.lines().any(has_anchor) {
+        lost.push("anchors are written out in full".to_string());
+    }
+    if matches!(format, Format::Json | Format::Jsonl) && has_huge_integer(text) {
+        lost.push("a whole number over 20 digits loses its last digits".to_string());
     }
     if format == Format::Xml {
         lost.extend(xml::lost(text));

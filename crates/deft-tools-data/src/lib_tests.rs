@@ -147,6 +147,11 @@ fn losses_are_named() {
     assert_eq!(lost("version: 1.10\n", Format::Yaml).len(), 1);
     assert!(lost("version: 1.15\nname: v1.10a\n", Format::Yaml).is_empty());
     assert!(lost("<a><b>x</b> <c>y</c></a>", Format::Xml).is_empty());
+    assert_eq!(lost("a: &b\n  x: 1\nc: *b\n", Format::Yaml).len(), 1);
+    assert!(lost("a: b & c\nd: 2 * 3\n", Format::Yaml).is_empty());
+    assert_eq!(lost("{\"n\":123456789012345678901}", Format::Json).len(), 1);
+    assert!(lost("{\"n\":\"123456789012345678901\"}", Format::Json).is_empty());
+    assert!(lost("{\"n\":12345678901234567890}", Format::Json).is_empty());
 }
 
 #[test]
