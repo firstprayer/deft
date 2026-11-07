@@ -52,6 +52,26 @@ fn attempt(bytes: &[u8], job: &Job, policy: Option<ImagePolicy>) -> Result<(Vec<
     Ok((deft_tools_pdf::meta::save_protected(&mut doc)?, n))
 }
 
+/// The error for a target below every attempt. The input itself counts as
+/// one: a floor above the file the user has would read as if compressing made
+/// it bigger.
+fn unreachable(name: &str, best: u64, original: u64, target: u64) -> DeftError {
+    let message = if best >= original {
+        format!(
+            "{name}: the file is already compact ({}); {} is not reachable",
+            format_bytes(original),
+            format_bytes(target)
+        )
+    } else {
+        format!(
+            "{name}: smallest reachable size is {}, above {}",
+            format_bytes(best),
+            format_bytes(target)
+        )
+    };
+    err(ErrorCode::TargetUnreachable, message)
+}
+
 fn run(job: &Job) -> Result<OpResult> {
     let input = job.input();
     open(input, job.params)?; // reports encryption and corruption with the file name
@@ -85,14 +105,11 @@ fn run(job: &Job) -> Result<OpResult> {
             }
             let best = best.expect("at least one attempt");
             if best.0.len() as u64 > target {
-                return Err(err(
-                    ErrorCode::TargetUnreachable,
-                    format!(
-                        "{}: smallest reachable size is {}, above {}",
-                        input.display,
-                        format_bytes(best.0.len() as u64),
-                        format_bytes(target)
-                    ),
+                return Err(unreachable(
+                    &input.display,
+                    best.0.len() as u64,
+                    original.len() as u64,
+                    target,
                 ));
             }
             best
@@ -131,4 +148,22 @@ fn run(job: &Job) -> Result<OpResult> {
         res = res.warn(w);
     }
     Ok(res)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_floor_is_never_above_the_input() {
+        let e = unreachable("a.pdf", 3_400_000, 3_088_632, 1_005_000);
+        assert!(e.message.contains("already compact"), "{}", e.message);
+        assert!(!e.message.contains("3.2MB"), "{}", e.message);
+        let e = unreachable("a.pdf", 2_000_000, 3_088_632, 1_005_000);
+        assert!(
+            e.message.contains("smallest reachable size"),
+            "{}",
+            e.message
+        );
+    }
 }
