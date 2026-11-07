@@ -611,3 +611,50 @@ fn a_rule_before_a_heading_is_not_front_matter() {
     assert_eq!(found.len(), 1);
     assert_eq!((found[0].plain.as_str(), found[0].line), ("Real", 3));
 }
+
+#[test]
+fn rtf_decodes_each_font_code_page() {
+    let cp1250 = rtf::read(br"{\rtf1\ansi\ansicpg1250{\fonttbl{\f0\fcharset238 Arial CE;}}\f0 za\'bf\'f3\'b3\'e6 g\'ea\'9cl\'b9\par}");
+    assert_eq!(cp1250.text(), "zażółć gęślą\n");
+    // Shift-JIS in a \fcharset128 font, with a trail byte written as a letter.
+    let japanese = rtf::read(br"{\rtf1\ansi\ansicpg1252{\fonttbl{\f0\fcharset0 Times;}{\f1\fcharset128 MS Gothic;}}\f0 caf\'e9 {\f1 \'83e\'83X\'83g \'94\'4f}\par}");
+    assert_eq!(japanese.text(), "café テスト 念\n");
+    // \uc2: two bytes stand for each \u character.
+    let unicode = rtf::read(
+        br"{\rtf1\ansi{\fonttbl{\f1\fcharset128 MS Gothic;}}\f1\uc2 \u24565\'94\'4f!\par}",
+    );
+    assert_eq!(unicode.text(), "念!\n");
+    let meta = rtf::read(
+        br"{\rtf1\ansi{\info{\upr{\author Axel D?fler}{\*\ud{\author Axel D\u246?fler}}}}Text\par}",
+    );
+    assert_eq!(meta.author.as_deref(), Some("Axel Döfler"));
+    assert_eq!(meta.text(), "Text\n");
+}
+
+#[test]
+fn rtf_keeps_tables_lists_notes_links_and_pictures() {
+    let png = "89504e470d0a1a0a";
+    let src = format!(
+        r#"{{\rtf1\ansi{{\fonttbl{{\f0 Arial;}}{{\f3\fcharset2 Symbol;}}}}{{\stylesheet{{\s1 heading 1;}}{{\*\cs10 Default;}}}}
+\pard\s1 Title\par
+\pard Claim{{\super\chftn}}{{\footnote \pard\plain {{\chftn}} The source.}} here.\par
+{{\listtext\pard\plain\f3 \'b7\tab}}\pard\li720 one\par
+{{\listtext\pard\plain\f3 \'b7\tab}}\pard\li1440 deeper\par
+{{\listtext\pard\plain 2.\tab}}\pard\li720 two\par
+\pard See {{\field{{\*\fldinst HYPERLINK "http://tika.apache.org"}}{{\fldrslt tika}}}}.\par
+\trowd\cellx1000\cellx2000\pard\intbl a\cell b\cell\row
+\pard\intbl c\par d\cell e\cell\row
+\pard After {{\*\shppict{{\pict\pngblip {png}}}}}{{\nonshppict{{\pict\wmetafile8 0102}}}}\par}}"#
+    );
+    let doc = rtf::read(src.as_bytes());
+    let md = markdown::render(&doc);
+    assert!(md.starts_with("# Title\n"), "{md}");
+    assert!(md.contains("Claim[^1] here."), "{md}");
+    assert!(md.contains("[^1]: The source."), "{md}");
+    assert!(md.contains("- one\n  - deeper\n"), "{md}");
+    assert!(md.contains("See [tika](http://tika.apache.org)."), "{md}");
+    assert!(md.contains("| a | b |\n| --- | --- |\n| c d | e |"), "{md}");
+    assert_eq!(doc.images.len(), 1);
+    assert_eq!(doc.images[0].name, "image1.png");
+    assert!(md.contains("After ![](image1.png)"), "{md}");
+}

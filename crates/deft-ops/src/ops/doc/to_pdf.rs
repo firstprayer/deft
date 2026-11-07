@@ -28,5 +28,7 @@ fn run(job: &Job) -> Result<OpResult> {
     let doc = load(job.input())?;
     let dir = images_folder(job, &doc.images)?;
     let md = deft_tools_doc::markdown::render(&doc);
-    markdown_pdf(job, &md, Some(&dir))
+    let mut res = markdown_pdf(job, &md, Some(&dir))?;
+    res.warnings.splice(0..0, doc.warnings);
+    Ok(res)
 }

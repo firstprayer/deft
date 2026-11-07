@@ -41,7 +41,7 @@ fn paragraphs_in<'a, 'i>(node: Node<'a, 'i>) -> Vec<Node<'a, 'i>> {
 }
 
 /// Add a list item `level` lists deep, under the last item of the list above.
-fn add_item(list: &mut Vec<Block>, level: usize, ordered: bool, item: Vec<Block>) {
+pub(crate) fn add_item(list: &mut Vec<Block>, level: usize, ordered: bool, item: Vec<Block>) {
     if level > 0
         && let Some(Block::List { items, .. }) = list.last_mut()
         && let Some(parent) = items.last_mut()

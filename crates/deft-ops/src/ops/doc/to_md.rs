@@ -46,5 +46,6 @@ fn run(job: &Job) -> Result<OpResult> {
     if let Some(w) = warning {
         res = res.warn(w);
     }
+    res.warnings.extend(doc.warnings);
     Ok(res)
 }

@@ -44,6 +44,7 @@ fn run(job: &Job) -> Result<OpResult> {
         author: p.opt_text("author"),
         blocks,
         images,
+        ..Default::default()
     };
     let words = doc.words();
     let mut res = OpResult::one(Produced::bytes(

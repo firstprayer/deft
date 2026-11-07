@@ -51,6 +51,7 @@ fn run(job: &Job) -> Result<OpResult> {
         );
     }
     let mut res = OpResult::one(Produced::bytes(html.into_bytes(), Format::Html));
+    res.warnings = doc.warnings;
     if skipped > 0 {
         res = res.warn(format!(
             "{skipped} pictures are in a format browsers cannot show"

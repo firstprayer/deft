@@ -77,6 +77,8 @@ pub struct Document {
     pub author: Option<String>,
     pub blocks: Vec<Block>,
     pub images: Vec<Image>,
+    /// What the reader could not keep, for the user to hear about.
+    pub warnings: Vec<String>,
 }
 
 fn spans_text(spans: &[Span], out: &mut String) {
