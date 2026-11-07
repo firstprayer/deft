@@ -40,6 +40,9 @@ impl Field {
         if self.read_only {
             v["read_only"] = json!(true);
         }
+        if let Some(n) = self.max_len.filter(|n| *n > 0 && self.kind == "text") {
+            v["max_length"] = json!(n);
+        }
         v
     }
 }
@@ -568,6 +571,30 @@ fn scalar(v: &Value) -> String {
     }
 }
 
+/// A text field with /MaxLen holds and shows at most that many characters (a
+/// comb field one per box), so a longer value would be cut on the page while
+/// the form data kept all of it.
+fn check_length(f: &Field, text: &str) -> Result<()> {
+    let Some(max) = f.max_len.filter(|n| *n > 0 && f.kind == "text") else {
+        return Ok(());
+    };
+    let n = text.chars().count();
+    if n as i64 <= max {
+        return Ok(());
+    }
+    let hint = if f.flags & (1 << 24) != 0 {
+        "it has one box per character; a number spread over several fields, \
+         such as an SSN, goes in parts into each of them"
+    } else {
+        "shorten the value; deft pdf fields shows each max_length"
+    };
+    Err(err(
+        ErrorCode::BadValue,
+        format!("{}: at most {max} characters, got {n}", f.name),
+    )
+    .hint(hint))
+}
+
 fn set_button(doc: &mut Document, f: &Field, value: &Value) -> Result<()> {
     // A radio group takes an export name; a checkbox takes true or false.
     let wanted = match value {
@@ -644,6 +671,7 @@ pub fn fill(doc: &mut Document, values: &BTreeMap<String, Value>) -> Result<Vec<
             "checkbox" | "radio" => set_button(doc, f, value)?,
             "text" | "choice" => {
                 let text = scalar(value);
+                check_length(f, &text)?;
                 if f.kind == "choice" && !f.options.is_empty() && !f.options.contains(&text) {
                     warnings.push(format!("{}: {text:?} is not one of its options", f.name));
                 }
@@ -822,3 +850,7 @@ pub fn flatten(doc: &mut Document) -> Result<usize> {
     }
     Ok(total)
 }
+
+#[cfg(test)]
+#[path = "forms_tests.rs"]
+mod tests;
