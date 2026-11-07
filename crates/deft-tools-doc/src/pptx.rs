@@ -13,6 +13,8 @@ const R: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relations
 pub struct Slide {
     pub title: Option<String>,
     pub body: Vec<Vec<Span>>,
+    /// Tables: rows of cells.
+    pub tables: Vec<Vec<Vec<Vec<Span>>>>,
     pub images: Vec<String>,
     pub notes: Option<String>,
 }
@@ -21,8 +23,9 @@ fn name(n: &Node) -> String {
     n.tag_name().name().to_string()
 }
 
-fn paragraph_spans(p: Node) -> Vec<Span> {
-    let mut out = Vec::new();
+/// A paragraph's runs. `links` maps relationship ids to web addresses.
+fn paragraph_spans(p: Node, links: &HashMap<String, String>) -> Vec<Span> {
+    let mut out: Vec<Span> = Vec::new();
     for r in p
         .children()
         .filter(|c| matches!(c.tag_name().name(), "r" | "fld" | "br"))
@@ -33,18 +36,57 @@ fn paragraph_spans(p: Node) -> Vec<Span> {
         }
         let props = r.children().find(|c| c.tag_name().name() == "rPr");
         let on = |k: &str| props.and_then(|x| x.attribute(k)) == Some("1");
+        let link = props
+            .and_then(|x| x.children().find(|c| c.tag_name().name() == "hlinkClick"))
+            .and_then(|h| h.attribute((R, "id")))
+            .and_then(|id| links.get(id))
+            .cloned();
         let text: String = r
             .children()
             .filter(|c| c.tag_name().name() == "t")
             .filter_map(|t| t.text())
             .collect();
-        if !text.is_empty() {
-            out.push(Span {
-                text,
-                bold: on("b"),
-                italic: on("i"),
-                ..Default::default()
-            });
+        if text.is_empty() {
+            continue;
+        }
+        let span = Span {
+            text,
+            bold: on("b"),
+            italic: on("i"),
+            link,
+            ..Default::default()
+        };
+        // PowerPoint splits text into runs at will; equal neighbours are one.
+        match out.last_mut() {
+            Some(last)
+                if last.bold == span.bold
+                    && last.italic == span.italic
+                    && last.link == span.link
+                    && last.text != "\n" =>
+            {
+                last.text.push_str(&span.text)
+            }
+            _ => out.push(span),
+        }
+    }
+    out
+}
+
+/// Relationship id -> address, for the links of one part that leave the deck.
+fn web_links(pkg: &Package, part: &str) -> HashMap<String, String> {
+    let (dir, file) = part.rsplit_once('/').unwrap_or(("", part));
+    let mut out = HashMap::new();
+    if let Some(text) = pkg.text(&format!("{dir}/_rels/{file}.rels"))
+        && let Ok(doc) = Xml::parse(&text)
+    {
+        for r in doc.root_element().children().filter(Node::is_element) {
+            if let (Some(id), Some(t), Some("External")) = (
+                r.attribute("Id"),
+                r.attribute("Target"),
+                r.attribute("TargetMode"),
+            ) {
+                out.insert(id.to_string(), t.to_string());
+            }
         }
     }
     out
@@ -86,6 +128,7 @@ fn read_slide(pkg: &Package, part: &str, images: &mut Vec<Image>) -> Result<Slid
     let text = pkg.text(part).ok_or_else(|| bad("pptx", part))?;
     let doc = Xml::parse(&text).map_err(|e| bad("pptx", e))?;
     let targets = rels(pkg, part);
+    let links = web_links(pkg, part);
     let mut slide = Slide::default();
     for shape in doc.descendants().filter(|n| name(n) == "sp") {
         let is_title = shape
@@ -96,7 +139,7 @@ fn read_slide(pkg: &Package, part: &str, images: &mut Vec<Image>) -> Result<Slid
         let mut paragraphs: Vec<Vec<Span>> = shape
             .descendants()
             .filter(|n| name(n) == "p")
-            .map(paragraph_spans)
+            .map(|p| paragraph_spans(p, &links))
             .filter(|s| s.iter().any(|x| !x.text.trim().is_empty()))
             .collect();
         if is_title && slide.title.is_none() {
@@ -104,7 +147,8 @@ fn read_slide(pkg: &Package, part: &str, images: &mut Vec<Image>) -> Result<Slid
                 .iter()
                 .map(|p| p.iter().map(|s| s.text.as_str()).collect())
                 .collect();
-            slide.title = Some(joined.join(" ").replace('\n', " "));
+            let title = joined.join(" ").replace('\n', " ");
+            slide.title = Some(title.trim().to_string()).filter(|t| !t.is_empty());
         } else {
             slide.body.append(&mut paragraphs);
         }
@@ -119,18 +163,32 @@ fn read_slide(pkg: &Package, part: &str, images: &mut Vec<Image>) -> Result<Slid
         }
     }
     for table in doc.descendants().filter(|n| name(n) == "tbl") {
-        for row in table.children().filter(|c| c.tag_name().name() == "tr") {
-            let cells: Vec<String> = row
-                .children()
-                .filter(|c| c.tag_name().name() == "tc")
-                .map(|c| {
-                    c.descendants()
-                        .filter(|n| name(n) == "t")
-                        .filter_map(|t| t.text())
-                        .collect::<String>()
-                })
-                .collect();
-            slide.body.push(vec![Span::plain(cells.join(" | "))]);
+        let rows: Vec<Vec<Vec<Span>>> = table
+            .children()
+            .filter(|c| c.tag_name().name() == "tr")
+            .map(|row| {
+                row.children()
+                    .filter(|c| c.tag_name().name() == "tc")
+                    .map(|c| {
+                        // A cell's paragraphs are separate sentences.
+                        let mut cell: Vec<Span> = Vec::new();
+                        for p in c.descendants().filter(|n| name(n) == "p") {
+                            let spans = paragraph_spans(p, &links);
+                            if spans.is_empty() {
+                                continue;
+                            }
+                            if !cell.is_empty() {
+                                cell.push(Span::plain(" "));
+                            }
+                            cell.extend(spans);
+                        }
+                        cell
+                    })
+                    .collect()
+            })
+            .collect();
+        if !rows.is_empty() {
+            slide.tables.push(rows);
         }
     }
     for blip in doc.descendants().filter(|n| name(n) == "blip") {
@@ -169,7 +227,12 @@ fn read_slide(pkg: &Package, part: &str, images: &mut Vec<Image>) -> Result<Slid
                         .filter(|n| name(n) == "p")
                         .collect::<Vec<_>>()
                 })
-                .map(|p| paragraph_spans(p).iter().map(|s| s.text.clone()).collect())
+                .map(|p| {
+                    paragraph_spans(p, &HashMap::new())
+                        .iter()
+                        .map(|s| s.text.clone())
+                        .collect()
+                })
                 .filter(|l: &String| !l.trim().is_empty())
                 .collect();
             if !lines.is_empty() {
@@ -235,7 +298,7 @@ fn diagram_text(pkg: &Package, path: &str) -> Vec<Vec<Span>> {
             pt.children()
                 .filter(|c| name(c) == "t")
                 .flat_map(|t| t.children().filter(|c| name(c) == "p"))
-                .map(paragraph_spans)
+                .map(|p| paragraph_spans(p, &HashMap::new()))
                 .collect::<Vec<_>>()
         })
         .filter(|s| s.iter().any(|x| !x.text.trim().is_empty()))
@@ -274,6 +337,9 @@ pub fn to_document(slides: &[Slide], images: Vec<Image>, notes: bool) -> Documen
                     .map(|p| vec![Block::Paragraph(p.clone())])
                     .collect(),
             });
+        }
+        for table in &s.tables {
+            blocks.push(Block::Table(table.clone()));
         }
         for img in &s.images {
             blocks.push(Block::Paragraph(vec![Span {

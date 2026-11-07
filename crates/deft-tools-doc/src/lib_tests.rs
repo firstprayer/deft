@@ -479,3 +479,36 @@ fn smartart_text_is_read_in_diagram_order() {
         ["1- A line can be drawn.", "2- A line can be extended."]
     );
 }
+
+#[test]
+fn slide_tables_links_and_untitled_slides() {
+    let title = "<p:sp><p:nvSpPr><p:nvPr><p:ph type=\"title\"/></p:nvPr></p:nvSpPr><p:txBody><a:p><a:r><a:t> </a:t></a:r></a:p></p:txBody></p:sp>";
+    let link = "<p:sp><p:txBody><a:p><a:r><a:rPr><a:hlinkClick r:id=\"rId4\"/></a:rPr><a:t>This is </a:t></a:r><a:r><a:rPr><a:hlinkClick r:id=\"rId4\"/></a:rPr><a:t>a link</a:t></a:r></a:p></p:txBody></p:sp>";
+    let cell = |a: &str, b: &str| {
+        format!(
+            "<a:tc><a:txBody><a:p><a:r><a:t>{a}</a:t></a:r></a:p><a:p><a:r><a:t>{b}</a:t></a:r></a:p></a:txBody></a:tc>"
+        )
+    };
+    let table = format!(
+        "<p:graphicFrame><a:graphic><a:graphicData><a:tbl><a:tr>{}{}</a:tr><a:tr>{}{}</a:tr></a:tbl></a:graphicData></a:graphic></p:graphicFrame>",
+        cell("How", ""),
+        cell("Result", ""),
+        cell("Sessions.", "Communities."),
+        cell("Exchanges.", "Cohesion.")
+    );
+    let rels = "<Relationship Id=\"rId4\" Type=\"hyperlink\" Target=\"http://tika.apache.org/\" TargetMode=\"External\"/>";
+    let bytes = deck(&format!("{title}{link}{table}"), rels, &[]);
+    let (slides, images) = pptx::read(&bytes).unwrap();
+    let md = markdown::render(&pptx::to_document(&slides, images, false));
+    assert!(md.starts_with("## Slide 1\n"), "{md}");
+    assert!(
+        md.contains("- [This is a link](http://tika.apache.org/)"),
+        "{md}"
+    );
+    assert!(
+        md.contains(
+            "| How | Result |\n| --- | --- |\n| Sessions. Communities. | Exchanges. Cohesion. |"
+        ),
+        "{md}"
+    );
+}
