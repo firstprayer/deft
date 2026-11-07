@@ -208,6 +208,13 @@ fn expand_inputs(op: &Op, req: &Request) -> Result<Vec<InputFile>> {
                 match format {
                     Some(f) if allowed.contains(&f) => {}
                     Some(f) => {
+                        if f == Format::Xls
+                            && let Some(kind) = std::fs::read(&path)
+                                .ok()
+                                .and_then(|b| deft_core::format::ole_content(&b))
+                        {
+                            return Err(old_office(&path, kind, op));
+                        }
                         return Err(err(
                             ErrorCode::InputMismatch,
                             format!(
@@ -247,6 +254,33 @@ fn expand_inputs(op: &Op, req: &Request) -> Result<Vec<InputFile>> {
         )),
         _ => Ok(out),
     }
+}
+
+/// Refuse an old or password-protected Office file with what to do about it.
+fn old_office(path: &Path, kind: &str, op: &Op) -> DeftError {
+    let (code, what, hint) = match kind {
+        "encrypted" => (
+            ErrorCode::InputEncrypted,
+            "the document is password-protected",
+            "remove the password in Office (File > Info > Protect), save, and try again",
+        ),
+        "word" => (
+            ErrorCode::InputMismatch,
+            "this is an old Word .doc file",
+            "deft reads Word .docx; save the file as .docx first",
+        ),
+        _ => (
+            ErrorCode::InputMismatch,
+            "this is an old PowerPoint .ppt file",
+            "deft reads .pptx; save the file as .pptx first",
+        ),
+    };
+    let expected = if code == ErrorCode::InputMismatch {
+        format!(", expected {}", op.input.label)
+    } else {
+        String::new()
+    };
+    err(code, format!("{}: {what}{expected}", path.display())).hint(hint)
 }
 
 fn conversion_hint(found: Format, op: &Op) -> String {
@@ -1039,4 +1073,30 @@ pub fn convert(req: Request, to: Option<String>, ctx: &Ctx) -> Result<Report> {
         stdout: stdout_bytes,
         chain: chain_ids,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn old_and_locked_office_files_say_so() {
+        let reg = registry();
+        let op = reg.ops.iter().find(|o| o.id == "doc.to-text").unwrap();
+        let ole = |stream: &str| {
+            let mut b = vec![0xD0, 0xCF, 0x11, 0xE0, 0, 0];
+            b.extend(stream.encode_utf16().flat_map(u16::to_le_bytes));
+            b
+        };
+        let kind = |s: &str| deft_core::format::ole_content(&ole(s));
+        assert_eq!(kind("EncryptedPackage"), Some("encrypted"));
+        assert_eq!(kind("WordDocument"), Some("word"));
+        assert_eq!(kind("Workbook"), None);
+        let e = old_office(Path::new("a.docx"), "encrypted", op);
+        assert_eq!(e.code, ErrorCode::InputEncrypted);
+        assert_eq!(e.message, "a.docx: the document is password-protected");
+        let e = old_office(Path::new("a.doc"), "word", op);
+        assert_eq!(e.code, ErrorCode::InputMismatch);
+        assert!(e.message.contains("old Word .doc"), "{}", e.message);
+    }
 }
