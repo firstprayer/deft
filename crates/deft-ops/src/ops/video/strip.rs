@@ -22,6 +22,8 @@ fn run(job: &Job) -> Result<OpResult> {
     args.extend(strs(&[
         "-map",
         "0",
+        "-map",
+        "-0:d?",
         "-map_metadata",
         "-1",
         "-map_chapters",

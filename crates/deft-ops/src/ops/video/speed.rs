@@ -37,10 +37,16 @@ fn run(job: &Job) -> Result<OpResult> {
     let format = job.target(job.input().require_format()?);
     let out = temp_out(job, format);
     let factor = job.params.float("factor");
-    let audio = stream(&probe(job, job.input(), OP.id)?, "audio").is_some();
+    let info = probe(job, job.input(), OP.id)?;
+    let audio = stream(&info, "audio").is_some();
+    // Without this a timelapse keeps every frame, at a rate players refuse.
+    let rate = stream(&info, "video")
+        .and_then(|v| v["avg_frame_rate"].as_str())
+        .filter(|r| !r.starts_with('0'))
+        .map_or(String::new(), |r| format!(",fps={r}"));
     let mut args = strs(&["-i"]);
     args.push(input_path(job)?);
-    args.extend(["-vf".to_string(), format!("setpts=PTS/{factor}")]);
+    args.extend(["-vf".to_string(), format!("setpts=PTS/{factor}{rate}")]);
     if audio {
         args.extend(["-af".to_string(), atempo(factor)]);
     }

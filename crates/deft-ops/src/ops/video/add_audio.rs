@@ -1,5 +1,6 @@
 use super::_common::{
     FFMPEG, VIDEO, duration, ffmpeg, file_result, input_path, probe, stream, strs, temp_out,
+    video_codec_args,
 };
 use deft_core::prelude::*;
 
@@ -52,7 +53,7 @@ fn run(job: &Job) -> Result<OpResult> {
     if p.text("mode") == "mix" && has_sound {
         args.extend(strs(&[
             "-filter_complex",
-            "[0:a][1:a]amix=inputs=2:duration=first:normalize=0[a]",
+            "[0:a][1:a]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.97:level=disabled[a]",
             "-map",
             "0:v",
             "-map",
@@ -63,13 +64,15 @@ fn run(job: &Job) -> Result<OpResult> {
     }
     // Longer audio is cut; shorter audio leaves the end silent.
     args.extend(["-t".to_string(), format!("{}", duration(&info))]);
-    let (video, sound) = if format == Format::Webm {
-        ("copy", "libopus")
+    let codec = stream(&info, "video").and_then(|v| v["codec_name"].as_str());
+    if format != Format::Webm {
+        args.extend(strs(&["-c:v", "copy", "-c:a", "aac"]));
+    } else if matches!(codec, Some("vp8" | "vp9" | "av1")) {
+        args.extend(strs(&["-c:v", "copy", "-c:a", "libopus"]));
     } else {
-        ("copy", "aac")
-    };
-    args.extend(["-c:v".to_string(), video.to_string()]);
-    args.extend(["-c:a".to_string(), sound.to_string()]);
+        // WebM holds no other picture format.
+        args.extend(video_codec_args(format, None));
+    }
     args.push(out.display().to_string());
     ffmpeg(job, OP.id, args)?;
     Ok(file_result(out, format))

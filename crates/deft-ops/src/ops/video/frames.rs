@@ -48,6 +48,12 @@ fn run(job: &Job) -> Result<OpResult> {
     let format = Format::from_name(&p.text("to")).expect("choice");
     let stem = job.input().stem();
     let src = input_path(job)?;
+    // ffmpeg's default JPEG quality shows; PNG has no such setting.
+    let quality = if format == Format::Jpeg {
+        strs(&["-q:v", "2"])
+    } else {
+        vec![]
+    };
     let mut outputs = Vec::new();
     let rate = match (p.opt_float("fps"), p.opt_seconds("interval")) {
         (Some(_), Some(_)) => {
@@ -92,6 +98,7 @@ fn run(job: &Job) -> Result<OpResult> {
                 args.extend(strs(&["-i"]));
                 args.push(src.clone());
                 args.extend(strs(&["-frames:v", "1", "-update", "1"]));
+                args.extend(quality.iter().cloned());
                 args.push(out.display().to_string());
                 ffmpeg(job, OP.id, args)?;
                 outputs.push(Produced::file(out, Some(format)).named(format!(
@@ -108,11 +115,11 @@ fn run(job: &Job) -> Result<OpResult> {
             let from = p.opt_seconds("from").unwrap_or(0.0);
             let mut args = vec!["-ss".to_string(), format!("{from}"), "-i".to_string()];
             args.push(src);
-            args.extend([
-                "-vf".to_string(),
-                format!("fps={fps}"),
-                pattern.display().to_string(),
-            ]);
+            // Rounding up takes the first frame of each step, so sampling starts at
+            // --from and not half a step later.
+            args.extend(["-vf".to_string(), format!("fps={fps}:round=up")]);
+            args.extend(quality);
+            args.push(pattern.display().to_string());
             ffmpeg(job, OP.id, args)?;
             let mut files: Vec<_> = std::fs::read_dir(&dir)?
                 .filter_map(|e| e.ok())

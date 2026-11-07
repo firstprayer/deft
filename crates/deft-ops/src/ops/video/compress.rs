@@ -1,4 +1,6 @@
-use super::_common::{FFMPEG, VIDEO, duration, ffmpeg, input_path, probe, stream, strs, temp_out};
+use super::_common::{
+    FFMPEG, VIDEO, duration, ffmpeg, input_path, probe, stream, strs, temp_out, video_size,
+};
 use deft_core::prelude::*;
 
 pub static OP: Op = Op {
@@ -45,6 +47,23 @@ fn run(job: &Job) -> Result<OpResult> {
     let p = job.params;
     let input = job.input();
     let out = temp_out(job, Format::Mp4);
+    let before = input.bytes()?.len() as u64;
+    let target = p.opt_bytes("target-size");
+    let info = probe(job, input, OP.id)?;
+    let shrinks = p
+        .opt_int("max-height")
+        .zip(video_size(&info))
+        .is_some_and(|(limit, (_, height))| limit < height as i64);
+    // Only an mp4 can be handed back as it is, and not when a smaller frame was asked for.
+    let can_keep = input.format == Some(Format::Mp4) && !shrinks;
+    if can_keep && target.is_some_and(|t| t >= before) {
+        return keep_input(
+            job,
+            out,
+            before,
+            "the input is already within --target-size",
+        );
+    }
     let scale = p
         .opt_int("max-height")
         .map(|h| vec!["-vf".to_string(), format!("scale=-2:'min({h},ih)'")])
@@ -53,25 +72,33 @@ fn run(job: &Job) -> Result<OpResult> {
         "-c:v", "libx264", "-preset", "medium", "-pix_fmt", "yuv420p",
     ]);
     video.extend(scale);
-    match p.opt_bytes("target-size") {
-        Some(target) => to_size(job, &video, target, &out)?,
-        None => {
+    match target {
+        Some(target) if target < before => to_size(job, &video, target, &out)?,
+        _ => {
             let crf = match p.text("level").as_str() {
                 "light" => "23",
                 "strong" => "32",
                 _ => "28",
             };
+            // A source below the usual bitrate keeps its own, or the sound would grow.
+            let audio = stream(&info, "audio")
+                .and_then(|a| a["bit_rate"].as_str())
+                .and_then(|b| b.parse::<u64>().ok())
+                .map_or(AUDIO_CRF_KBPS, |b| (b / 1000).clamp(8, AUDIO_CRF_KBPS));
             let mut args = strs(&["-i"]);
             args.push(input_path(job)?);
             args.extend(video);
-            args.extend(strs(&["-crf", crf, "-c:a", "aac", "-b:a", "96k"]));
+            args.extend(strs(&["-crf", crf, "-c:a", "aac", "-b:a"]));
+            args.push(format!("{audio}k"));
             args.extend(strs(&["-movflags", "+faststart"]));
             args.push(out.display().to_string());
             ffmpeg(job, OP.id, args)?;
         }
     }
-    let before = input.bytes()?.len() as u64;
     let after = std::fs::metadata(&out)?.len();
+    if can_keep && after >= before {
+        return keep_input(job, out, before, "re-encoding would not make it smaller");
+    }
     let ratio = after as f64 / before.max(1) as f64;
     let mut res = OpResult::one(Produced::file(out, Some(Format::Mp4)))
         .fact("bytes_before", before)
@@ -89,6 +116,19 @@ fn run(job: &Job) -> Result<OpResult> {
     Ok(res)
 }
 
+/// Hand back the input unchanged, saying why.
+fn keep_input(job: &Job, out: std::path::PathBuf, bytes: u64, why: &str) -> Result<OpResult> {
+    std::fs::copy(job.input().local_path(job.ctx)?, &out)?;
+    Ok(OpResult::one(Produced::file(out, Some(Format::Mp4)))
+        .fact("bytes_before", bytes)
+        .fact("bytes_after", bytes)
+        .fact("ratio", 1.0)
+        .note(format!("{} kept as it is", format_bytes(bytes)))
+        .warn(format!("{why}; the output is a copy of the input")))
+}
+
+/// Highest audio bitrate at a compression level, in kbps.
+const AUDIO_CRF_KBPS: u64 = 96;
 /// Audio bitrate when aiming for a file size, in kbps.
 const AUDIO_KBPS: f64 = 64.0;
 /// Two-pass encoding lands close to the target but can pass it, so this many

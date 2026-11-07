@@ -1,6 +1,6 @@
 use super::_common::{
-    FFMPEG, VIDEO, end_args, ffmpeg, file_result, input_path, seek_args, strs, temp_out,
-    video_codec_args,
+    FFMPEG, VIDEO, check_from, duration, end_args, ffmpeg, file_result, input_path, probe,
+    seek_args, strs, temp_out, video_codec_args,
 };
 use deft_core::prelude::*;
 
@@ -35,6 +35,7 @@ pub static OP: Op = Op {
 
 fn run(job: &Job) -> Result<OpResult> {
     let format = job.target(job.input().require_format()?);
+    check_from(job.params, duration(&probe(job, job.input(), OP.id)?))?;
     let out = temp_out(job, format);
     let mut args = seek_args(job.params);
     args.extend(end_args(job.params)?);
