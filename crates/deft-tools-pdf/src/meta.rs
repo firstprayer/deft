@@ -190,8 +190,30 @@ pub fn encrypt(
         .map_err(|e| err(ErrorCode::Internal, format!("encryption: {e}")))?;
     doc.encrypt(&state)
         .map_err(|e| err(ErrorCode::Internal, format!("encryption: {e}")))?;
+    state_key_length(doc);
+    // AES-256 needs a newer file version than many inputs declare.
+    if doc.version.as_str() < "1.7" {
+        doc.version = "1.7".to_string();
+    }
     // Encrypted strings must not move into object streams.
     Ok(())
+}
+
+/// PDFKit opens a file whose crypt filter has no key length, then shows blank
+/// pages. lopdf leaves it out. It is in bytes here.
+fn state_key_length(doc: &mut Document) {
+    let Ok(id) = doc.trailer.get(b"Encrypt").and_then(Object::as_reference) else {
+        return;
+    };
+    let filter = doc
+        .get_dictionary_mut(id)
+        .and_then(|d| d.get_mut(b"CF"))
+        .and_then(Object::as_dict_mut)
+        .and_then(|cf| cf.get_mut(b"StdCF"))
+        .and_then(Object::as_dict_mut);
+    if let Ok(filter) = filter {
+        filter.set("Length", 32);
+    }
 }
 
 /// Serialise an encrypted document, which cannot use object streams.
