@@ -39,9 +39,12 @@ pub fn decode(bytes: &[u8], format: Format, max_pixels: u64) -> Result<DynamicIm
             format!("image is {w}x{h}, over the {max_pixels}-pixel safety limit"),
         ));
     }
-    let orientation = decoder
-        .orientation()
-        .unwrap_or(image::metadata::Orientation::NoTransforms);
+    let orientation = match format {
+        Format::Webp => webp::orientation(bytes).and_then(image::metadata::Orientation::from_exif),
+        _ => None,
+    }
+    .or_else(|| decoder.orientation().ok())
+    .unwrap_or(image::metadata::Orientation::NoTransforms);
     let mut img = DynamicImage::from_decoder(decoder).map_err(image_err)?;
     img.apply_orientation(orientation);
     Ok(img)
@@ -69,6 +72,9 @@ pub fn dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
 
 /// EXIF orientation value (1..=8) of an image, 1 when absent.
 pub fn exif_orientation(bytes: &[u8]) -> u8 {
+    if let Some(o) = webp::orientation(bytes) {
+        return o;
+    }
     ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
         .ok()

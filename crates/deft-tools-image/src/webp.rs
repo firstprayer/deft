@@ -45,9 +45,14 @@ pub fn exif_chunk(bytes: &[u8]) -> Option<&[u8]> {
 
 /// The orientation in a WebP's EXIF chunk. Some writers put the JPEG
 /// segment's `Exif\0\0` before the TIFF data, which other readers miss.
-fn orientation(all: &[(&[u8], &[u8])]) -> Option<u8> {
+fn chunk_orientation(all: &[(&[u8], &[u8])]) -> Option<u8> {
     let exif = all.iter().find(|(k, _)| *k == b"EXIF")?.1;
     crate::tiff_orientation(exif.strip_prefix(b"Exif\0\0").unwrap_or(exif))
+}
+
+/// The EXIF orientation of a WebP file; None for other files or when absent.
+pub fn orientation(bytes: &[u8]) -> Option<u8> {
+    chunk_orientation(&chunks(bytes)?)
 }
 
 /// Keep only the chunks that make the picture: the image data, alpha,
@@ -57,7 +62,7 @@ fn orientation(all: &[(&[u8], &[u8])]) -> Option<u8> {
 /// so the picture keeps displaying upright.
 pub fn strip(bytes: &[u8], keep_icc: bool) -> Option<Vec<u8>> {
     let all = chunks(bytes)?;
-    let orientation = orientation(&all).unwrap_or_else(|| crate::exif_orientation(bytes));
+    let orientation = chunk_orientation(&all).unwrap_or(1);
     let tiff = crate::orientation_tiff(orientation);
     let mut header = all
         .iter()
@@ -103,6 +108,32 @@ pub fn with_profile(bytes: &[u8], icc: &[u8], width: u32, height: u32) -> Option
             .copied()
             .filter(|(k, _)| !matches!(*k, b"VP8X" | b"ICCP")),
     );
+    Some(file(&kept))
+}
+
+/// Put an EXIF block (TIFF data) into a WebP file, replacing any there.
+pub fn with_exif(bytes: &[u8], tiff: &[u8]) -> Option<Vec<u8>> {
+    let all = chunks(bytes)?;
+    let mut header = match all.iter().find(|(k, _)| *k == b"VP8X") {
+        Some((_, b)) => b.to_vec(),
+        None => {
+            let (width, height) = crate::dimensions(bytes)?;
+            let mut h = vec![0; 4];
+            h.extend_from_slice(&(width - 1).to_le_bytes()[..3]);
+            h.extend_from_slice(&(height - 1).to_le_bytes()[..3]);
+            h
+        }
+    };
+    *header.first_mut()? |= EXIF_FLAG;
+    let mut kept: Vec<(&[u8], &[u8])> = vec![(b"VP8X", &header)];
+    kept.extend(
+        all.iter()
+            .copied()
+            .filter(|(k, _)| !matches!(*k, b"VP8X" | b"EXIF" | b"XMP ")),
+    );
+    // The order the format asks for: EXIF after the picture, XMP last.
+    kept.push((b"EXIF", tiff));
+    kept.extend(all.iter().copied().filter(|(k, _)| *k == b"XMP "));
     Some(file(&kept))
 }
 

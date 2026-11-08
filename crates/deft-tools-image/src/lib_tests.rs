@@ -201,6 +201,13 @@ fn webp_orientation_behind_an_exif_prefix_is_read() {
     );
     let little = b"II\x2A\0\x08\0\0\0\x01\0\x12\x01\x03\0\x01\0\0\0\x08\0\0\0\0\0\0\0";
     assert_eq!(crate::tiff_orientation(little), Some(8));
+    // Every command reads it, not only strip: a 4x2 picture shows 2x4.
+    let img = DynamicImage::ImageRgb8(image::RgbImage::new(4, 2));
+    let plain = encode(&img, Format::Webp, Encode::default()).unwrap();
+    let webp = crate::webp::with_exif(&plain, &exif).unwrap();
+    assert_eq!(exif_orientation(&webp), 6);
+    let upright = decode(&webp, Format::Webp, u64::MAX).unwrap();
+    assert_eq!((upright.width(), upright.height()), (2, 4));
 }
 
 #[test]
