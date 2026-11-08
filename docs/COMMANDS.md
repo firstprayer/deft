@@ -80,12 +80,11 @@ Resize, crop, convert, compress, adjust, montage, OCR
 
 ## video
 
-Stabilize, fit into a frame, add text or a logo (ffmpeg)
+Fit into a frame, add text or a logo (ffmpeg)
 
 | Command | What it does | Needs | Example |
 |---|---|---|---|
 | `deft video pad` | Fit into a frame with bars: --size 1080x1920 | ffmpeg, ffprobe | `deft video pad clip.mp4 --size 480x640 --background white -o tall.mp4` |
-| `deft video stabilize` | Steady shaky footage, or --denoise grain | ffmpeg, ffprobe | `deft video stabilize clip.mp4 --denoise -o steady.mp4` |
 | `deft video watermark` | Add text or a logo: --text, --image, --position | ffmpeg, ffprobe | `deft video watermark clip.mp4 --text Sample -o marked.mp4` |
 
 ## doc

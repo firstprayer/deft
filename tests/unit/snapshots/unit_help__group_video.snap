@@ -4,6 +4,5 @@ expression: "help::group(g.name)"
 ---
 deft video - commands (input -> output)
   pad        video -> video  Fit into a frame with bars: --size 1080x1920
-  stabilize  video -> video  Steady shaky footage, or --denoise grain
   watermark  video -> video  Add text or a logo: --text, --image, --position
 More: deft video <command> --help

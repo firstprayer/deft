@@ -6,8 +6,6 @@ turn a horizontal video into a vertical one for tiktok | video pad
 add black bars to my video | video pad
 fit my video into instagram reels | video pad
 put my logo on the video | video watermark
-fix shaky footage | video stabilize
-my phone video shakes too much | video stabilize
 shrink this pdf | pdf compress
 my pdf is too big to email | pdf compress
 combine these pdfs into one | pdf merge
