@@ -1,11 +1,6 @@
 # What people type, and a command that must be in the first three results.
 # `| -` means deft cannot do it, so find must say so.
 # Add a line whenever `deft find` misses something it should find.
-I wanna make my landscape video into a portrait video | video pad
-turn a horizontal video into a vertical one for tiktok | video pad
-add black bars to my video | video pad
-fit my video into instagram reels | video pad
-put my logo on the video | video watermark
 shrink this pdf | pdf compress
 my pdf is too big to email | pdf compress
 combine these pdfs into one | pdf merge

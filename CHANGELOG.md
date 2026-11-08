@@ -28,11 +28,12 @@ Deft follows semantic versioning. Before 1.0, a minor version may change command
 - `html screenshot` and `html to-pdf --browser`. Deft no longer uses Chrome.
 - The `youtube` group, `deft engine install` and `update`, `--offline` and `--install-engines`. Deft no longer touches the network.
 - Commands an agent does in one ordinary line: `file hash`, `base64`, `split`, `join`, `rename` and `organize`; `video crop`, `resize`, `rotate`, `mute`, `fade`, `repeat`, `reverse`, `stack`, `thumbnail`, `extract-audio` and `extract-subtitles`; `image diff`, `invert` and `sharpen`; `pdf grayscale` and `repair`; `video split` (`ffmpeg -ss … -to …`); `data query`; `sheet transpose`; `email info`.
+- The `video` group: `pad` and `watermark` are one ffmpeg line each.
 - `video stabilize`: `ffmpeg -vf deshake` does it in one line, and on real handheld clips deft's two-pass vidstab smeared a third of them.
 - `pdf strip`: metadata hides in figures, attachments and scripts inside a PDF, and on real files authors' names survived. Deft does not promise a clean file it cannot guarantee.
 - `json format` and `merge`: `jq -S .` and `jq -s '.[0] * .[1]'` do them in one line.
 - `pdf redact`: a redaction that misses a word is a leak, and on real files it missed text in attachments, comments and fonts it could not decode. Deft does not promise safety it cannot give.
-- `video add-audio`, `add-subtitles`, `chunk`, `compress`, `convert`, `frames`, `from-images`, `info`, `merge`, `speed`, `strip` and `to-gif`: on real files an agent did each as well with one ffmpeg line. `video` keeps `pad` and `watermark`.
+- `video add-audio`, `add-subtitles`, `chunk`, `compress`, `convert`, `frames`, `from-images`, `info`, `merge`, `speed`, `strip` and `to-gif`: on real files an agent did each as well with one ffmpeg line. 
 - `sheet query`, `filter`, `sort`, `select`, `group`, `dedupe` and `join`: an agent does these in one line with sqlite3, DuckDB or pandas. Deft no longer includes SQLite.
 - The `email` and `file` groups.
 - Commands whose output was not good enough: `pdf to-docx`, `to-md`, `to-sheet` and `to-pdfa`; `slides to-pdf`; `md to-pptx`.

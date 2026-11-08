@@ -78,15 +78,6 @@ Resize, crop, convert, compress, adjust, montage, OCR
 | `deft image trim` | Cut away plain borders; --speck 4 ignores stray dots |  | `deft image trim bordered.png -o tight.png` |
 | `deft image watermark` | Add text or a logo: --text, --image, --position |  | `deft image watermark photo-1.jpg --text Sample -o marked.jpg` |
 
-## video
-
-Fit into a frame, add text or a logo (ffmpeg)
-
-| Command | What it does | Needs | Example |
-|---|---|---|---|
-| `deft video pad` | Fit into a frame with bars: --size 1080x1920 | ffmpeg, ffprobe | `deft video pad clip.mp4 --size 480x640 --background white -o tall.mp4` |
-| `deft video watermark` | Add text or a logo: --text, --image, --position | ffmpeg, ffprobe | `deft video watermark clip.mp4 --text Sample -o marked.mp4` |
-
 ## doc
 
 Word/ODT/RTF: to text, Markdown, HTML, PDF; find and replace

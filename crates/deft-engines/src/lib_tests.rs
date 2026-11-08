@@ -10,7 +10,7 @@ fn missing_engine_has_a_hint() {
     let ctx = Ctx::new(std::env::temp_dir());
     // SAFETY: tests in this crate do not read this variable concurrently.
     unsafe { std::env::set_var(env_key("ffmpeg"), "") };
-    let e = require(&ctx, "ffmpeg", "video.pad").unwrap_err();
+    let e = require(&ctx, "ffmpeg", "image.convert").unwrap_err();
     assert_eq!(e.code, ErrorCode::EngineMissing);
     assert!(e.hint.unwrap().contains("brew install ffmpeg"));
 }

@@ -12,7 +12,6 @@ Syntax: `deft <group> <command> [inputs] [-o output] [--options]`
 Groups:
 - `pdf`: Merge, split, compress, encrypt, forms, OCR, compare, convert
 - `image`: Resize, crop, convert, compress, adjust, montage, OCR
-- `video`: Fit into a frame, add text or a logo (ffmpeg)
 - `doc`: Word/ODT/RTF: to text, Markdown, HTML, PDF; find and replace
 - `slides`: PowerPoint: extract text, Markdown outline
 - `sheet`: Excel/CSV/ODS tables: pivot, merge, split, convert

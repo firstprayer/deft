@@ -45,7 +45,7 @@ Deft is one binary, but some groups call external programs. `deft doctor` shows 
 
 | Group | Needs | How to get it |
 |---|---|---|
-| `video`, and commands that read or write it | ffmpeg | Your package manager, such as `brew install ffmpeg` |
+| Reading HEIC and AVIF images | ffmpeg | Your package manager, such as `brew install ffmpeg` |
 | `pdf`, `image`, `sheet`, `md` | Nothing | Built in |
 
 Deft does not install these for you; install ffmpeg by hand.

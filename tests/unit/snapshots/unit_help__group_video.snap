@@ -1,8 +1,0 @@
----
-source: crates/deft-cli/../../tests/unit/help.rs
-expression: "help::group(g.name)"
----
-deft video - commands (input -> output)
-  pad        video -> video  Fit into a frame with bars: --size 1080x1920
-  watermark  video -> video  Add text or a logo: --text, --image, --position
-More: deft video <command> --help
