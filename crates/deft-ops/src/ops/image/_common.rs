@@ -161,14 +161,15 @@ fn tile_graph(grid: &serde_json::Value) -> Vec<String> {
     ]
 }
 
-/// HEIC needs an HEVC decoder, which has no pure-Rust implementation, and
-/// ffmpeg 7 or later reads both formats. ffmpeg gives the pixels as stored;
-/// the rotation is applied here, so `-noautorotate` keeps a later ffmpeg from
-/// applying it too.
+/// HEIC needs an HEVC decoder, which has no pure-Rust implementation, so
+/// both HEIC and AVIF are decoded by ffmpeg. deft reads the container itself
+/// and hands ffmpeg the coded tiles as a plain stream: ffmpeg's own HEIF
+/// reader cannot open some phones' files and joins tiles wrongly in others.
+/// Rotation, mirroring and the clean-aperture crop are applied here.
 fn through_ffmpeg(job: &Job, input: &InputFile) -> Result<DynamicImage> {
-    let ffmpeg = deft_engines::require(job.ctx, "ffmpeg", "image decoding")?;
     let max_pixels = job.ctx.limits.max_pixels;
-    let facts = heif::read(input.bytes()?).unwrap_or_default();
+    let bytes = input.bytes()?;
+    let facts = heif::read(bytes).unwrap_or_default();
     if facts.width as u64 * facts.height as u64 > max_pixels {
         return Err(err(
             ErrorCode::LimitExceeded,
@@ -178,6 +179,130 @@ fn through_ffmpeg(job: &Job, input: &InputFile) -> Result<DynamicImage> {
             ),
         ));
     }
+    let mut img = match heif::picture(bytes) {
+        Some(picture) => match from_tiles(job, &picture) {
+            Ok(img) => img,
+            Err(e) if e.code == ErrorCode::EngineMissing => return Err(e),
+            // An unusual stream: ffmpeg's own HEIF reader may still manage.
+            Err(_) => through_demuxer(job, input, &facts)?,
+        },
+        None => through_demuxer(job, input, &facts)?,
+    };
+    if let Some(o) = Orientation::from_exif(facts.orientation) {
+        img.apply_orientation(o);
+    }
+    Ok(img)
+}
+
+/// ffmpeg options that turn decoded pictures into full-range RGB or gray,
+/// using the colour coding the file states over the stream's own.
+fn to_pixels(coded: &heif::Coded, gray: bool) -> String {
+    let mut scale = vec!["out_range=pc".to_string()];
+    if let Some(nclx) = coded.nclx {
+        scale.push(format!(
+            "in_range={}",
+            if nclx.full_range { "pc" } else { "tv" }
+        ));
+        let matrix = match nclx.matrix {
+            1 => Some("bt709"),
+            4 => Some("fcc"),
+            5 => Some("bt470"),
+            6 => Some("smpte170m"),
+            7 => Some("smpte240m"),
+            9 | 10 => Some("bt2020"),
+            _ => None,
+        };
+        if let Some(m) = matrix {
+            scale.push(format!("in_color_matrix={m}"));
+        }
+    }
+    format!(
+        "scale={},format={}",
+        scale.join(":"),
+        if gray { "gray" } else { "rgb24" }
+    )
+}
+
+/// Decode every tile of a coded picture and join them.
+fn decode_tiles(job: &Job, coded: &heif::Coded, gray: bool) -> Result<Vec<u8>> {
+    let ffmpeg = deft_engines::require(job.ctx, "ffmpeg", "image decoding")?;
+    let (name, demuxer) = match coded.codec {
+        heif::Codec::Hevc => ("tiles.hevc", "hevc"),
+        heif::Codec::Av1 => ("tiles.obu", "obu"),
+    };
+    let src = job.ctx.temp_path(name);
+    let out = job.ctx.temp_path("tiles.raw");
+    std::fs::write(&src, &coded.stream)?;
+    let args: Vec<String> = [
+        "-hide_banner",
+        "-nostdin",
+        "-loglevel",
+        "error",
+        "-y",
+        "-f",
+        demuxer,
+        "-i",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .chain([src.display().to_string()])
+    .chain([
+        "-fps_mode".into(),
+        "passthrough".into(),
+        "-vf".into(),
+        to_pixels(coded, gray),
+        "-f".into(),
+        "rawvideo".into(),
+        out.display().to_string(),
+    ])
+    .collect();
+    deft_engines::run(job.ctx, &ffmpeg, &args)?;
+    let raw = std::fs::read(&out)?;
+    heif::join(&raw, coded, if gray { 1 } else { 3 }).ok_or_else(|| {
+        err(
+            ErrorCode::EngineFailed,
+            format!(
+                "ffmpeg decoded {} bytes for {} tiles of {}x{}",
+                raw.len(),
+                coded.tiles,
+                coded.tile_width,
+                coded.tile_height
+            ),
+        )
+    })
+}
+
+fn from_tiles(job: &Job, picture: &heif::Picture) -> Result<DynamicImage> {
+    use deft_tools_image::image::{RgbImage, RgbaImage};
+    let colour = &picture.colour;
+    let rgb = decode_tiles(job, colour, false)?;
+    let bad = || err(ErrorCode::Internal, "joined tiles have the wrong size");
+    let mut img = match &picture.alpha {
+        Some(alpha) => {
+            let a = decode_tiles(job, alpha, true)?;
+            let rgba: Vec<u8> = rgb
+                .chunks_exact(3)
+                .zip(a)
+                .flat_map(|(p, a)| [p[0], p[1], p[2], a])
+                .collect();
+            DynamicImage::ImageRgba8(
+                RgbaImage::from_raw(colour.width, colour.height, rgba).ok_or_else(bad)?,
+            )
+        }
+        None => DynamicImage::ImageRgb8(
+            RgbImage::from_raw(colour.width, colour.height, rgb).ok_or_else(bad)?,
+        ),
+    };
+    if let Some((x, y, w, h)) = picture.crop {
+        img = img.crop_imm(x, y, w, h);
+    }
+    Ok(img)
+}
+
+/// The older way: ffmpeg reads the HEIF container itself.
+fn through_demuxer(job: &Job, input: &InputFile, facts: &heif::Heif) -> Result<DynamicImage> {
+    let ffmpeg = deft_engines::require(job.ctx, "ffmpeg", "image decoding")?;
+    let max_pixels = job.ctx.limits.max_pixels;
     let out = job.ctx.temp_path("decoded.png");
     let src = input.local_path(job.ctx)?;
     let select = select_picture(job, &src, facts.alpha)?;
@@ -205,26 +330,25 @@ fn through_ffmpeg(job: &Job, input: &InputFile) -> Result<DynamicImage> {
             .map(|s| s.to_string()),
     );
     args.push(out.display().to_string());
-    deft_engines::run(job.ctx, &ffmpeg, &args).map_err(|mut e| {
-        e.hint = Some("HEIC and AVIF need ffmpeg 7 or later".into());
-        e
-    })?;
-    let mut img = deft_tools_image::decode(&std::fs::read(&out)?, Format::Png, max_pixels)?;
-    if img.width() < facts.width || img.height() < facts.height {
-        return Err(err(
+    let unreadable = |detail: String| {
+        err(
             ErrorCode::InputUnsupported,
             format!(
-                "ffmpeg read {}x{} of a {}x{} picture",
-                img.width(),
-                img.height(),
-                facts.width,
-                facts.height
+                "deft cannot read this {} layout: {detail}",
+                format_name(input)
             ),
         )
-        .hint("HEIC and AVIF need ffmpeg 7 or later"));
-    }
-    if let Some(o) = Orientation::from_exif(facts.orientation) {
-        img.apply_orientation(o);
+    };
+    deft_engines::run(job.ctx, &ffmpeg, &args).map_err(|e| unreadable(e.message))?;
+    let img = deft_tools_image::decode(&std::fs::read(&out)?, Format::Png, max_pixels)?;
+    if img.width() < facts.width || img.height() < facts.height {
+        return Err(unreadable(format!(
+            "ffmpeg read {}x{} of a {}x{} picture",
+            img.width(),
+            img.height(),
+            facts.width,
+            facts.height
+        )));
     }
     Ok(img)
 }
@@ -375,4 +499,10 @@ pub fn save(job: &Job, img: &DynamicImage, format: Format) -> Result<OpResult> {
         res = res.warn(warning);
     }
     Ok(res)
+}
+
+fn format_name(input: &InputFile) -> String {
+    input
+        .format
+        .map_or_else(|| "image".to_string(), |f| f.to_string().to_uppercase())
 }
