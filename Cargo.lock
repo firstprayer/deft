@@ -945,6 +945,7 @@ dependencies = [
  "rqrr",
  "serde_json",
  "typst-assets",
+ "zune-jpeg",
 ]
 
 [[package]]

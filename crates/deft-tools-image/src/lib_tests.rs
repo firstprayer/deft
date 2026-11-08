@@ -233,3 +233,63 @@ fn a_gif_keeps_its_frames_and_loses_its_comments() {
     );
     assert_eq!(s.trailing, 7);
 }
+
+/// A small CMYK printer profile: ink only darkens, without hue.
+fn cmyk_profile() -> Vec<u8> {
+    let mut lut = b"mft1\0\0\0\0".to_vec();
+    lut.extend_from_slice(&[4, 3, 2, 0]);
+    for i in 0..9 {
+        let one = if i % 4 == 0 { 0x0001_0000u32 } else { 0 };
+        lut.extend_from_slice(&one.to_be_bytes());
+    }
+    let ramp: Vec<u8> = (0..=255).collect();
+    for _ in 0..4 {
+        lut.extend_from_slice(&ramp);
+    }
+    // Grid corners in C, M, Y, K order with K varying fastest.
+    for corner in 0..16u8 {
+        let inked = corner.count_ones() as u32;
+        let l = if corner & 1 == 1 {
+            0
+        } else {
+            255 - 60 * inked.min(4)
+        };
+        lut.extend_from_slice(&[l as u8, 128, 128]);
+    }
+    for _ in 0..3 {
+        lut.extend_from_slice(&ramp);
+    }
+    let mut icc = vec![0u8; 128];
+    icc[8..12].copy_from_slice(&[2, 0x10, 0, 0]);
+    icc[12..16].copy_from_slice(b"prtr");
+    icc[16..20].copy_from_slice(b"CMYK");
+    icc[20..24].copy_from_slice(b"Lab ");
+    icc[36..40].copy_from_slice(b"acsp");
+    // D50 illuminant.
+    icc[68..80].copy_from_slice(&[0, 0, 0xF6, 0xD6, 0, 1, 0, 0, 0, 0, 0xD3, 0x2D]);
+    icc.extend_from_slice(&1u32.to_be_bytes());
+    icc.extend_from_slice(b"A2B0");
+    icc.extend_from_slice(&(128 + 4 + 12u32).to_be_bytes());
+    icc.extend_from_slice(&(lut.len() as u32).to_be_bytes());
+    icc.extend_from_slice(&lut);
+    let size = icc.len() as u32;
+    icc[..4].copy_from_slice(&size.to_be_bytes());
+    icc
+}
+
+#[test]
+fn cmyk_goes_through_its_profile() {
+    let icc = cmyk_profile();
+    let rgb = crate::cmyk_to_srgb(&[0, 0, 0, 0, 0, 0, 0, 255], &icc).unwrap();
+    assert!(
+        rgb[..3].iter().all(|v| *v > 240),
+        "no ink is white: {rgb:?}"
+    );
+    assert!(
+        rgb[3..].iter().all(|v| *v < 15),
+        "full black is black: {rgb:?}"
+    );
+    let adobe = [0xFF, 0xD8, 0xFF, 0xEE, 0, 14, b'A', b'd', b'o', b'b', b'e'];
+    assert!(crate::has_adobe_segment(&adobe));
+    assert!(!crate::has_adobe_segment(&adobe[..6]));
+}

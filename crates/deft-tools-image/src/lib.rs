@@ -31,6 +31,10 @@ pub fn decode(bytes: &[u8], format: Format, max_pixels: u64) -> Result<DynamicIm
     let reader = ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
         .map_err(|e| err(ErrorCode::InputCorrupt, e.to_string()))?;
+    let cmyk = match format {
+        Format::Jpeg => cmyk_through_profile(bytes)?,
+        _ => None,
+    };
     let mut decoder = reader.into_decoder().map_err(image_err)?;
     let (w, h) = decoder.dimensions();
     if w as u64 * h as u64 > max_pixels {
@@ -45,9 +49,92 @@ pub fn decode(bytes: &[u8], format: Format, max_pixels: u64) -> Result<DynamicIm
     }
     .or_else(|| decoder.orientation().ok())
     .unwrap_or(image::metadata::Orientation::NoTransforms);
-    let mut img = DynamicImage::from_decoder(decoder).map_err(image_err)?;
+    let mut img = match cmyk {
+        Some(img) => img,
+        None => DynamicImage::from_decoder(decoder).map_err(image_err)?,
+    };
     img.apply_orientation(orientation);
     Ok(img)
+}
+
+/// A CMYK JPEG with a CMYK profile, converted to sRGB through that profile.
+/// Without one, the decoder's plain formula is as good as any.
+fn cmyk_through_profile(bytes: &[u8]) -> Result<Option<DynamicImage>> {
+    use zune_jpeg::JpegDecoder;
+    use zune_jpeg::zune_core::bytestream::ZCursor;
+    use zune_jpeg::zune_core::colorspace::ColorSpace;
+    if jpeg_info(bytes).is_none_or(|(_, _, components)| components != 4) {
+        return Ok(None);
+    }
+    let mut decoder = JpegDecoder::new(ZCursor::new(bytes));
+    if decoder.decode_headers().is_err() {
+        return Ok(None);
+    }
+    let Some(icc) = decoder
+        .icc_profile()
+        .filter(|p| p.get(16..20) == Some(b"CMYK"))
+    else {
+        return Ok(None);
+    };
+    let ycck = decoder.input_colorspace() == Some(ColorSpace::YCCK);
+    let (w, h) = decoder.dimensions().unwrap_or_default();
+    let options = decoder
+        .options()
+        .set_max_width(65_535)
+        .set_max_height(65_535)
+        .jpeg_set_out_colorspace(if ycck {
+            ColorSpace::YCCK
+        } else {
+            ColorSpace::CMYK
+        });
+    decoder.set_options(options);
+    let mut raw = decoder
+        .decode()
+        .map_err(|e| err(ErrorCode::InputCorrupt, format!("jpeg: {e:?}")))?;
+    // Photoshop stores CMYK inverted and says so with its Adobe segment; in
+    // YCCK the colour planes decode to the ink amounts directly.
+    let inverted = has_adobe_segment(bytes);
+    for px in raw.as_chunks_mut::<4>().0 {
+        if ycck {
+            let (y, cb, cr) = (px[0] as f32, px[1] as f32 - 128.0, px[2] as f32 - 128.0);
+            let ink = |v: f32| v.round().clamp(0.0, 255.0) as u8;
+            px[0] = ink(y + 1.402 * cr);
+            px[1] = ink(y - 0.344_136 * cb - 0.714_136 * cr);
+            px[2] = ink(y + 1.772 * cb);
+            px[3] = 255 - px[3];
+        } else if inverted {
+            for v in px.iter_mut() {
+                *v = 255 - *v;
+            }
+        }
+    }
+    let Some(rgb) = cmyk_to_srgb(&raw, &icc) else {
+        return Ok(None);
+    };
+    Ok(RgbImage::from_raw(w as u32, h as u32, rgb).map(DynamicImage::ImageRgb8))
+}
+
+fn has_adobe_segment(bytes: &[u8]) -> bool {
+    bytes
+        .windows(6)
+        .any(|w| w[..2] == [0xFF, 0xEE] && &w[4..] == b"Ad")
+}
+
+/// Ink amounts (0 none, 255 full) to sRGB through a CMYK profile.
+fn cmyk_to_srgb(cmyk: &[u8], icc: &[u8]) -> Option<Vec<u8>> {
+    use moxcms::{ColorProfile, Layout, TransformOptions};
+    let source = ColorProfile::new_from_slice(icc).ok()?;
+    let transform = source
+        .create_transform_8bit(
+            Layout::Rgba,
+            &ColorProfile::new_srgb(),
+            Layout::Rgb,
+            TransformOptions::default(),
+        )
+        .ok()?;
+    let mut out = vec![0; cmyk.len() / 4 * 3];
+    transform.transform(cmyk, &mut out).ok()?;
+    Some(out)
 }
 
 fn image_err(e: image::ImageError) -> deft_core::error::DeftError {
