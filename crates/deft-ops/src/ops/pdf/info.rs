@@ -7,7 +7,13 @@ pub static OP: Op = Op {
     output: Output::report(),
     params: &[super::_common::PASSWORD],
     examples: &["deft pdf info report.pdf"],
-    tags: &["inspect", "metadata", "page count", "details"],
+    tags: &[
+        "inspect",
+        "metadata",
+        "page count",
+        "how many pages",
+        "details",
+    ],
     result: &[
         "pages", "width", "height", "paper", "title", "author", "images", "fonts", "forms",
     ],

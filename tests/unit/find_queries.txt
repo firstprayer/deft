@@ -42,3 +42,63 @@ gpx to kml | gps convert
 how far was this ride | gps info
 extract all the tables from a pdf | pdf extract-sheets
 pdf has several tables, save each one | pdf extract-sheets
+# From the quality audit of 2026-11-07: the first hit for jobs deft does, none for the rest.
+make this pdf smaller so I can email it | pdf compress
+combine these three pdfs into one | pdf merge
+take pages 3 to 5 out of the contract pdf | pdf delete
+password protect a pdf | pdf encrypt
+fill in a pdf form from json | pdf fill
+add page numbers to a pdf | pdf number
+resize my photos to 1080 pixels wide | image resize
+convert heic photos to jpg | image convert
+remove gps location from photos before posting | image strip
+make a favicon from my logo | image favicon
+put my logo on a video | video watermark
+steady a shaky phone video | video stabilize
+make a landscape video fit a vertical 9:16 frame with black bars | video pad
+turn a word document into markdown | doc to-md
+replace a name everywhere in a docx | doc replace
+get the text out of a powerpoint | slides to-text
+excel to csv | sheet convert
+pivot table of sales by region and month | sheet pivot
+split a big csv into files of 1000 rows | sheet split
+compare two json config files | json diff
+validate json against a schema | json validate
+markdown to pdf | md to-pdf
+make an epub from markdown chapters | md to-epub
+how long and how far was my gpx ride | gps info
+make a qr code for my wifi | qr create
+read the qr code in this screenshot | qr read
+convert gpx to kml for google earth | gps convert
+make a barcode for a product | qr create
+turn web page html into markdown | html to-md
+how many pages does this pdf have | pdf info
+trim the first 10 seconds of a video | -
+convert mov to mp4 | -
+extract the audio track from a video as mp3 | -
+make a gif from a video clip | -
+compress a video to under 25 MB | -
+remove background noise from an audio recording | -
+convert a wav file to mp3 | -
+transcribe the meeting recording | -
+cut an mp3 into two parts | -
+normalize the loudness of podcast episodes | -
+redact names and account numbers from a pdf | -
+black out a social security number in a scanned pdf | -
+record my screen as a video | -
+pretty print a json file | -
+merge two json files | -
+run a sql query against a csv file | -
+filter rows in a spreadsheet where amount is over 1000 | -
+translate this document into spanish | -
+summarize this pdf | -
+download a youtube video | -
+add subtitles to a video | -
+rotate a video 90 degrees | -
+convert pdf to word | -
+sign a pdf with my digital certificate | -
+unzip a zip archive | -
+speed up a video 2x | -
+remove the background from a photo of a person | -
+convert flac to mp3 | -
+join two video clips together | -

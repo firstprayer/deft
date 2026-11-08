@@ -218,7 +218,7 @@ fn find_answers_what_people_type() {
         let (query, want) = (query.trim(), want.trim());
         let hits = reg.find(query);
         let found = if want == "-" {
-            !reg.unknown_job(query).is_empty()
+            hits.is_empty()
         } else {
             let (group, command) = want.split_once(' ').expect("group command");
             let op = reg.resolve(group, command).expect(want).op.id;

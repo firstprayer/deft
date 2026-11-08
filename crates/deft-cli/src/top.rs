@@ -30,12 +30,21 @@ pub fn find(rest: &[String]) -> Result<Outcome> {
             hits.iter().map(|(p, op, _)| json!({"command": format!("deft {p}"), "op": op.id, "summary": op.summary, "signature": op.signature()})).collect();
         return Ok(Outcome::text(format!(
             "{}\n",
-            json!({"v": 1, "ok": true, "matches": list, "unknown_words": unknown})
+            if list.is_empty() {
+                json!({"v": 1, "ok": true, "matches": list, "unknown_words": unknown, "note": "no command does this"})
+            } else {
+                json!({"v": 1, "ok": true, "matches": list, "unknown_words": unknown})
+            }
         )));
     }
     if hits.is_empty() {
+        let why = if unknown.is_empty() {
+            String::new()
+        } else {
+            format!(" (nothing knows {:?})", unknown.join(" "))
+        };
         return Ok(Outcome::text(format!(
-            "no match for {query:?}; deft lists all groups\n"
+            "no command does this{why}; use another tool. All groups: deft --help\n"
         )));
     }
     let w = hits.iter().map(|h| h.0.len()).max().unwrap_or(0);
@@ -45,13 +54,6 @@ pub fn find(rest: &[String]) -> Result<Outcome> {
         .max()
         .unwrap_or(0);
     let mut s = String::new();
-    if !unknown.is_empty() {
-        let _ = writeln!(
-            s,
-            "no command does this: nothing knows {:?}. Results below only share a file type.",
-            unknown.join(" ")
-        );
-    }
     for (path, op, _) in &hits {
         let _ = writeln!(s, "{path:<w$}  {:<sw$}  {}", op.signature(), op.summary);
     }
