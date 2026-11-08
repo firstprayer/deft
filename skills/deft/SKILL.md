@@ -15,10 +15,10 @@ Groups:
 - `doc`: Word/ODT/RTF: to text, Markdown, HTML, PDF; find and replace
 - `slides`: PowerPoint: extract text, Markdown outline
 - `sheet`: Excel/CSV/ODS tables: pivot, merge, split, convert
-- `json`: JSON: convert, format, merge, diff, validate
+- `json`: JSON: convert, validate against a schema
 - `toml`: TOML: convert, format, merge, diff, validate
-- `xml`: XML: convert, format, merge, diff, validate
-- `yaml`: YAML: convert, format, merge, diff, validate
+- `xml`: XML: convert to JSON, YAML or TOML
+- `yaml`: YAML: convert, merge, diff, validate
 - `md`: Markdown to PDF, HTML, Word, EPUB; table of contents
 - `html`: HTML to Markdown, text, Word and PDF
 - `epub`: E-books: info, to text, Markdown and PDF

@@ -120,12 +120,11 @@ Excel/CSV/ODS tables: pivot, merge, split, convert
 
 ## json
 
-JSON: convert, format, merge, diff, validate
+JSON: convert, validate against a schema
 
 | Command | What it does | Needs | Example |
 |---|---|---|---|
 | `deft json convert` | Change format: --to json\|jsonl\|yaml\|toml\|xml |  | `deft json convert messy.json --to yaml -o out.yaml` |
-| `deft json diff` | Compare two files by structure |  | `deft json diff messy.json override.json` |
 | `deft json validate` | Check syntax, or a JSON Schema with --schema |  | `deft json validate messy.json` |
 
 ## toml
@@ -142,25 +141,20 @@ TOML: convert, format, merge, diff, validate
 
 ## xml
 
-XML: convert, format, merge, diff, validate
+XML: convert to JSON, YAML or TOML
 
 | Command | What it does | Needs | Example |
 |---|---|---|---|
 | `deft xml convert` | Change format: --to json\|yaml\|toml\|jsonl |  | `deft xml convert shop.xml --to json -o out.json` |
-| `deft xml diff` | Compare two files by structure |  | `deft xml diff shop.xml override.xml` |
-| `deft xml format` | Tidy a file: --sort-keys |  | `deft xml format shop.xml -o tidy.xml` |
-| `deft xml merge` | Deep-merge files; later files win |  | `deft xml merge shop.xml override.xml -o merged.xml` |
-| `deft xml validate` | Check syntax, or a JSON Schema with --schema |  | `deft xml validate shop.xml` |
 
 ## yaml
 
-YAML: convert, format, merge, diff, validate
+YAML: convert, merge, diff, validate
 
 | Command | What it does | Needs | Example |
 |---|---|---|---|
 | `deft yaml convert` | Change format: --to json\|toml\|xml\|jsonl |  | `deft yaml convert config.yaml --to json -o out.json` |
 | `deft yaml diff` | Compare two files by structure |  | `deft yaml diff config.yaml override.yaml` |
-| `deft yaml format` | Tidy a file: --sort-keys |  | `deft yaml format config.yaml -o tidy.yaml` |
 | `deft yaml merge` | Deep-merge files; later files win |  | `deft yaml merge config.yaml override.yaml -o merged.yaml` |
 | `deft yaml validate` | Check syntax, or a JSON Schema with --schema |  | `deft yaml validate config.yaml` |
 

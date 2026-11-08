@@ -3,7 +3,7 @@ use deft_core::prelude::*;
 
 pub static GROUP: Group = Group {
     name: "yaml",
-    summary: "YAML: convert, format, merge, diff, validate",
+    summary: "YAML: convert, merge, diff, validate",
     aliases: &["yml"],
     synonyms: SYNONYMS,
     order: 47,

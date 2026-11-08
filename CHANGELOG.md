@@ -31,7 +31,7 @@ Deft follows semantic versioning. Before 1.0, a minor version may change command
 - The `video` group: `pad` and `watermark` are one ffmpeg line each.
 - `video stabilize`: `ffmpeg -vf deshake` does it in one line, and on real handheld clips deft's two-pass vidstab smeared a third of them.
 - `pdf strip`: metadata hides in figures, attachments and scripts inside a PDF, and on real files authors' names survived. Deft does not promise a clean file it cannot guarantee.
-- `json format` and `merge`: `jq -S .` and `jq -s '.[0] * .[1]'` do them in one line.
+- `json format`, `merge` and `diff`: `jq` does each in one line. `xml diff` and `validate`: `xmllint` does them. `yaml format`, `xml format` and `xml merge`: on real files they lost comments, namespaces or element order by design.
 - `pdf redact`: a redaction that misses a word is a leak, and on real files it missed text in attachments, comments and fonts it could not decode. Deft does not promise safety it cannot give.
 - `video add-audio`, `add-subtitles`, `chunk`, `compress`, `convert`, `frames`, `from-images`, `info`, `merge`, `speed`, `strip` and `to-gif`: on real files an agent did each as well with one ffmpeg line. 
 - `sheet query`, `filter`, `sort`, `select`, `group`, `dedupe` and `join`: an agent does these in one line with sqlite3, DuckDB or pandas. Deft no longer includes SQLite.
