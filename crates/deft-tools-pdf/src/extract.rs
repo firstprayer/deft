@@ -78,6 +78,9 @@ enum Space {
     Rgb,
     Cmyk,
     Indexed(Vec<u8>, usize),
+    /// One ink (a Separation or a one-colorant DeviceN): the colour at no
+    /// tint and at full tint.
+    Tint([u8; 3], [u8; 3]),
 }
 
 /// Channels of an image a compressor can decode: gray, RGB or CMYK.
@@ -86,7 +89,7 @@ pub(crate) fn decodable_channels(doc: &Document, o: &Object) -> Option<usize> {
         Space::Gray => Some(1),
         Space::Rgb => Some(3),
         Space::Cmyk => Some(4),
-        Space::Indexed(..) => None,
+        Space::Indexed(..) | Space::Tint(..) => None,
     }
 }
 
@@ -118,7 +121,7 @@ fn color_space(doc: &Document, o: &Object) -> Option<Space> {
                         Space::Gray => 1,
                         Space::Rgb => 3,
                         Space::Cmyk => 4,
-                        Space::Indexed(..) => return None,
+                        Space::Indexed(..) | Space::Tint(..) => return None,
                     };
                     let table = match deref(doc, a.get(3)?) {
                         Object::String(s, _) => s.clone(),
@@ -127,11 +130,59 @@ fn color_space(doc: &Document, o: &Object) -> Option<Space> {
                     };
                     Some(Space::Indexed(table, comps))
                 }
+                b"Separation" | b"DeviceN" => {
+                    let names: Vec<&[u8]> = match deref(doc, a.get(1)?) {
+                        Object::Name(n) => vec![n.as_slice()],
+                        Object::Array(v) => v
+                            .iter()
+                            .filter_map(|o| deref(doc, o).as_name().ok())
+                            .collect(),
+                        _ => return None,
+                    };
+                    match names.as_slice() {
+                        [b"Black" | b"All"] => Some(Space::Tint([255; 3], [0; 3])),
+                        [_] => tint_ends(doc, a.get(2)?, a.get(3)?),
+                        _ => None,
+                    }
+                }
                 _ => None,
             }
         }
         _ => None,
     }
+}
+
+/// The colours of one ink at no and at full tint, when its tint transform is
+/// an exponential function (type 2) into gray, RGB or CMYK.
+fn tint_ends(doc: &Document, alternate: &Object, function: &Object) -> Option<Space> {
+    let f = match deref(doc, function) {
+        Object::Dictionary(d) => d,
+        Object::Stream(s) => &s.dict,
+        _ => return None,
+    };
+    if f.get(b"FunctionType").ok().and_then(num)? as i64 != 2 {
+        return None;
+    }
+    let values = |key: &[u8], default: f64| -> Vec<f64> {
+        f.get(key)
+            .ok()
+            .and_then(|o| deref(doc, o).as_array().ok())
+            .map(|a| a.iter().filter_map(|o| num(deref(doc, o))).collect())
+            .unwrap_or_else(|| vec![default])
+    };
+    let rgb = |v: &[f64]| -> Option<[u8; 3]> {
+        let b = |x: f64| (x.clamp(0.0, 1.0) * 255.0).round() as u8;
+        match (color_space(doc, alternate)?, v) {
+            (Space::Gray, [g]) => Some([b(*g); 3]),
+            (Space::Rgb, [r, g, bl]) => Some([b(*r), b(*g), b(*bl)]),
+            (Space::Cmyk, [c, m, y, k]) => Some(cmyk_to_rgb(b(*c), b(*m), b(*y), b(*k))),
+            _ => None,
+        }
+    };
+    Some(Space::Tint(
+        rgb(&values(b"C0", 0.0))?,
+        rgb(&values(b"C1", 1.0))?,
+    ))
 }
 
 /// Read sample `n` of a row at `bits` per component.
@@ -180,7 +231,7 @@ fn decode(doc: &Document, stream: &Stream) -> Option<DynamicImage> {
     };
     let data = stream.decompressed_content().ok()?;
     let comps = match space {
-        Space::Gray | Space::Indexed(..) => 1,
+        Space::Gray | Space::Indexed(..) | Space::Tint(..) => 1,
         Space::Rgb => 3,
         Space::Cmyk => 4,
     };
@@ -211,6 +262,13 @@ fn decode(doc: &Document, stream: &Stream) -> Option<DynamicImage> {
                         .collect();
                     rgb.extend_from_slice(&cmyk_to_rgb(v[0], v[1], v[2], v[3]));
                 }
+                Space::Tint(lo, hi) => {
+                    let t = scale(sample(row, x, bits)) as i32;
+                    for c in 0..3 {
+                        let (a, b) = (lo[c] as i32, hi[c] as i32);
+                        rgb.push((a + (b - a) * t / 255) as u8);
+                    }
+                }
                 Space::Indexed(table, n) => {
                     let i = sample(row, x, bits) as usize * n;
                     let entry = table.get(i..i + n).unwrap_or(&[0, 0, 0, 0][..*n]);
@@ -226,7 +284,10 @@ fn decode(doc: &Document, stream: &Stream) -> Option<DynamicImage> {
         }
     }
     let img = RgbImage::from_raw(w as u32, h as u32, rgb)?;
-    if matches!(space, Space::Gray) {
+    let gray = |c: &[u8; 3]| c[0] == c[1] && c[1] == c[2];
+    if matches!(&space, Space::Gray)
+        || matches!(&space, Space::Tint(lo, hi) if gray(lo) && gray(hi))
+    {
         return Some(DynamicImage::ImageLuma8(
             DynamicImage::ImageRgb8(img).to_luma8(),
         ));
