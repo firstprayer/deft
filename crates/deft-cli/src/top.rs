@@ -435,6 +435,7 @@ Commands:
 Options for install:
   --agent claude|codex|all    Which agent; default all
   --scope user|project        Home folder or this folder; default user
+  --force                     Replace a SKILL.md that differs (an edited copy)
 
 Example:
   deft skill install --agent claude
@@ -478,17 +479,16 @@ pub fn skill(rest: &[String]) -> Result<Outcome> {
                     ));
                 }
             };
-            let mut s = String::new();
-            for a in agents {
-                // Codex reads skills from the shared `.agents` folder.
-                let folder = if *a == "codex" { "agents" } else { a };
-                let path = base.join(format!(".{folder}/skills/deft/SKILL.md"));
-                std::fs::create_dir_all(path.parent().expect("has parent"))
-                    .map_err(|e| err(ErrorCode::OutputUnwritable, e.to_string()))?;
-                std::fs::write(&path, skill_text())
-                    .map_err(|e| err(ErrorCode::OutputUnwritable, e.to_string()))?;
-                let _ = writeln!(s, "ok skill.install {a} -> {}", path.display());
-            }
+            let force = rest.iter().any(|a| a == "--force");
+            let paths: Vec<(&str, PathBuf)> = agents
+                .iter()
+                .map(|a| {
+                    // Codex reads skills from the shared `.agents` folder.
+                    let folder = if *a == "codex" { "agents" } else { a };
+                    (*a, base.join(format!(".{folder}/skills/deft/SKILL.md")))
+                })
+                .collect();
+            let s = install_skill(&paths, force)?;
             Ok(Outcome::text(s))
         }
         other => Err(err(
@@ -497,6 +497,35 @@ pub fn skill(rest: &[String]) -> Result<Outcome> {
         )
         .hint("deft skill print | install --agent claude|codex|all --scope user|project")),
     }
+}
+
+/// Write the skill to each path. A SKILL.md that differs may hold the user's
+/// own edits: it is replaced only with `force`, and nothing is written until
+/// every path is clear.
+fn install_skill(paths: &[(&str, PathBuf)], force: bool) -> Result<String> {
+    let text = skill_text();
+    if !force
+        && let Some((_, path)) = paths
+            .iter()
+            .find(|(_, p)| std::fs::read_to_string(p).is_ok_and(|old| old != text))
+    {
+        return Err(err(
+            ErrorCode::OutputExists,
+            format!(
+                "{} differs from this deft's skill (edited, or from another version)",
+                path.display()
+            ),
+        )
+        .hint("add --force to replace it, or deft skill print to compare"));
+    }
+    let mut s = String::new();
+    for (a, path) in paths {
+        std::fs::create_dir_all(path.parent().expect("has parent"))
+            .map_err(|e| err(ErrorCode::OutputUnwritable, e.to_string()))?;
+        std::fs::write(path, &text).map_err(|e| err(ErrorCode::OutputUnwritable, e.to_string()))?;
+        let _ = writeln!(s, "ok skill.install {a} -> {}", path.display());
+    }
+    Ok(s)
 }
 
 pub fn doctor() -> Result<Outcome> {
@@ -587,7 +616,24 @@ pub fn run_plugin(path: &Path, args: &[String]) -> Result<Outcome> {
 
 #[cfg(test)]
 mod tests {
-    use super::plugin_name;
+    use super::{install_skill, plugin_name, skill_text};
+    use std::path::PathBuf;
+
+    #[test]
+    fn an_edited_skill_is_kept_unless_forced() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".claude/skills/deft/SKILL.md");
+        let paths: Vec<(&str, PathBuf)> = vec![("claude", path.clone())];
+        install_skill(&paths, false).unwrap();
+        // The same text again is fine.
+        install_skill(&paths, false).unwrap();
+        std::fs::write(&path, "my own notes").unwrap();
+        let e = install_skill(&paths, false).unwrap_err();
+        assert!(e.message.contains("differs"), "{}", e.message);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "my own notes");
+        install_skill(&paths, true).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), skill_text());
+    }
 
     #[test]
     fn only_programs_are_plugins() {
