@@ -207,7 +207,7 @@ pub fn info(rest: &[String], stdin: impl FnOnce() -> Vec<u8>) -> Result<Outcome>
 fn media_info(ctx: &deft_core::job::Ctx, path: &Path, item: &mut Item) {
     let Some(ffprobe) = deft_engines::locate(ctx, "ffprobe") else {
         item.warnings.push(
-            "duration and picture size need ffprobe, which is not installed (see deft doctor)"
+            "duration and picture size need ffprobe, part of ffmpeg, which is not installed (see deft doctor)"
                 .into(),
         );
         return;
