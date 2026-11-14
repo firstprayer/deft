@@ -272,7 +272,7 @@ fn embed_profile(enc: &mut impl image::ImageEncoder, icc: Option<&[u8]>) {
 }
 
 /// Convert pixels from an RGB profile to sRGB. None if the profile is unusable.
-fn to_srgb(img: &DynamicImage, icc: &[u8]) -> Option<DynamicImage> {
+pub fn to_srgb(img: &DynamicImage, icc: &[u8]) -> Option<DynamicImage> {
     use moxcms::{ColorProfile, Layout, TransformOptions};
     let source = ColorProfile::new_from_slice(icc).ok()?;
     let transform = source

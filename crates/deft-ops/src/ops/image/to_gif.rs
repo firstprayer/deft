@@ -1,4 +1,4 @@
-use super::_common::{IN, decode};
+use super::_common::{IN, decode_srgb};
 use deft_core::prelude::*;
 use deft_tools_image::Fit;
 
@@ -38,7 +38,7 @@ fn run(job: &Job) -> Result<OpResult> {
     let images = job
         .inputs
         .iter()
-        .map(|i| decode(job, i))
+        .map(|i| decode_srgb(job, i))
         .collect::<Result<Vec<_>>>()?;
     let (w, h) = match p.opt_size("size") {
         Some(s) => {

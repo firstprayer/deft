@@ -64,6 +64,20 @@ pub fn decode(job: &Job, input: &InputFile) -> Result<DynamicImage> {
     })
 }
 
+/// Decode an input with its pixels in sRGB, for outputs that mix several
+/// inputs or carry no colour profile. The numbers of a Display P3 or Adobe
+/// RGB photo mean other colours than the same numbers in sRGB.
+pub fn decode_srgb(job: &Job, input: &InputFile) -> Result<DynamicImage> {
+    let img = decode(job, input)?;
+    let icc = input
+        .format
+        .and_then(|f| deft_tools_image::icc_profile(input.bytes().ok()?, f));
+    Ok(icc
+        .filter(|p| deft_tools_image::profile_fits(p, &img))
+        .and_then(|p| deft_tools_image::to_srgb(&img, &p))
+        .unwrap_or(img))
+}
+
 /// How to get the whole picture out of a HEIF file: ffmpeg options that go
 /// after `-i`. ffmpeg shows the tiles of a grid and a transparency plane as
 /// separate streams, and which stream carries what can differ from the file's
@@ -476,6 +490,20 @@ pub fn encode(
 
 /// Write in the input's format; formats deft cannot write fall back to PNG.
 pub fn save(job: &Job, img: &DynamicImage, format: Format) -> Result<OpResult> {
+    save_with(job, img, format, profile(job))
+}
+
+/// `save` for pixels given in sRGB.
+pub fn save_srgb(job: &Job, img: &DynamicImage, format: Format) -> Result<OpResult> {
+    save_with(job, img, format, None)
+}
+
+fn save_with(
+    job: &Job,
+    img: &DynamicImage,
+    format: Format,
+    icc: Option<Vec<u8>>,
+) -> Result<OpResult> {
     let format = job.target(format);
     let format = if deft_tools_image::WRITABLE.contains(&format) {
         format
@@ -483,7 +511,6 @@ pub fn save(job: &Job, img: &DynamicImage, format: Format) -> Result<OpResult> {
         Format::Png
     };
     let quality = job.params.opt_int("quality").unwrap_or(85) as u8;
-    let icc = profile(job);
     let opt = deft_tools_image::Encode {
         quality,
         icc: icc.as_deref(),
@@ -505,4 +532,63 @@ fn format_name(input: &InputFile) -> String {
     input
         .format
         .map_or_else(|| "image".to_string(), |f| f.to_string().to_uppercase())
+}
+
+/// Running image operations on pictures made in memory.
+#[cfg(test)]
+pub(crate) mod testing {
+    use super::*;
+    use deft_tools_image::image::{self, Rgb, RgbImage};
+
+    /// Run `op` with options given as on the command line.
+    pub fn run(op: &Op, inputs: Vec<(Vec<u8>, Format)>, options: &[(&str, &str)]) -> OpResult {
+        try_run(op, inputs, options).expect("the operation runs")
+    }
+
+    pub fn try_run(
+        op: &Op,
+        inputs: Vec<(Vec<u8>, Format)>,
+        options: &[(&str, &str)],
+    ) -> Result<OpResult> {
+        let mut params = Params::default();
+        for (key, raw) in options {
+            let spec = op.param(key).expect("a known option");
+            params.set(key, spec.kind.parse(key, raw).expect("a valid value"));
+        }
+        crate::runtime::finalize_params(op, &mut params, None).expect("options");
+        let tmp = std::env::temp_dir().join(format!("deft-test-{}-{}", op.id, std::process::id()));
+        let ctx = Ctx::new(tmp);
+        let job = Job {
+            inputs: inputs
+                .into_iter()
+                .map(|(b, f)| InputFile::stdin(b, Some(f)))
+                .collect(),
+            params: &params,
+            ctx: &ctx,
+            out_format: None,
+            out_dir: None,
+        };
+        (op.run)(&job)
+    }
+
+    /// The first output, decoded.
+    pub fn picture(res: &OpResult) -> DynamicImage {
+        match &res.outputs[0].data {
+            Data::Bytes(b) => image::load_from_memory(b).expect("an image"),
+            other => panic!("not bytes: {other:?}"),
+        }
+    }
+
+    /// A PNG of one colour, with an optional colour profile.
+    pub fn png(w: u32, h: u32, colour: [u8; 3], icc: Option<&[u8]>) -> (Vec<u8>, Format) {
+        let img = DynamicImage::ImageRgb8(RgbImage::from_pixel(w, h, Rgb(colour)));
+        let opt = deft_tools_image::Encode {
+            icc,
+            ..Default::default()
+        };
+        (
+            deft_tools_image::encode(&img, Format::Png, opt).expect("png"),
+            Format::Png,
+        )
+    }
 }

@@ -1,4 +1,4 @@
-use super::_common::{IN, INOUT, QUALITY, decode, save};
+use super::_common::{IN, INOUT, QUALITY, decode_srgb, save_srgb};
 use deft_core::prelude::*;
 use deft_tools_image::edit::Grid;
 
@@ -50,7 +50,7 @@ fn run(job: &Job) -> Result<OpResult> {
     let images = job
         .inputs
         .iter()
-        .map(|i| decode(job, i))
+        .map(|i| decode_srgb(job, i))
         .collect::<Result<Vec<_>>>()?;
     let n = images.len() as u32;
     let cols = p
@@ -73,5 +73,26 @@ fn run(job: &Job) -> Result<OpResult> {
     };
     let out = deft_tools_image::edit::montage(&images, grid)?;
     let format = job.input().require_format()?;
-    save(job, &out, format)
+    save_srgb(job, &out, format)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::_common::testing::{picture, png, run};
+
+    #[test]
+    fn tiles_in_other_colour_spaces_are_converted() {
+        let p3 = moxcms::ColorProfile::new_display_p3().encode().unwrap();
+        let colour = [200, 100, 50];
+        let res = run(
+            &super::OP,
+            vec![png(10, 10, colour, Some(&p3)), png(10, 10, colour, None)],
+            &[("cols", "2")],
+        );
+        let out = picture(&res).to_rgb8();
+        // The Display P3 tile shows a redder orange than the same numbers in sRGB.
+        let (p3_tile, srgb_tile) = (out.get_pixel(5, 5).0, out.get_pixel(15, 5).0);
+        assert_eq!(srgb_tile, colour);
+        assert!(p3_tile[0] > 210 && p3_tile[1] < 95, "{p3_tile:?}");
+    }
 }

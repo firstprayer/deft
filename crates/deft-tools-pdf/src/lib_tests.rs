@@ -425,3 +425,23 @@ fn split_gives_the_same_parts_as_select() {
         );
     }
 }
+
+#[test]
+fn a_jpeg_keeps_its_colour_profile_on_the_page() {
+    use deft_core::format::Format;
+    let img = image::DynamicImage::ImageRgb8(image::RgbImage::new(8, 8));
+    let mut icc = vec![0u8; 128];
+    icc[16..20].copy_from_slice(b"RGB ");
+    let opt = deft_tools_image::Encode {
+        icc: Some(&icc),
+        ..Default::default()
+    };
+    let jpg = deft_tools_image::encode(&img, Format::Jpeg, opt).unwrap();
+    let pic = PdfImage::from_bytes(&jpg, Format::Jpeg, u64::MAX).unwrap();
+    assert!(matches!(&pic, PdfImage::Jpeg { icc: Some(p), .. } if *p == icc));
+    let mut doc = Document::with_version("1.7");
+    let id = embed_image(&mut doc, &pic);
+    let stream = doc.get_object(id).unwrap().as_stream().unwrap();
+    let cs = stream.dict.get(b"ColorSpace").unwrap().as_array().unwrap();
+    assert_eq!(cs[0].as_name().unwrap(), b"ICCBased");
+}
