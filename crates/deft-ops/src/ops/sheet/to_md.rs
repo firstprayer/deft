@@ -9,7 +9,7 @@ pub static OP: Op = Op {
     params: &[param(
         "sheet",
         Kind::Text,
-        "Sheet name or number (default: first)",
+        "Sheet name or number (default: first visible)",
     )],
     converts: &[Edge {
         from: IN,

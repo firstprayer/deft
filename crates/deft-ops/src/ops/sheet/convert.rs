@@ -13,7 +13,11 @@ pub static OP: Op = Op {
             Kind::Choice(&["csv", "xlsx", "json"]),
             "Target format (or give -o name.ext)",
         ),
-        param("sheet", Kind::Text, "Sheet name or number (default: first)"),
+        param(
+            "sheet",
+            Kind::Text,
+            "Sheet name or number (default: first visible)",
+        ),
     ],
     converts: &[Edge {
         from: IN,

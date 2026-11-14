@@ -12,7 +12,11 @@ pub const IN: &[Format] = &[
 ];
 pub const OUT: &[Format] = &[Format::Csv, Format::Xlsx, Format::Json];
 
-pub const SHEET: ParamSpec = param("sheet", Kind::Text, "Sheet name or number (default: first)");
+pub const SHEET: ParamSpec = param(
+    "sheet",
+    Kind::Text,
+    "Sheet name or number (default: first visible)",
+);
 pub const TO: ParamSpec = param(
     "to",
     Kind::Choice(&["csv", "xlsx", "json"]),
@@ -23,16 +27,55 @@ pub fn tables(input: &InputFile) -> Result<Vec<Table>> {
     deft_tools_sheet::read(input.bytes()?, input.require_format()?, &input.stem())
 }
 
+/// Names for a message: the first few, then how many more.
+pub fn some_names(names: &[&str]) -> String {
+    const SHOWN: usize = 5;
+    let mut s = names
+        .iter()
+        .take(SHOWN)
+        .copied()
+        .collect::<Vec<_>>()
+        .join(", ");
+    if names.len() > SHOWN {
+        s.push_str(&format!(" and {} more", names.len() - SHOWN));
+    }
+    s
+}
+
+/// The sheet taken when none is named: the first one that is not hidden.
+pub fn first_visible(tables: &[Table]) -> usize {
+    tables.iter().position(|t| !t.hidden).unwrap_or(0)
+}
+
 /// A warning when a workbook has sheets that a command will not look at.
 pub fn other_sheets(tables: &[Table], wanted: Option<&str>) -> Option<String> {
-    let rest: Vec<&str> = tables.iter().skip(1).map(|t| t.name.as_str()).collect();
-    (wanted.is_none() && !rest.is_empty()).then(|| {
-        format!(
-            "used the first sheet, {}; also in the file: {}",
-            tables[0].name,
-            rest.join(", ")
-        )
-    })
+    if wanted.is_some() || tables.len() < 2 {
+        return None;
+    }
+    let used = first_visible(tables);
+    let rest: Vec<&str> = tables
+        .iter()
+        .enumerate()
+        .filter(|(i, t)| *i != used && !t.hidden)
+        .map(|(_, t)| t.name.as_str())
+        .collect();
+    let hidden: Vec<&str> = tables
+        .iter()
+        .enumerate()
+        .filter(|(i, t)| *i != used && t.hidden)
+        .map(|(_, t)| t.name.as_str())
+        .collect();
+    let mut w = format!("used the first sheet, {}", tables[used].name);
+    if tables[used].hidden {
+        w.push_str(" (hidden; every sheet is)");
+    }
+    if !rest.is_empty() {
+        w.push_str(&format!("; also in the file: {}", some_names(&rest)));
+    }
+    if !hidden.is_empty() {
+        w.push_str(&format!("; hidden sheets: {}", some_names(&hidden)));
+    }
+    Some(w)
 }
 
 /// Find a sheet by name or 1-based number.
@@ -50,11 +93,12 @@ pub fn sheet_index(tables: &[Table], wanted: &str) -> Result<usize> {
     })
 }
 
-/// Pick a sheet by name or 1-based number.
+/// Pick a sheet by name or 1-based number; by default the first that is
+/// not hidden.
 pub fn pick(mut tables: Vec<Table>, wanted: Option<String>) -> Result<Table> {
     let index = match wanted {
         Some(w) => sheet_index(&tables, &w)?,
-        None => 0,
+        None => first_visible(&tables),
     };
     Ok(tables.swap_remove(index))
 }
@@ -129,4 +173,33 @@ pub fn finish(job: &Job, t: &Table) -> Result<OpResult> {
             t.rows.len().saturating_sub(1),
             t.columns()
         )))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use deft_tools_sheet::Cell;
+
+    fn table(rows: &[&[&str]]) -> Table {
+        Table {
+            rows: rows
+                .iter()
+                .map(|r| r.iter().map(|c| Cell::Text(c.to_string())).collect())
+                .collect(),
+            ..Table::default()
+        }
+    }
+
+    #[test]
+    fn hidden_sheets_are_skipped_by_default() {
+        let mut hidden = table(&[&["x"]]);
+        hidden.name = "Cache".into();
+        hidden.hidden = true;
+        let mut shown = table(&[&["y"]]);
+        shown.name = "Data".into();
+        let tables = vec![hidden, shown];
+        assert_eq!(first_visible(&tables), 1);
+        let w = other_sheets(&tables, None).unwrap();
+        assert_eq!(w, "used the first sheet, Data; hidden sheets: Cache");
+    }
 }

@@ -54,6 +54,9 @@ pub struct Table {
     /// Row and column of the first cell, counted from 0. A sheet need not
     /// start at A1, and readers drop the empty rows and columns before it.
     pub origin: (usize, usize),
+    /// A sheet hidden in the workbook (Excel's hidden and very hidden, an
+    /// ODS table with display off).
+    pub hidden: bool,
     /// What reading had to decide, such as the text encoding of a CSV file.
     pub notes: Vec<String>,
 }
@@ -192,6 +195,12 @@ pub fn read_workbook(bytes: &[u8]) -> Result<Vec<Table>> {
     let bytes = cleaned.as_deref().unwrap_or(bytes);
     let mut wb = open_workbook_auto_from_rs(Cursor::new(bytes.to_vec()))
         .map_err(|e| err(ErrorCode::InputCorrupt, format!("workbook: {e}")))?;
+    let hidden: std::collections::HashSet<String> = wb
+        .sheets_metadata()
+        .iter()
+        .filter(|s| s.visible != calamine::SheetVisible::Visible)
+        .map(|s| s.name.clone())
+        .collect();
     let mut out = Vec::new();
     for name in wb.sheet_names() {
         let range = wb
@@ -202,6 +211,7 @@ pub fn read_workbook(bytes: &[u8]) -> Result<Vec<Table>> {
             .start()
             .map_or((0, 0), |(r, c)| (r as usize, c as usize));
         out.push(Table {
+            hidden: hidden.contains(&name),
             name,
             rows,
             origin,

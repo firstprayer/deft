@@ -7,7 +7,11 @@ pub static OP: Op = Op {
     input: Input::each(IN, "sheet"),
     output: Output::one(OUT, "sheet"),
     params: &[
-        param("sheet", Kind::Text, "Sheet name or number (default: first)"),
+        param(
+            "sheet",
+            Kind::Text,
+            "Sheet name or number (default: first visible)",
+        ),
         param("range", Kind::Text, "Cell range, e.g. B2:D10"),
         param(
             "to",

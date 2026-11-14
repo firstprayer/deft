@@ -1,4 +1,4 @@
-use super::_common::{IN, OUT, other_sheets, shape, tables, write};
+use super::_common::{IN, OUT, first_visible, other_sheets, shape, tables, write};
 use deft_core::prelude::*;
 
 pub static OP: Op = Op {
@@ -26,7 +26,7 @@ fn run(job: &Job) -> Result<OpResult> {
     for input in &job.inputs {
         let mut sheets = tables(input)?;
         warnings.extend(other_sheets(&sheets, None));
-        let t = sheets.remove(0);
+        let t = sheets.swap_remove(first_visible(&sheets));
         warnings.extend(t.notes.iter().cloned());
         all.push(t);
     }
