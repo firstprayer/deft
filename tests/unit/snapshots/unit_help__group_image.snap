@@ -6,7 +6,7 @@ deft image - commands (input -> output)
   info         image -> report                  Format, dimensions, EXIF orientation, GPS
   adjust       image -> image                   Change --brightness, --contrast, --saturation, --gamma
   blur         image -> image                   Gaussian blur: --radius 5, or a --box region
-  compress     image -> image                   Smaller file: --quality, --target-size 200KB
+  compress     JPEG, PNG or WebP -> image       Smaller file: --quality, --target-size 200KB
   convert      image -> image                   Change format: --to png|jpg|webp|avif|gif|tiff|bmp|ico
   crop         image -> image                   Cut a region: --box x,y,w,h or --aspect 16:9
   favicon      image -> ico+png...              Website icon set: favicon.ico and PNG sizes

@@ -918,6 +918,7 @@ dependencies = [
  "deft-tools-sheet",
  "deft-tools-text",
  "glob",
+ "moxcms",
  "regex",
  "serde_json",
  "tempfile",
@@ -983,6 +984,7 @@ dependencies = [
  "rxing",
  "serde_json",
  "typst-assets",
+ "zune-jpeg",
 ]
 
 [[package]]

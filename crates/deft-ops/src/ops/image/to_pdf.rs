@@ -46,7 +46,7 @@ fn run(job: &Job) -> Result<OpResult> {
         .iter()
         .map(|i| match i.require_format()? {
             Format::Heic | Format::Avif => {
-                Ok(PdfImage::from_image(&super::_common::decode(job, i)?))
+                Ok(PdfImage::from_image(&super::_common::decode_srgb(job, i)?))
             }
             format => PdfImage::from_bytes(i.bytes()?, format, max),
         })

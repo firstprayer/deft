@@ -1024,6 +1024,8 @@ pub enum PdfImage {
         width: u32,
         height: u32,
         components: u8,
+        /// The colour profile the JPEG's numbers are in.
+        icc: Option<Vec<u8>>,
     },
     /// 8-bit raw samples, Flate-compressed on embedding.
     Raw {
@@ -1052,19 +1054,27 @@ impl PdfImage {
         max_pixels: u64,
     ) -> Result<PdfImage> {
         use deft_core::format::Format;
+        let icc = deft_tools_image::icc_profile(bytes, format);
         if format == Format::Jpeg
             && deft_tools_image::exif_orientation(bytes) == 1
             && let Some((width, height, components)) = deft_tools_image::jpeg_info(bytes)
             && (components == 1 || components == 3)
         {
+            let model: &[u8] = if components == 1 { b"GRAY" } else { b"RGB " };
             return Ok(PdfImage::Jpeg {
                 bytes: bytes.to_vec(),
                 width,
                 height,
                 components,
+                icc: icc.filter(|p| p.get(16..20) == Some(model)),
             });
         }
         let img = deft_tools_image::decode(bytes, format, max_pixels)?;
+        // Decoded pixels go in as sRGB, so a page shows them as the file does.
+        let img = icc
+            .filter(|p| deft_tools_image::profile_fits(p, &img))
+            .and_then(|p| deft_tools_image::to_srgb(&img, &p))
+            .unwrap_or(img);
         if format == Format::Jpeg {
             // Rotated or CMYK JPEG: re-encode upright at high quality.
             let jpg = deft_tools_image::encode(
@@ -1082,6 +1092,7 @@ impl PdfImage {
                 width,
                 height,
                 components,
+                icc: None,
             });
         }
         Ok(PdfImage::from_image(&img))
@@ -1124,11 +1135,26 @@ pub fn embed_image(doc: &mut Document, img: &PdfImage) -> ObjectId {
             width,
             height,
             components,
+            icc,
         } => {
-            let cs = if *components == 1 {
+            let device = if *components == 1 {
                 "DeviceGray"
             } else {
                 "DeviceRGB"
+            };
+            let cs = match icc {
+                Some(profile) => {
+                    let dict = dictionary! {
+                        "N" => *components as i64, "Alternate" => device, "Filter" => "FlateDecode",
+                    };
+                    let id =
+                        doc.add_object(Stream::new(dict, flate(profile)).with_compression(false));
+                    Object::Array(vec![
+                        Object::Name(b"ICCBased".to_vec()),
+                        Object::Reference(id),
+                    ])
+                }
+                None => Object::Name(device.as_bytes().to_vec()),
             };
             let dict = dictionary! {
                 "Type" => "XObject", "Subtype" => "Image", "Width" => *width as i64, "Height" => *height as i64,

@@ -1,6 +1,9 @@
 use deft_core::prelude::*;
 
-const FORMATS: &[Format] = &[Format::Jpeg, Format::Png, Format::Webp];
+/// GIF is taken only to be refused with the right advice.
+const INPUTS: &[Format] = &[Format::Jpeg, Format::Png, Format::Webp, Format::Gif];
+/// Below this JPEG or WebP quality a photo shows blocks and colour shifts.
+const LOW_QUALITY: u8 = 30;
 
 pub static OP: Op = Op {
     id: "image.compress",
@@ -8,9 +11,11 @@ pub static OP: Op = Op {
     details: &[
         "JPEG and WebP re-encode (WebP needs ffmpeg). PNG is optimised losslessly.",
         "A file is never made larger. Missing --target-size is an error.",
+        "A target reached only below quality 30 gives a warning: resizing first keeps it sharper.",
     ],
-    input: Input::each(FORMATS, "image"),
-    output: Output::one(FORMATS, "image"),
+    input: Input::each(INPUTS, "JPEG, PNG or WebP"),
+    // GIF here too, so `-o out.gif` reaches the refusal that says why.
+    output: Output::one(INPUTS, "image"),
     params: &[
         param(
             "quality",
@@ -74,12 +79,32 @@ fn run(job: &Job) -> Result<OpResult> {
     let input = job.input();
     let original = input.bytes()?;
     let format = input.require_format()?;
+    if format == Format::Gif {
+        let animated = deft_tools_image::is_animated(original, format);
+        let e = err(
+            ErrorCode::InputUnsupported,
+            format!(
+                "{}: image compress takes JPEG, PNG and WebP; it does not shrink GIF{}",
+                input.display,
+                if animated {
+                    ", and converting an animation keeps only its first frame"
+                } else {
+                    ""
+                }
+            ),
+        );
+        return Err(if animated {
+            e
+        } else {
+            e.hint("a still GIF: deft convert <file> -o <name>.png, then compress that")
+        });
+    }
     let before = original.len() as u64;
     let target = p.opt_bytes("target-size");
     let mut quality = None;
-    let mut warning = None;
+    let mut warning: Option<String> = None;
     let data = if target.is_some_and(|t| before <= t) {
-        warning = Some("already under the target; the picture is unchanged");
+        warning = Some("already under the target; the picture is unchanged".into());
         unchanged(job, original, format)
     } else {
         let data = if format == Format::Png {
@@ -104,12 +129,18 @@ fn run(job: &Job) -> Result<OpResult> {
                 None => (p.int("quality") as u8, encode(p.int("quality") as u8)?),
                 Some(t) => fit(t, &input.display, encode)?,
             };
+            if target.is_some() && q < LOW_QUALITY {
+                warning = Some(format!(
+                    "the target needed quality {q}, which shows blocks and shifts colours; \
+                     resizing first keeps it sharper: deft image resize --size 50%"
+                ));
+            }
             quality = Some(q);
             out
         };
         if data.len() as u64 >= before {
             quality = None;
-            warning = Some("already compact; the picture is unchanged");
+            warning = Some("already compact; the picture is unchanged".into());
             unchanged(job, original, format)
         } else {
             data
@@ -144,4 +175,59 @@ fn run(job: &Job) -> Result<OpResult> {
         res = res.warn(w);
     }
     Ok(res)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::_common::testing::{run, try_run};
+    use deft_core::prelude::*;
+    use deft_tools_image::image::{DynamicImage, Rgb, RgbImage};
+
+    #[test]
+    fn a_target_reached_only_at_low_quality_warns() {
+        let noise = DynamicImage::ImageRgb8(RgbImage::from_fn(96, 96, |x, y| {
+            let v = (x * 7919 + y * 104_729) ^ (x * y * 31);
+            Rgb([v as u8, (v >> 3) as u8, (v >> 6) as u8])
+        }));
+        let at = |quality| {
+            let opt = deft_tools_image::Encode {
+                quality,
+                ..Default::default()
+            };
+            deft_tools_image::encode(&noise, Format::Jpeg, opt).unwrap()
+        };
+        let input = at(95);
+        let target = at(12).len().to_string();
+        let res = run(
+            &super::OP,
+            vec![(input.clone(), Format::Jpeg)],
+            &[("target-size", &target)],
+        );
+        assert!(
+            res.warnings.iter().any(|w| w.contains("resiz")),
+            "{:?}",
+            res.warnings
+        );
+        let target = at(80).len().to_string();
+        let res = run(
+            &super::OP,
+            vec![(input, Format::Jpeg)],
+            &[("target-size", &target)],
+        );
+        assert!(res.warnings.is_empty(), "{:?}", res.warnings);
+    }
+
+    #[test]
+    fn a_gif_is_refused_without_advice_that_loses_frames() {
+        let frame = || deft_tools_image::image::RgbaImage::new(4, 4);
+        let gif = deft_tools_image::edit::encode_gif(vec![frame(), frame()], 100, 0).unwrap();
+        let e = try_run(&super::OP, vec![(gif, Format::Gif)], &[]).unwrap_err();
+        assert_eq!(e.code, ErrorCode::InputUnsupported);
+        assert!(e.message.contains("first frame"), "{}", e.message);
+        assert!(e.hint.is_none());
+        assert!(
+            super::OP.output.formats.contains(&Format::Gif),
+            "-o out.gif reaches it"
+        );
+    }
 }
