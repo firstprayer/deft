@@ -400,3 +400,26 @@ fn gps_behind_a_pointer_of_the_ifd_type_is_found() {
     assert!(tags.contains_key("GPSLatitude"), "{tags:?}");
     assert!(metadata_summary(&t, Format::Tiff).1, "has GPS");
 }
+
+#[test]
+fn tags_are_written_into_tiff_without_touching_the_picture() {
+    let img = DynamicImage::ImageRgb8(RgbImage::from_fn(5, 4, |x, y| {
+        image::Rgb([x as u8 * 40, y as u8 * 50, 90])
+    }));
+    let plain = encode(&img, Format::Tiff, Encode::default()).unwrap();
+    let fields = crate::exif::Fields {
+        author: Some("Ada".into()),
+        date: Some("2026:05:01 12:30:00".into()),
+        comment: Some("survey".into()),
+        ..Default::default()
+    };
+    let signed = crate::exif::write(&plain, Format::Tiff, &fields).unwrap();
+    // Everything that was there stays byte for byte; the tags come after it.
+    assert_eq!(&signed[8..plain.len()], &plain[8..]);
+    let tags = crate::exif::read(&signed);
+    assert_eq!(tags["Artist"], "Ada");
+    assert_eq!(tags["DateTimeOriginal"], "2026-05-01 12:30:00");
+    assert_eq!(tags["UserComment"], "survey");
+    let again = decode(&signed, Format::Tiff, u64::MAX).unwrap();
+    assert_eq!(again.to_rgb8(), img.to_rgb8());
+}
