@@ -1,4 +1,6 @@
-use super::_common::{IN, OUT, SHEET, TO, column, input_table, some_names, tables, warned, write};
+use super::_common::{
+    IN, OUT, SHEET, TO, column, find_header, input_table, some_names, tables, warned, write,
+};
 use deft_core::prelude::*;
 use deft_tools_sheet::Table;
 
@@ -70,10 +72,11 @@ fn run(job: &Job) -> Result<OpResult> {
             })
             .collect()
     } else {
-        let (t, other_sheets) = input_table(job)?;
+        let (mut t, other_sheets) = input_table(job)?;
         warning = other_sheets;
         match (p.opt_text("columns"), p.opt_int("every")) {
             (Some(name), None) => {
+                warning.extend(find_header(&mut t, std::slice::from_ref(&name)));
                 let c = column(&t, "columns", &name)?;
                 deft_tools_sheet::split_by(&t, c)
                     .into_iter()

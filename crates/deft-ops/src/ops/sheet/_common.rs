@@ -145,6 +145,36 @@ pub fn warned(mut res: OpResult, warnings: Vec<String>) -> OpResult {
     res
 }
 
+/// When named columns are not in the first row but all are in a later one
+/// (a bank statement or a statistics table with a title block above its
+/// header), take that row as the header. Returns the warning to give.
+pub fn find_header(t: &mut Table, names: &[String]) -> Option<String> {
+    let in_row = |row: &[deft_tools_sheet::Cell]| {
+        names.iter().all(|n| {
+            row.iter()
+                .any(|c| c.to_string().trim().eq_ignore_ascii_case(n.trim()))
+        })
+    };
+    if names.is_empty() || t.rows.first().is_none_or(|r| in_row(r)) {
+        return None;
+    }
+    if deft_tools_sheet::find_columns(t, &names.join(",")).is_ok() {
+        return None;
+    }
+    let at = t.rows.iter().take(50).position(|r| in_row(r))?;
+    t.rows.drain(..at);
+    Some(format!(
+        "the header is row {}; the {} above it {} left out",
+        at + 1,
+        if at == 1 {
+            "row".to_string()
+        } else {
+            format!("{at} rows")
+        },
+        if at == 1 { "was" } else { "were" }
+    ))
+}
+
 /// Map a column lookup failure to the option that named the column.
 pub fn columns(t: &Table, option: &str, list: &str) -> Result<Vec<usize>> {
     deft_tools_sheet::find_columns(t, list).map_err(|m| bad_value(option, m))
@@ -188,6 +218,21 @@ mod tests {
                 .collect(),
             ..Table::default()
         }
+    }
+
+    #[test]
+    fn a_title_block_above_the_header_is_found_by_the_named_columns() {
+        let mut t = table(&[
+            &["Statement"],
+            &["date", "name", "amount"],
+            &["1", "a", "2"],
+        ]);
+        let w = find_header(&mut t, &["name".into(), "amount".into()]).unwrap();
+        assert_eq!(w, "the header is row 2; the row above it was left out");
+        assert_eq!(t.rows.len(), 2);
+        // A header already in row 1 is left alone, as is a name found nowhere.
+        assert!(find_header(&mut t, &["name".into()]).is_none());
+        assert!(find_header(&mut t, &["nope".into()]).is_none());
     }
 
     #[test]
