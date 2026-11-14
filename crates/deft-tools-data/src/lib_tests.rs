@@ -222,6 +222,12 @@ fn plist_keys_stay_with_their_values() {
 }
 
 #[test]
+fn xml_comments_are_reported_as_lost() {
+    let doc = read(b"<!-- why --><rss><channel/></rss>", Format::Xml).unwrap();
+    assert_eq!(doc.warnings, vec!["comments are not kept"]);
+}
+
+#[test]
 fn mixed_xml_content_keeps_its_order() {
     let v = parse(b"<p><b>DOI:</b> <a>10.7554</a></p>", Format::Xml).unwrap();
     assert_eq!(

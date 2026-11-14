@@ -39,6 +39,9 @@ pub fn lost(text: &str) -> Vec<String> {
     if clash {
         out.push("elements from two namespaces share a name and were merged".to_string());
     }
+    if doc.descendants().any(|n| n.is_comment()) {
+        out.push("comments are not kept".to_string());
+    }
     out
 }
 
