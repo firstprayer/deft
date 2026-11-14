@@ -248,7 +248,7 @@ fn cmyk_profile() -> Vec<u8> {
     }
     // Grid corners in C, M, Y, K order with K varying fastest.
     for corner in 0..16u8 {
-        let inked = corner.count_ones() as u32;
+        let inked = corner.count_ones();
         let l = if corner & 1 == 1 {
             0
         } else {

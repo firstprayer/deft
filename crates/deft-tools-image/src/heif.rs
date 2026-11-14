@@ -175,11 +175,14 @@ pub struct Picture {
     pub crop: Option<(u32, u32, u32, u32)>,
 }
 
+/// Where an item's data is: (item, construction method, (offset, length) extents).
+type Location = (u32, u8, Vec<(u64, u64)>);
+
 struct Meta<'a> {
     file: &'a [u8],
     idat: &'a [u8],
     types: Vec<(u32, &'a [u8])>,
-    locations: Vec<(u32, u8, Vec<(u64, u64)>)>,
+    locations: Vec<Location>,
     props: Vec<(&'a [u8], &'a [u8])>,
     assoc: Vec<(u32, Vec<usize>)>,
     /// (kind, from, to).
@@ -192,7 +195,7 @@ fn uint(data: &[u8], at: usize, size: usize) -> Option<u64> {
 }
 
 /// Item locations from an `iloc` box: (item, construction method, extents).
-fn locations(iloc: &[u8]) -> Option<Vec<(u32, u8, Vec<(u64, u64)>)>> {
+fn locations(iloc: &[u8]) -> Option<Vec<Location>> {
     let version = *iloc.first()?;
     let (offset_size, length_size) = ((iloc.get(4)? >> 4) as usize, (iloc.get(4)? & 15) as usize);
     let base_size = (iloc.get(5)? >> 4) as usize;
