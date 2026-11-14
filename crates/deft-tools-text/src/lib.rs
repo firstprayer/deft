@@ -212,13 +212,75 @@ fn is_markup(html: &str) -> bool {
     HTML_TAGS.contains(&name.as_str()) || name.contains('-')
 }
 
+/// The `src` of every `<img>` tag in raw HTML, as byte ranges of the value.
+pub fn img_sources(html: &str) -> Vec<std::ops::Range<usize>> {
+    use deft_core::text::{attribute, img_tags};
+    img_tags(html)
+        .into_iter()
+        .filter_map(|tag| {
+            let r = attribute(&html[tag.clone()], "src")?;
+            Some(tag.start + r.start..tag.start + r.end)
+        })
+        .collect()
+}
+
+/// The pictures of raw HTML, as (src, alt).
+pub fn html_pictures(html: &str) -> Vec<(String, String)> {
+    use deft_core::text::{attribute, img_tags, unescape_attribute};
+    img_tags(html)
+        .into_iter()
+        .filter_map(|tag| {
+            let tag = &html[tag];
+            let value = |name: &str| attribute(tag, name).map(|r| unescape_attribute(&tag[r]));
+            Some((value("src")?, value("alt").unwrap_or_default()))
+        })
+        .collect()
+}
+
+/// Whether inline raw HTML is a line break.
+fn is_break(html: &str) -> bool {
+    let t: String = html.chars().filter(|c| !c.is_whitespace()).collect();
+    matches!(t.to_ascii_lowercase().as_str(), "<br>" | "<br/>")
+}
+
+/// Raw HTML with the `src` of its pictures changed by `relink`.
+fn relink_img(html: &str, relink: &dyn Fn(&str) -> Option<String>) -> String {
+    let mut out = html.to_string();
+    for range in img_sources(html).into_iter().rev() {
+        if let Some(new) = relink(&html[range.clone()]) {
+            out.replace_range(range, &html_escape(&new));
+        }
+    }
+    out
+}
+
 /// Markdown events with an id on every heading, taken from `ids` in order,
-/// and inline tags HTML does not have turned back into text.
-fn html_events<'a>(md: &'a str, ids: &[String]) -> Vec<Event<'a>> {
+/// inline tags HTML does not have turned back into text, and picture paths
+/// changed by `relink`.
+fn html_events<'a>(
+    md: &'a str,
+    ids: &[String],
+    relink: &dyn Fn(&str) -> Option<String>,
+) -> Vec<Event<'a>> {
     let mut out = Vec::new();
     let mut ids = ids.iter();
     for ev in Parser::new_ext(md, options()) {
         match ev {
+            Event::Start(Tag::Image {
+                link_type,
+                dest_url,
+                title,
+                id,
+            }) => out.push(Event::Start(Tag::Image {
+                link_type,
+                dest_url: relink(&dest_url).map_or(dest_url, Into::into),
+                title,
+                id,
+            })),
+            Event::Html(h) => out.push(Event::Html(relink_img(&h, relink).into())),
+            Event::InlineHtml(h) if is_markup(&h) => {
+                out.push(Event::InlineHtml(relink_img(&h, relink).into()))
+            }
             Event::Start(Tag::Heading {
                 level,
                 id: None,
@@ -244,14 +306,30 @@ fn html_events<'a>(md: &'a str, ids: &[String]) -> Vec<Event<'a>> {
 /// HTML for Markdown, without a page around it, with these heading ids.
 pub fn html_fragment(md: &str, ids: &[String]) -> String {
     let mut body = String::new();
-    pulldown_cmark::html::push_html(&mut body, html_events(md, ids).into_iter());
+    pulldown_cmark::html::push_html(&mut body, html_events(md, ids, &|_| None).into_iter());
     body
 }
 
 /// Render Markdown to HTML. `standalone` wraps it in a full page. Headings
 /// get the anchors `md toc` links to.
 pub fn to_html(md: &str, standalone: bool, page_title: Option<&str>) -> String {
-    let body = html_fragment(md, &heading_ids(md));
+    to_html_relinked(md, standalone, page_title, &|_| None)
+}
+
+/// `to_html`, with the path of each picture changed by `relink` where it
+/// gives one: a path relative to the Markdown file must become one relative
+/// to the page.
+pub fn to_html_relinked(
+    md: &str,
+    standalone: bool,
+    page_title: Option<&str>,
+    relink: &dyn Fn(&str) -> Option<String>,
+) -> String {
+    let mut body = String::new();
+    pulldown_cmark::html::push_html(
+        &mut body,
+        html_events(md, &heading_ids(md), relink).into_iter(),
+    );
     if !standalone {
         return body;
     }
@@ -386,8 +464,114 @@ fn pipe_measures(md: &str) -> TableMeasures {
     out
 }
 
+/// Whether a picture's address is on the web, or data in the page, rather
+/// than a file beside the document.
+pub fn is_web_address(url: &str) -> bool {
+    let lower = url.trim_start().to_ascii_lowercase();
+    ["http://", "https://", "//", "ftp://", "data:"]
+        .iter()
+        .any(|p| lower.starts_with(p))
+}
+
+/// Download the web pictures among `urls`. `data:` addresses need no
+/// download and are read where they are used.
+pub fn fetch_web_pictures(
+    urls: &[String],
+) -> HashMap<String, std::result::Result<Vec<u8>, String>> {
+    let web: Vec<String> = urls
+        .iter()
+        .filter(|u| is_web_address(u) && !u.trim_start().to_ascii_lowercase().starts_with("data:"))
+        .cloned()
+        .collect();
+    if web.is_empty() {
+        return HashMap::new();
+    }
+    deft_tools_file::web::fetch_pictures(&web, Default::default())
+}
+
+/// The bytes of a web picture: fetched already, or held in a `data:` address.
+/// An SVG comes as a PNG of it: web SVGs, such as badges, often link to
+/// other files or break the XML rules a book or a PDF holds them to.
+pub fn web_picture(
+    url: &str,
+    fetched: &HashMap<String, std::result::Result<Vec<u8>, String>>,
+) -> Option<Vec<u8>> {
+    let bytes = if url.trim_start().to_ascii_lowercase().starts_with("data:") {
+        deft_tools_file::web::data_url(url)?
+    } else {
+        fetched.get(url).and_then(|r| r.as_ref().ok()).cloned()?
+    };
+    if deft_tools_file::web::picture_extension(&bytes) == Some("svg") {
+        return svg_as_png(&bytes);
+    }
+    Some(bytes)
+}
+
+/// A PNG of an SVG at twice its size, within reason.
+pub fn svg_as_png(bytes: &[u8]) -> Option<Vec<u8>> {
+    let small = deft_tools_image::render_svg(bytes, None).ok()?;
+    let width = (small.width() * 2).clamp(1, 3000);
+    let img = deft_tools_image::render_svg(bytes, Some(width)).ok()?;
+    deft_tools_image::encode(&img, deft_core::format::Format::Png, Default::default()).ok()
+}
+
+/// The one warning about web pictures that could not be had, naming a few.
+pub fn web_pictures_warning(failed: &[String]) -> String {
+    let short = |u: &String| {
+        if u.trim_start().to_ascii_lowercase().starts_with("data:") {
+            "data:...".to_string()
+        } else if u.chars().count() > 80 {
+            format!("{}...", u.chars().take(77).collect::<String>())
+        } else {
+            u.clone()
+        }
+    };
+    let named: Vec<String> = failed.iter().take(3).map(short).collect();
+    let n = failed.len();
+    format!(
+        "{n} web picture{} could not be downloaded and {} left out, keeping any alt text: {}{}",
+        if n == 1 { "" } else { "s" },
+        if n == 1 { "is" } else { "are" },
+        named.join(", "),
+        if n > 3 { ", ..." } else { "" }
+    )
+}
+
+/// The one warning about pictures whose files are not there, naming a few.
+pub fn missing_pictures_warning(missing: &[String]) -> String {
+    let n = missing.len();
+    let named: Vec<&str> = missing.iter().take(3).map(String::as_str).collect();
+    format!(
+        "{n} picture{} not found and left out: {}{}",
+        if n == 1 { "" } else { "s" },
+        named.join(", "),
+        if n > 3 { ", ..." } else { "" }
+    )
+}
+
+/// Every picture address in Markdown: `![](...)` and raw HTML `<img>`.
+pub fn picture_addresses(md: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for ev in Parser::new_ext(md, options()) {
+        match ev {
+            Event::Start(Tag::Image { dest_url, .. }) => out.push(dest_url.to_string()),
+            Event::Html(h) | Event::InlineHtml(h) => {
+                out.extend(html_pictures(&h).into_iter().map(|(src, _)| src))
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 struct Translator<'a> {
     base: Option<&'a Path>,
+    /// Web pictures, downloaded before the text is laid out.
+    web: HashMap<String, std::result::Result<Vec<u8>, String>>,
+    /// Web pictures that could not be had.
+    failed: Vec<String>,
+    /// Picture files that are not there.
+    missing: Vec<String>,
     files: HashMap<String, Vec<u8>>,
     warnings: Vec<String>,
     /// Text width and font size, for table columns.
@@ -402,11 +586,19 @@ impl Translator<'_> {
         }
     }
 
-    /// Markup for a picture, or text saying why there is none.
+    /// Markup for a picture, or its alt text when there is none to draw.
     fn image(&mut self, url: &str, alt: &str) -> String {
-        if url.starts_with("http://") || url.starts_with("https://") {
-            self.warn(format!("remote image not embedded: {url}"));
-            return format!("#link({})[{}];", lit(url), esc(url));
+        if is_web_address(url) {
+            let bytes = web_picture(url, &self.web);
+            let Some((bytes, ext)) = bytes.and_then(|b| drawable(&b).map(|e| (b, e))) else {
+                if !self.failed.iter().any(|f| f == url) {
+                    self.failed.push(url.to_string());
+                }
+                return esc(alt);
+            };
+            let name = format!("img-{}.{ext}", self.files.len() + 1);
+            self.files.insert(name.clone(), bytes);
+            return format!("#box(image({}));", lit(&name));
         }
         let located = |name: &str| {
             self.base
@@ -421,8 +613,10 @@ impl Translator<'_> {
             located(&percent_decode(url))
         };
         let Ok(bytes) = std::fs::read(&path) else {
-            self.warn(format!("image not found: {url}"));
-            return esc(&format!("[image: {url}]"));
+            if !self.missing.iter().any(|m| m == url) {
+                self.missing.push(url.to_string());
+            }
+            return esc(alt);
         };
         let Some(ext) = drawable(&bytes) else {
             // An office suite's own drawing format, such as the VCLMTF
@@ -436,6 +630,18 @@ impl Translator<'_> {
             self.warn(format!("{kind} cannot be drawn in a PDF and were left out"));
             let label = if alt.is_empty() { url } else { alt };
             return esc(&format!("[picture: {label}]"));
+        };
+        // An SVG that links to other files stops the layout: draw it here.
+        let (bytes, ext) = if ext == "svg" && String::from_utf8_lossy(&bytes).contains("<image") {
+            match svg_as_png(&bytes) {
+                Some(png) => (png, "png"),
+                None => {
+                    self.warn(format!("{url}: this SVG cannot be drawn and was left out"));
+                    return esc(alt);
+                }
+            }
+        } else {
+            (bytes, ext)
         };
         let name = format!("img-{}.{ext}", self.files.len() + 1);
         self.files.insert(name.clone(), bytes);
@@ -542,6 +748,9 @@ fn paper_width(paper: &str) -> f64 {
 fn translate(md: &str, base: Option<&Path>, style: &PdfStyle) -> Translation {
     let mut t = Translator {
         base,
+        web: fetch_web_pictures(&picture_addresses(md)),
+        failed: Vec::new(),
+        missing: Vec::new(),
         files: HashMap::new(),
         warnings: Vec::new(),
         width: paper_width(&style.paper) - 2.0 * style.margin,
@@ -634,12 +843,21 @@ fn translate(md: &str, base: Option<&Path>, style: &PdfStyle) -> Translation {
                 Event::Html(h) => block.push_str(&h),
                 Event::End(TagEnd::HtmlBlock) => {
                     let block = html_block.take().expect("in html");
+                    let pictures = html_pictures(&block);
                     if block.trim() == "<!-- page break -->" {
                         out.push_str("#pagebreak(weak: true)\n");
                     } else if let Some(rows) = table::html_table(&block) {
                         let m = t.html_table(rows);
                         out.push_str(&m);
-                    } else {
+                    } else if !pictures.is_empty() {
+                        // A README's centred logo or a book's figure.
+                        for (src, alt) in pictures {
+                            let m = t.image(&src, &alt);
+                            out.push_str(&m);
+                            out.push(' ');
+                        }
+                        out.push_str("\n\n");
+                    } else if !block.trim_start().starts_with("<!--") {
                         t.warn("raw HTML is skipped in PDF output".to_string());
                     }
                 }
@@ -767,6 +985,14 @@ fn translate(md: &str, base: Option<&Path>, style: &PdfStyle) -> Translation {
             Event::Html(h) if h.trim() == "<!-- page break -->" => {
                 out.push_str("#pagebreak(weak: true)\n");
             }
+            Event::InlineHtml(h) if is_break(&h) => out.push_str(" \\\n"),
+            Event::InlineHtml(h) if !html_pictures(&h).is_empty() => {
+                for (src, alt) in html_pictures(&h) {
+                    let m = t.image(&src, &alt);
+                    out.push_str(&m);
+                }
+            }
+            Event::Html(h) | Event::InlineHtml(h) if h.trim_start().starts_with("<!--") => {}
             Event::Html(_) | Event::InlineHtml(_) => {
                 t.warn("raw HTML is skipped in PDF output".to_string());
             }
@@ -779,6 +1005,14 @@ fn translate(md: &str, base: Option<&Path>, style: &PdfStyle) -> Translation {
                 out.push_str(&format!("#[#set text(dir: rtl)\n{body}]\n\n"));
             }
         }
+    }
+    if !t.missing.is_empty() {
+        let w = missing_pictures_warning(&t.missing);
+        t.warn(w);
+    }
+    if !t.failed.is_empty() {
+        let w = web_pictures_warning(&t.failed);
+        t.warn(w);
     }
     Translation {
         markup: out,
@@ -941,7 +1175,7 @@ pub fn to_pdf(md: &str, base: Option<&Path>, style: &PdfStyle) -> Result<PdfOutp
     };
     let preamble = format!(
         "{doc_title}#set page(paper: {paper}, margin: {margin}pt)\n\
-         #set text(font: ({font_list}\"Libertinus Serif\", \"PingFang SC\", \"Noto Sans CJK SC\", \"Microsoft YaHei\"), size: {size}pt, fallback: true)\n\
+         #set text(font: ({font_list}\"Libertinus Serif\", \"PingFang SC\", \"Hiragino Sans\", \"Apple SD Gothic Neo\", \"Noto Sans CJK SC\", \"Noto Sans CJK JP\", \"Noto Sans CJK KR\", \"Microsoft YaHei\", \"Yu Gothic\", \"Malgun Gothic\"), size: {size}pt, fallback: true)\n\
          #set par(leading: 0.75em, spacing: 1.1em)\n\
          #show heading: set block(above: 1.4em, below: 0.7em)\n\
          #show link: set text(fill: rgb(\"#1a5fb4\"))\n\
