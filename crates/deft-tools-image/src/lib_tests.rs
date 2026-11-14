@@ -321,6 +321,48 @@ fn tags_are_written_into_webp_without_touching_the_picture() {
 }
 
 #[test]
+fn an_svg_comes_out_at_the_width_asked_for() {
+    // A fractional size whose rounded height would scale it a pixel wider.
+    let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 613.7 458.5" width="613.7" height="458.5"><rect width="613.7" height="458.5" fill="red"/></svg>"#;
+    let spec = deft_core::value::SizeSpec::parse("512x").unwrap();
+    let img = render_svg_sized(svg, &spec, Fit::Contain, u64::MAX).unwrap();
+    assert_eq!(img.width(), 512);
+    assert!((382..=383).contains(&img.height()), "{}", img.height());
+}
+
+#[test]
+fn invisible_margins_are_trimmed_whatever_colour_they_keep() {
+    // A 4x2 red mark in a 10x6 canvas whose transparent pixels hold noise.
+    let img = RgbaImage::from_fn(10, 6, |x, y| {
+        if (3..7).contains(&x) && (2..4).contains(&y) {
+            image::Rgba([200, 0, 0, 255])
+        } else {
+            image::Rgba([(x * 25) as u8, (y * 40) as u8, 7, 0])
+        }
+    });
+    let b = crate::edit::trim_box(&DynamicImage::ImageRgba8(img), 5.0, 0);
+    assert_eq!(b, Some((3, 2, 4, 2)));
+}
+
+#[test]
+fn only_the_background_joined_to_the_edge_goes() {
+    // White background, a black ring, white inside the ring.
+    let img = DynamicImage::ImageRgb8(RgbImage::from_fn(9, 9, |x, y| {
+        let ring = (2..7).contains(&x)
+            && (2..7).contains(&y)
+            && !((3..6).contains(&x) && (3..6).contains(&y));
+        image::Rgb(if ring { [0, 0, 0] } else { [255, 255, 255] })
+    }));
+    let (out, n) = crate::edit::make_transparent(&img, [255, 255, 255, 255], 10.0, false);
+    let out = out.to_rgba8();
+    assert_eq!(out.get_pixel(0, 0)[3], 0);
+    assert_eq!(out.get_pixel(4, 4)[3], 255, "the white inside stays");
+    assert_eq!(n, 81 - 25);
+    let (_, all) = crate::edit::make_transparent(&img, [255, 255, 255, 255], 10.0, true);
+    assert_eq!(all, 81 - 16);
+}
+
+#[test]
 fn gps_behind_a_pointer_of_the_ifd_type_is_found() {
     // A little-endian TIFF: IFD0 with a GPS pointer of type 13 (IFD), and a
     // GPS IFD with latitude 49 N, as a Parrot Sequoia camera writes it.
@@ -347,4 +389,3 @@ fn gps_behind_a_pointer_of_the_ifd_type_is_found() {
     assert!(tags.contains_key("GPSLatitude"), "{tags:?}");
     assert!(metadata_summary(&t, Format::Tiff).1, "has GPS");
 }
-

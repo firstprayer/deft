@@ -13,7 +13,7 @@ pub static OP: Op = Op {
     id: "image.transparent",
     summary: "Make a colour see-through: --color white --fuzz 10",
     details: &[
-        "The colour goes everywhere it appears, not only around the edges.",
+        "The colour goes where it joins the edge of the picture, so a white product on white keeps its own white. --everywhere removes it wherever it appears.",
         "JPEG cannot hold transparency, so JPEG input becomes PNG.",
     ],
     input: Input::each(IN, "image"),
@@ -21,9 +21,17 @@ pub static OP: Op = Op {
     params: &[
         param("color", Kind::Color, "Colour to remove").default("white"),
         FUZZ.default("10"),
+        param(
+            "everywhere",
+            Kind::Flag,
+            "Remove the colour inside the picture too",
+        ),
         QUALITY,
     ],
-    examples: &["deft image transparent logo.png --color white -o cutout.png"],
+    examples: &[
+        "deft image transparent logo.png --color white -o cutout.png",
+        "deft image transparent logo.png --everywhere -o see-through.png",
+    ],
     tags: &[
         "transparent background",
         "chroma key",
@@ -41,7 +49,12 @@ fn run(job: &Job) -> Result<OpResult> {
     let p = job.params;
     let (img, format) = open(job)?;
     let fuzz = p.float("fuzz") as f32;
-    let (out, n) = deft_tools_image::edit::make_transparent(&img, p.color("color"), fuzz);
+    let (out, n) = deft_tools_image::edit::make_transparent(
+        &img,
+        p.color("color"),
+        fuzz,
+        p.flag("everywhere"),
+    );
     let format = if OUT.contains(&format) {
         format
     } else {
