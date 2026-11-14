@@ -7,7 +7,6 @@ Deft follows semantic versioning. Before 1.0, a minor version may change command
 ### Added
 
 - `gps` group: GPX and KML conversion, distance, time and climb.
-- `pdf extract-sheets`: each table in a PDF as its own CSV, or as a sheet in one XLSX.
 - `deft find` says when no command does a job.
 - `html to-docx --main` and `html to-pdf --main`.
 - `calendar to-csv` adds `status` and `except` columns, and `calendar from-csv` reads them.
@@ -46,7 +45,7 @@ Deft follows semantic versioning. Before 1.0, a minor version may change command
 ### Fixed
 
 - `pdf encrypt` output opens in Apple's PDF readers. `pdf to-text` and `search` read fonts that came out as garbage before, and ligatures.
-- `pdf merge` keeps every form and bookmark. `extract-sheets` uses real glyph widths.
+- `pdf merge` keeps every form and bookmark.
 - HEIC photos from phones come out whole and upright. `image strip` removes everything after a JPEG's end. `image info` finds GPS in every format. Display P3 colour survives.
 - `image compress` never grows a file and fails when it misses a target. `image trim --speck` ignores dust.
 - `video watermark` and `pad` handle phone rotation.

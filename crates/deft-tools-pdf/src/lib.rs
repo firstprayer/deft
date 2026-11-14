@@ -10,7 +10,6 @@ pub mod compare;
 pub mod extract;
 pub mod fonts;
 pub mod forms;
-pub mod layout;
 pub mod meta;
 mod outline;
 pub mod pages;

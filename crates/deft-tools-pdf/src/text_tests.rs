@@ -20,16 +20,6 @@ fn page(glyphs: Vec<Glyph>) -> PageText {
 }
 
 #[test]
-fn a_gap_wider_than_a_cell_splits_one_operator() {
-    let runs = page(vec![glyph("6", 10.0, 5.0, 0), glyph("7", 30.0, 5.0, 0)]).runs();
-    assert_eq!(runs.len(), 2);
-    assert_eq!(runs[0].text, "6");
-    assert_eq!(runs[1].text, "7");
-    assert!((runs[1].x - 30.0).abs() < 0.01, "{}", runs[1].x);
-    assert!((runs[1].y - 692.0).abs() < 0.01, "{}", runs[1].y);
-}
-
-#[test]
 fn a_word_gap_is_a_space_and_kerning_is_not() {
     let text = page(vec![
         glyph("a", 10.0, 5.0, 0),

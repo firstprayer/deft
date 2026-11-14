@@ -3,7 +3,6 @@
 //! and gives real positions, so text, search and tables all agree.
 
 use crate::Renderer;
-use crate::layout::Run;
 use deft_core::error::Result;
 use hayro::hayro_interpret::font::{Glyph as Drawn, GlyphRun};
 use hayro::hayro_interpret::hayro_cmap::BfString;
@@ -25,8 +24,6 @@ const WORD_GAP: f64 = 0.2;
 const TIGHT_WORD_GAP: f64 = 0.12;
 /// Letters this close, in ems, touch.
 const TOUCHING: f64 = 0.03;
-/// One this wide separates cells: LaTeX writes a whole table row in one operator.
-const CELL_GAP: f64 = 0.7;
 /// A step off the baseline this tall, in ems, starts a new line. Less is a
 /// superscript or a subscript.
 const LINE_STEP: f64 = 0.6;
@@ -636,31 +633,6 @@ impl PageText {
             .collect()
     }
 
-    /// Pieces of text for finding tables, with the baseline measured from the
-    /// bottom of the page. One piece is what one operator drew, cut at wide gaps.
-    pub fn runs(&self) -> Vec<Run> {
-        let apart = |a: &Glyph, b: &Glyph| {
-            a.run != b.run || !a.same_line(b) || a.step_to(b).0 >= a.size() * CELL_GAP
-        };
-        let mut out = Vec::new();
-        for piece in self.glyphs.chunk_by(|a, b| !apart(a, b)) {
-            let first = piece.iter().position(|g| !g.is_blank());
-            let last = piece.iter().rposition(|g| !g.is_blank());
-            let (Some(first), Some(last)) = (first, last) else {
-                continue;
-            };
-            let kept = &piece[first..=last];
-            let text: String = reading(kept).iter().map(|c| c.0).collect();
-            out.push(Run {
-                x: kept[0].start.x,
-                y: self.height - kept[0].start.y,
-                size: kept[0].size(),
-                text,
-                width: (kept[kept.len() - 1].end - kept[0].start).hypot(),
-            });
-        }
-        out
-    }
 }
 
 impl Renderer {
