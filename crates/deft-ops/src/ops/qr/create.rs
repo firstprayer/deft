@@ -6,6 +6,7 @@ pub static OP: Op = Op {
     summary: "Make a QR code or barcode: --text https://example.com",
     details: &[
         "--type code128, code39, ean13, ean8 or itf makes a linear barcode.",
+        "itf takes an even number of digits.",
         "--module-size is pixels per module; SVG output ignores it.",
     ],
     output: Output::one(

@@ -55,6 +55,15 @@ pub fn barcode(text: &str, kind: &str) -> Result<Modules> {
         "code39" => Code39::new(text).map_err(bad)?.encode(),
         "ean13" => EAN13::new(text).map_err(bad)?.encode(),
         "ean8" => EAN8::new(text).map_err(bad)?.encode(),
+        // The encoder would add a check digit to an odd count without saying
+        // so, and the label would carry a number nobody typed.
+        "itf" if text.len() % 2 == 1 && text.bytes().all(|b| b.is_ascii_digit()) => {
+            return Err(err(
+                ErrorCode::BadValue,
+                format!("{text:?} cannot be an itf barcode: it needs an even number of digits"),
+            )
+            .hint("add a leading 0, or the check digit if the number has one (ITF-14)"));
+        }
         "itf" => TF::interleaved(text).map_err(bad)?.encode(),
         other => return Err(err(ErrorCode::BadValue, format!("unknown barcode {other}"))),
     };

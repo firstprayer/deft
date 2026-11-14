@@ -58,3 +58,10 @@ fn a_picture_with_no_code_gives_none() {
     let img = RgbaImage::from_pixel(300, 200, Rgba([200, 30, 30, 255]));
     assert!(read_qr(&DynamicImage::ImageRgba8(img)).is_empty());
 }
+
+#[test]
+fn itf_takes_an_even_number_of_digits_only() {
+    assert!(barcode("12345678", "itf").is_ok());
+    let e = barcode("1234567", "itf").unwrap_err();
+    assert_eq!(e.code, ErrorCode::BadValue);
+}
