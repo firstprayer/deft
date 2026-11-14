@@ -528,9 +528,44 @@ fn install_skill(paths: &[(&str, PathBuf)], force: bool) -> Result<String> {
     Ok(s)
 }
 
-pub fn doctor() -> Result<Outcome> {
+pub fn doctor(rest: &[String]) -> Result<Outcome> {
     let (ctx, _tmp) = engine_ctx()?;
     let reg = registry();
+    let engines: Vec<_> = deft_engines::ENGINES
+        .iter()
+        .map(|e| {
+            let path = deft_engines::locate(&ctx, e.name);
+            let version = path
+                .as_ref()
+                .and_then(|p| deft_engines::version(p, e.version_arg));
+            (e, path, version)
+        })
+        .collect();
+    if rest.iter().any(|a| a == "--json") {
+        let list: Vec<_> = engines
+            .iter()
+            .map(|(e, path, version)| {
+                json!({
+                    "name": e.name,
+                    "found": path.is_some(),
+                    "path": path.as_ref().map(|p| p.display().to_string()),
+                    "version": version,
+                    "purpose": e.purpose,
+                    "install": e.manual,
+                })
+            })
+            .collect();
+        let report = json!({
+            "v": 1,
+            "ok": true,
+            "version": help::VERSION,
+            "groups": reg.groups.len(),
+            "operations": reg.ops.len(),
+            "engine_dir": ctx.engine_dir.display().to_string(),
+            "engines": list,
+        });
+        return Ok(Outcome::text(format!("{report}\n")));
+    }
     let mut s = format!(
         "deft {}\n{} groups, {} operations\n",
         help::VERSION,
@@ -538,11 +573,10 @@ pub fn doctor() -> Result<Outcome> {
         reg.ops.len()
     );
     let _ = writeln!(s, "engine dir: {}", ctx.engine_dir.display());
-    for e in deft_engines::ENGINES {
-        match deft_engines::locate(&ctx, e.name) {
-            Some(p) => {
-                let v = deft_engines::version(&p, e.version_arg)
-                    .unwrap_or_else(|| "version unknown".into());
+    for (e, path, version) in &engines {
+        match path {
+            Some(_) => {
+                let v = version.as_deref().unwrap_or("version unknown");
                 let _ = writeln!(s, "ok      {:<8} {v}", e.name);
             }
             None => {

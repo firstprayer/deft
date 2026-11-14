@@ -77,7 +77,7 @@ pub const TOP_COMMANDS: &[TopCommand] = &[
     },
     TopCommand {
         name: "doctor",
-        usage: "",
+        usage: "[--json]",
         summary: "Check the environment and engines",
         example: "deft doctor",
         any_file: false,
