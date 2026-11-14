@@ -14,7 +14,9 @@ pub static OP: Op = Op {
     converts: &[Edge {
         from: IN,
         to: &[Format::Pdf],
-        quality: Quality::Approximate,
+        // As faithful as a Markdown chain to PDF, which loses the pictures and
+        // writes merged table cells less well.
+        quality: Quality::Faithful,
     }],
     stability: Stability::Beta,
     examples: &["deft doc to-pdf letter.docx -o letter.pdf"],

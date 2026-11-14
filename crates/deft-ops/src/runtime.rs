@@ -937,6 +937,26 @@ pub fn convert(req: Request, to: Option<String>, ctx: &Ctx) -> Result<Report> {
                 ));
             }
             let ids: Vec<String> = chain.iter().map(|(op, _)| op.id.to_string()).collect();
+            // Options for a step, such as --images for a conversion to Markdown,
+            // go to the steps that have them. Pictures of a Markdown file in the
+            // middle of a chain go to a scratch folder, so --images belongs to
+            // the last step only.
+            let applies = |name: &str| {
+                chain.iter().enumerate().any(|(i, (op, _))| {
+                    op.param(name).is_some() && (name != "images" || i + 1 == chain.len())
+                })
+            };
+            if let Some((name, _)) = req.params.iter().find(|(n, _)| *n != "to" && !applies(n)) {
+                return Err(err(
+                    ErrorCode::BadOption,
+                    format!(
+                        "--{name} does not apply to {} to {} (via {})",
+                        from.label(),
+                        target.label(),
+                        ids.join(" > ")
+                    ),
+                ));
+            }
             let mut warnings = Vec::new();
             if chain.iter().any(|(op, _)| {
                 op.converts
@@ -996,6 +1016,18 @@ pub fn convert(req: Request, to: Option<String>, ctx: &Ctx) -> Result<Report> {
                 let mut params = Params::default();
                 if op.param("to").is_some() {
                     params.set("to", Value::Text(step_to.ext().to_string()));
+                }
+                let last = step + 1 == chain.len();
+                for (name, value) in req.params.iter() {
+                    if name != "to" && op.param(name).is_some() {
+                        params.set(name, value.clone());
+                    }
+                }
+                if !last && *step_to == Format::Md && op.param("images").is_some() {
+                    params.set(
+                        "images",
+                        Value::Path(ctx.temp_path(&format!("images-{step}"))),
+                    );
                 }
                 finalize_params(op, &mut params, None)?;
                 let job = Job {
@@ -1125,6 +1157,55 @@ mod tests {
         assert_eq!(name(&file("a.docx")), "a.replaced.docx");
         // Content that is not what its extension says gets the right one.
         assert_eq!(name(&file("a.zip")), "a.replaced.docx");
+    }
+
+    /// Run `deft convert` on one file.
+    fn convert_file(input: &Path, out: &Path, params: Params) -> Result<Report> {
+        let tmp = tempfile::tempdir().unwrap();
+        let req = Request {
+            inputs: vec![input.display().to_string()],
+            output: Some(out.display().to_string()),
+            params,
+            jobs: 1,
+            ..Default::default()
+        };
+        convert(req, None, &Ctx::new(tmp.path().to_path_buf()))
+    }
+
+    #[test]
+    fn pictures_survive_a_chain_through_markdown() {
+        let dir = tempfile::tempdir().unwrap();
+        let png = deft_tools_image::encode(
+            &deft_tools_image::image::DynamicImage::new_rgb8(40, 30),
+            Format::Png,
+            Default::default(),
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("pic.png"), png).unwrap();
+        let md = dir.path().join("a.md");
+        std::fs::write(&md, "# Title\n\n![a picture](pic.png)\n").unwrap();
+        let docx = dir.path().join("a.docx");
+        let r = convert_file(&md, &docx, Params::default()).unwrap();
+        assert!(r.items[0].error.is_none(), "{:?}", r.items[0].error);
+        // docx to epub runs doc.to-md, then md.to-epub.
+        let epub = dir.path().join("a.epub");
+        let r = convert_file(&docx, &epub, Params::default()).unwrap();
+        assert_eq!(r.chain, ["doc.to-md", "md.to-epub"]);
+        let bytes = std::fs::read(&epub).unwrap();
+        let book = deft_tools_doc::epub::read(&bytes).unwrap();
+        assert_eq!(book.images.len(), 1, "the picture was lost");
+        // A step's own option is accepted, and one no step has is refused.
+        let mut images = Params::default();
+        images.set("images", Value::Path(dir.path().join("media")));
+        let r = convert_file(&epub, &dir.path().join("b.md"), images.clone()).unwrap();
+        assert!(r.items[0].error.is_none(), "{:?}", r.items[0].error);
+        assert_eq!(
+            std::fs::read_dir(dir.path().join("media")).unwrap().count(),
+            1
+        );
+        let r = convert_file(&docx, &dir.path().join("c.pdf"), images).unwrap();
+        let e = r.items[0].error.as_ref().unwrap();
+        assert_eq!(e.code, ErrorCode::BadOption);
     }
 
     #[test]

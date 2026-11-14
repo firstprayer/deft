@@ -184,13 +184,25 @@ pub(crate) const CONVERT_PARAMS: &[deft_core::spec::ParamSpec] =
     &[deft_core::spec::param("to", Kind::Text, "Target format")];
 
 pub fn convert(rest: &[String], stdin: impl FnOnce() -> Vec<u8>) -> Result<Outcome> {
-    let parsed = args::parse(rest, CONVERT_PARAMS)?;
+    // Options of the converters a chain may run, such as --images.
+    let mut specs = CONVERT_PARAMS.to_vec();
+    for op in registry().ops.iter().filter(|op| !op.converts.is_empty()) {
+        for p in op.params {
+            if !specs.iter().any(|s| s.name == p.name) {
+                specs.push(*p);
+            }
+        }
+    }
+    let parsed = args::parse(rest, &specs)?;
     if parsed.help {
         let mut s = String::from(
             "deft convert <in>... [-o <file|dir>] [--to <format>] - Any-to-any conversion\n",
         );
         s.push_str("The target comes from --to or the -o extension; deft picks the best chain of converters.\n");
         s.push_str("--dry-run shows the chain. Several inputs need -o <dir>/ or --to.\n");
+        s.push_str(
+            "Options of a step pass through, e.g. --images <dir> when the target is Markdown.\n",
+        );
         s.push_str("\nExamples:\n  deft convert photo.png -o photo.pdf\n  deft convert notes.md --to html\n  deft convert *.png --to webp -o web/\n");
         return Ok(Outcome::text(s));
     }

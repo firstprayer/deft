@@ -16,6 +16,9 @@ pub struct Book {
     /// Chapters as HTML, in reading order.
     pub chapters: Vec<String>,
     pub images: Vec<Image>,
+    /// File name of the cover picture, among `images`. Most books show it
+    /// only from the package, not in a chapter.
+    pub cover: Option<String>,
 }
 
 fn opf_path(pkg: &Package) -> Result<String> {
@@ -70,6 +73,12 @@ pub fn read(bytes: &[u8]) -> Result<Book> {
     };
     let mut manifest = HashMap::new();
     let mut images = Vec::new();
+    // EPUB 2 names the cover's item in <meta name="cover">, EPUB 3 marks it.
+    let cover_id = doc
+        .descendants()
+        .find(|n| n.tag_name().name() == "meta" && n.attribute("name") == Some("cover"))
+        .and_then(|n| n.attribute("content"));
+    let mut cover = None;
     for item in doc.descendants().filter(|n| n.tag_name().name() == "item") {
         let (Some(id), Some(href)) = (item.attribute("id"), item.attribute("href")) else {
             continue;
@@ -87,6 +96,12 @@ pub fn read(bytes: &[u8]) -> Result<Book> {
             && let Some(bytes) = pkg.read(&path)
         {
             let name = path.rsplit('/').next().unwrap_or(&path).to_string();
+            let marked = item
+                .attribute("properties")
+                .is_some_and(|p| p.split_whitespace().any(|p| p == "cover-image"));
+            if marked || cover_id == Some(id) {
+                cover = Some(name.clone());
+            }
             images.push(Image { name, bytes });
         }
         manifest.insert(id.to_string(), path);
@@ -131,6 +146,7 @@ pub fn read(bytes: &[u8]) -> Result<Book> {
         language: meta("language"),
         chapters,
         images,
+        cover,
     })
 }
 
@@ -148,7 +164,14 @@ impl Book {
         // Images sit in folders inside the book; keep only their file names.
         let re = regex::Regex::new(r#"!\[([^\]]*)\]\((?:[^)/\s]*/)*([^)/\s]+)((?:\s+"[^"]*")?)\)"#)
             .map_err(|e| bad("regex", e))?;
-        let out = re.replace_all(&out, "![$1]($2$3)");
+        let mut out = re.replace_all(&out, "![$1]($2$3)").to_string();
+        // A cover no chapter shows goes first, as a reader shows it.
+        if let Some(cover) = &self.cover {
+            let link = crate::markdown::link_name(cover);
+            if !out.contains(&format!("]({link}")) {
+                out.insert_str(0, &format!("![Cover]({link})\n\n"));
+            }
+        }
         // Links between chapters lead nowhere once the book is one file.
         let inner = regex::Regex::new(r"(^|[^!])\[([^\]]*)\]\([^):\s]*\.x?html?(?:#[^)\s]*)?\)")
             .map_err(|e| bad("regex", e))?;
