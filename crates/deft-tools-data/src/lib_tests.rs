@@ -81,17 +81,10 @@ fn diff_reports_paths() {
 fn json_schema() {
     let schema =
         json!({"type": "object", "required": ["a"], "properties": {"a": {"type": "integer"}}});
-    assert!(
-        validate_schema(&json!({"a": 1}), &schema)
-            .unwrap()
-            .is_empty()
-    );
-    assert!(
-        !validate_schema(&json!({"a": "x"}), &schema)
-            .unwrap()
-            .is_empty()
-    );
-    assert!(validate_schema(&json!({}), &json!({"type": "nope"})).is_err());
+    let check = |v| validate_schema(&v, &schema, None).unwrap().problems;
+    assert!(check(json!({"a": 1})).is_empty());
+    assert!(!check(json!({"a": "x"})).is_empty());
+    assert!(validate_schema(&json!({}), &json!({"type": "nope"}), None).is_err());
 }
 
 #[test]

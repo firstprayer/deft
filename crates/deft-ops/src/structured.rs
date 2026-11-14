@@ -149,22 +149,34 @@ pub fn diff(job: &Job) -> Result<OpResult> {
 
 pub fn validate(job: &Job) -> Result<OpResult> {
     let value = load(job.input())?;
+    let mut res_warnings = Vec::new();
     if let Some(path) = job.params.opt_path("schema") {
         let bytes = std::fs::read(&path)
             .map_err(|e| bad_value("schema", format!("{}: {e}", path.display())))?;
         let format = Format::from_path(&path).unwrap_or(Format::Json);
         let schema = deft_tools_data::parse(&bytes, format)?;
-        let problems = deft_tools_data::validate_schema(&value, &schema)?;
-        if !problems.is_empty() {
-            return Err(err(
-                ErrorCode::InputCorrupt,
-                format!("{}: {}", job.input().display, problems.join("; ")),
+        let checked = deft_tools_data::validate_schema(&value, &schema, Some(&path))?;
+        if !checked.unchecked.is_empty() {
+            res_warnings.push(format!(
+                "not checked: the parts of the schema that refer to {} (deft does not fetch schemas from the network)",
+                checked.unchecked.join(", ")
             ));
+        }
+        if !checked.problems.is_empty() {
+            let mut e = err(
+                ErrorCode::InputCorrupt,
+                format!("{}: {}", job.input().display, checked.problems.join("; ")),
+            );
+            if let Some(w) = res_warnings.iter().find(|w| w.starts_with("not checked")) {
+                e = e.hint(w.clone());
+            }
+            return Err(e);
         }
     }
     let format = job.input().require_format()?;
-    Ok(OpResult::report(
-        facts![("valid", true), ("format", format.label())],
-        "",
-    ))
+    let mut res = OpResult::report(facts![("valid", true), ("format", format.label())], "");
+    for w in res_warnings {
+        res = res.warn(w);
+    }
+    Ok(res)
 }

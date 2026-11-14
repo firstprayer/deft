@@ -8,10 +8,12 @@ use serde_json::{Map, Value, json};
 mod diff;
 pub mod geo;
 mod query;
+mod schema;
 mod xml;
 
 pub use diff::{Change, diff};
 pub use query::query;
+pub use schema::Checked;
 
 fn bad(format: Format, e: impl std::fmt::Display) -> deft_core::error::DeftError {
     err(ErrorCode::InputCorrupt, format!("invalid {format}: {e}"))
@@ -363,23 +365,13 @@ fn to_yaml(v: &Value) -> std::result::Result<String, serde_yaml::Error> {
     Ok(text)
 }
 
-/// Check a document against a JSON Schema. Returns the problems found.
-pub fn validate_schema(value: &Value, schema: &Value) -> Result<Vec<String>> {
-    let mut schemas = boon::Schemas::new();
-    let mut compiler = boon::Compiler::new();
-    let url = "schema.json";
-    let bad_schema = |e: boon::CompileError| err(ErrorCode::BadValue, format!("bad schema: {e}"));
-    compiler
-        .add_resource(url, schema.clone())
-        .map_err(bad_schema)?;
-    let index = compiler.compile(url, &mut schemas).map_err(bad_schema)?;
-    Ok(match schemas.validate(value, index) {
-        Ok(()) => vec![],
-        Err(e) => format!("{e:#}")
-            .lines()
-            .map(|l| l.trim().to_string())
-            .collect(),
-    })
+/// Check a document against a JSON Schema in the file at `location`.
+pub fn validate_schema(
+    value: &Value,
+    schema: &Value,
+    location: Option<&std::path::Path>,
+) -> Result<Checked> {
+    schema::validate(value, schema, location)
 }
 
 #[cfg(test)]

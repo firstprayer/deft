@@ -894,14 +894,17 @@ dependencies = [
  "boon",
  "csv",
  "deft-core",
+ "fancy-regex",
  "jaq-core",
  "jaq-json",
  "jaq-std",
+ "regex",
  "roxmltree 0.21.2",
  "serde",
  "serde_json",
  "serde_yaml",
  "toml 0.8.23",
+ "url",
 ]
 
 [[package]]
