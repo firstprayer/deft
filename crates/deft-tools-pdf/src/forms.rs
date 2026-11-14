@@ -738,9 +738,81 @@ fn set_button(doc: &mut Document, f: &Field, value: &Value) -> Result<()> {
         } else {
             "Off".to_string()
         };
+        if this != "Off" {
+            draw_missing_tick(doc, *w, &this);
+        }
         set_on(doc, *w, b"AS", Object::Name(this.into_bytes()))?;
     }
     Ok(())
+}
+
+/// Give a widget a tick to show in `state` when its appearance for that state
+/// is not a drawing (some writers leave an empty dictionary), so a ticked box
+/// does not show empty.
+fn draw_missing_tick(doc: &mut Document, widget: ObjectId, state: &str) {
+    let Ok(annot) = doc.get_dictionary(widget) else {
+        return;
+    };
+    let Some(normal) = annot
+        .get(b"AP")
+        .ok()
+        .map(|o| deref(doc, o))
+        .and_then(|o| o.as_dict().ok())
+        .and_then(|ap| ap.get(b"N").ok())
+    else {
+        return;
+    };
+    let normal_id = normal.as_reference().ok();
+    let ap_id = annot.get(b"AP").ok().and_then(|o| o.as_reference().ok());
+    let drawn = deref(doc, normal)
+        .as_dict()
+        .ok()
+        .and_then(|n| n.get(state.as_bytes()).ok())
+        .is_some_and(|o| matches!(deref(doc, o), Object::Stream(_)));
+    let Some([x0, y0, x1, y1]) = annot_rect(doc, annot) else {
+        return;
+    };
+    if drawn {
+        return;
+    }
+    let (w, h) = ((x1 - x0).abs(), (y1 - y0).abs());
+    let line = w.min(h) * 0.12;
+    let content = format!(
+        "q 0 G {line:.2} w 1 J 1 j {:.2} {:.2} m {:.2} {:.2} l {:.2} {:.2} l S Q",
+        w * 0.2,
+        h * 0.5,
+        w * 0.42,
+        h * 0.25,
+        w * 0.8,
+        h * 0.8
+    );
+    let tick = doc.add_object(Stream::new(
+        dictionary! {
+            "Type" => "XObject",
+            "Subtype" => "Form",
+            "BBox" => vec![0.into(), 0.into(), w.into(), h.into()],
+            "Resources" => Dictionary::new(),
+        },
+        content.into_bytes(),
+    ));
+    let target = match (normal_id, ap_id) {
+        (Some(id), _) => doc.get_dictionary_mut(id).ok(),
+        (None, Some(id)) => doc
+            .get_dictionary_mut(id)
+            .ok()
+            .and_then(|ap| ap.get_mut(b"N").ok())
+            .and_then(|o| o.as_dict_mut().ok()),
+        (None, None) => doc
+            .get_dictionary_mut(widget)
+            .ok()
+            .and_then(|a| a.get_mut(b"AP").ok())
+            .and_then(|o| o.as_dict_mut().ok())
+            .and_then(|ap| ap.get_mut(b"N").ok())
+            .and_then(|o| o.as_dict_mut().ok()),
+    };
+    if let Some(n) = target {
+        n.set(state.as_bytes().to_vec(), Object::Reference(tick));
+    }
 }
 
 fn set_on(doc: &mut Document, id: ObjectId, key: &[u8], value: Object) -> Result<()> {

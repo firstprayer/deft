@@ -179,3 +179,51 @@ fn flattening_drops_the_field_objects() {
     let k = doc.get_dictionary(elem).unwrap().get(b"K").unwrap();
     assert_eq!(k.as_array().unwrap(), &vec![Object::Integer(0)]);
 }
+
+#[test]
+fn a_ticked_box_without_a_drawing_gets_a_tick() {
+    // hyperref writes the on-appearance as an empty dictionary.
+    let mut doc = form();
+    let page = page_ids(&doc)[0];
+    let ap = dictionary! { "N" => dictionary! { "Yes" => Dictionary::new(), "Off" => Dictionary::new() } };
+    let check = doc.add_object(dictionary! {
+        "Type" => "Annot", "Subtype" => "Widget", "P" => page, "FT" => "Btn",
+        "T" => Object::string_literal("Check"), "AP" => ap,
+        "Rect" => vec![10.into(), 40.into(), 22.into(), 52.into()],
+    });
+    let form = doc.catalog().unwrap().get(b"AcroForm").unwrap().clone();
+    let form = match form {
+        Object::Reference(id) => doc.get_dictionary_mut(id).unwrap(),
+        _ => doc
+            .catalog_mut()
+            .unwrap()
+            .get_mut(b"AcroForm")
+            .unwrap()
+            .as_dict_mut()
+            .unwrap(),
+    };
+    form.get_mut(b"Fields")
+        .unwrap()
+        .as_array_mut()
+        .unwrap()
+        .push(check.into());
+    fill(&mut doc, &values(&[("Check", json!(true))])).unwrap();
+    let widget = doc.get_dictionary(check).unwrap();
+    assert_eq!(widget.get(b"AS").unwrap().as_name().unwrap(), b"Yes");
+    let on = widget
+        .get(b"AP")
+        .unwrap()
+        .as_dict()
+        .unwrap()
+        .get(b"N")
+        .unwrap();
+    let on = on
+        .as_dict()
+        .unwrap()
+        .get(b"Yes")
+        .unwrap()
+        .as_reference()
+        .unwrap();
+    let tick = doc.get_object(on).unwrap().as_stream().unwrap();
+    assert!(String::from_utf8_lossy(&tick.content).contains(" l S"));
+}
