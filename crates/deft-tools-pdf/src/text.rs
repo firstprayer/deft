@@ -20,6 +20,11 @@ use std::collections::HashSet;
 const UNITS: f64 = 1000.0;
 /// A gap this wide, in ems, is a space between words.
 const WORD_GAP: f64 = 0.2;
+/// On a line whose letters touch, a gap this wide is a space too: justified
+/// text squeezes word spaces below `WORD_GAP`.
+const TIGHT_WORD_GAP: f64 = 0.12;
+/// Letters this close, in ems, touch.
+const TOUCHING: f64 = 0.03;
 /// One this wide separates cells: LaTeX writes a whole table row in one operator.
 const CELL_GAP: f64 = 0.7;
 /// A step off the baseline this tall, in ems, starts a new line. Less is a
@@ -263,6 +268,7 @@ fn join_gbk(glyphs: &mut [Glyph]) {
 /// positions call for has no glyph.
 fn reading(glyphs: &[Glyph]) -> Vec<(char, Option<usize>)> {
     let mut out: Vec<(char, Option<usize>)> = Vec::new();
+    let tight = tight_lines(glyphs);
     // The last glyph with text: one whose text another glyph of its cluster
     // carries is passed over.
     let mut last: Option<&Glyph> = None;
@@ -271,6 +277,7 @@ fn reading(glyphs: &[Glyph]) -> Vec<(char, Option<usize>)> {
             continue;
         }
         if let Some(last) = last {
+            let word_gap = if tight[i] { TIGHT_WORD_GAP } else { WORD_GAP };
             let blank = out.last().is_none_or(|(c, _)| c.is_whitespace());
             // Chinese and Japanese put no spaces between words.
             let close = out.last().is_some_and(|(c, _)| is_cjk(*c))
@@ -279,7 +286,7 @@ fn reading(glyphs: &[Glyph]) -> Vec<(char, Option<usize>)> {
                 out.push(('\n', None));
             } else if !blank && !glyph.is_blank() && !close {
                 let (along, _) = last.step_to(glyph);
-                if along > last.size().max(glyph.size()) * WORD_GAP {
+                if along > last.size().max(glyph.size()) * word_gap {
                     out.push((' ', None));
                 }
             }
@@ -288,7 +295,86 @@ fn reading(glyphs: &[Glyph]) -> Vec<(char, Option<usize>)> {
         last = Some(glyph);
     }
     logical_order(&mut out, glyphs);
+    despace(&mut out);
     out
+}
+
+/// For each glyph, whether the letters of its line touch: the middle gap
+/// between them is under `TOUCHING`. Such a line is set tight, so a narrower
+/// gap is still a space between words.
+fn tight_lines(glyphs: &[Glyph]) -> Vec<bool> {
+    let mut out = vec![false; glyphs.len()];
+    let mut start = 0;
+    while start < glyphs.len() {
+        let mut end = start + 1;
+        let mut gaps = Vec::new();
+        let mut prev = start;
+        while end < glyphs.len() && glyphs[prev].same_line(&glyphs[end]) {
+            let (a, b) = (&glyphs[prev], &glyphs[end]);
+            if !a.is_blank() && !b.is_blank() && !a.text.is_empty() && !b.text.is_empty() {
+                gaps.push(a.step_to(b).0 / a.size().max(b.size()).max(f64::EPSILON));
+            }
+            prev = end;
+            end += 1;
+        }
+        if gaps.len() >= 8 {
+            gaps.sort_by(f64::total_cmp);
+            let middle = gaps[gaps.len() / 2];
+            if middle.abs() < TOUCHING {
+                out[start..end].fill(true);
+            }
+        }
+        start = end;
+    }
+    out
+}
+
+/// Text that has a space glyph after nearly every letter, and two between
+/// words, as some OCR layers are written ("T h e  N a ti o n al"): drop the
+/// single spaces and keep one of each pair. Each line is judged on its own.
+fn despace(out: &mut Vec<(char, Option<usize>)>) {
+    let mut kept = Vec::with_capacity(out.len());
+    for line in out.split_inclusive(|c| c.0 == '\n') {
+        if !letter_spaced(line) {
+            kept.extend_from_slice(line);
+            continue;
+        }
+        let mut i = 0;
+        while i < line.len() {
+            if line[i].0 == ' ' {
+                let mut j = i;
+                while j < line.len() && line[j].0 == ' ' {
+                    j += 1;
+                }
+                if j - i >= 2 {
+                    kept.push(line[i]);
+                }
+                i = j;
+            } else {
+                kept.push(line[i]);
+                i += 1;
+            }
+        }
+    }
+    *out = kept;
+}
+
+/// Whether a line reads as letters with single spaces between them and
+/// double spaces between words: mostly pieces of one or two letters, and at
+/// least one double space. Chinese, Japanese and Korean do not count: their
+/// words can be one or two characters long.
+fn letter_spaced(line: &[(char, Option<usize>)]) -> bool {
+    let text: String = line.iter().map(|c| c.0).collect();
+    let text = text.trim();
+    if !text.contains("  ") {
+        return false;
+    }
+    let pieces: Vec<&str> = text.split(' ').filter(|p| !p.is_empty()).collect();
+    let short = pieces
+        .iter()
+        .filter(|p| p.chars().count() <= 2 && p.chars().all(|c| c.is_alphabetic() && !is_cjk(c)))
+        .count();
+    pieces.len() >= 6 && short * 10 >= pieces.len() * 7
 }
 
 fn is_rtl(c: char) -> bool {

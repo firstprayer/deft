@@ -206,3 +206,49 @@ fn a_picture_with_a_short_stamp_of_text_is_a_scan() {
     ocred.images = vec![[0.0, 0.0, 612.0, 792.0]];
     assert!(!ocred.is_scan(), "{}", ocred.text_cover());
 }
+
+/// Glyphs of `words` set touching, with `space` ems between words.
+fn set(words: &[&str], space: f64) -> PageText {
+    let mut glyphs = Vec::new();
+    let mut x = 10.0;
+    for w in words {
+        for c in w.chars() {
+            glyphs.push(glyph(&c.to_string(), x, 5.0, 0));
+            x += 5.0;
+        }
+        x += space * 10.0;
+    }
+    page(glyphs)
+}
+
+#[test]
+fn a_squeezed_word_space_in_tight_text_is_a_space() {
+    let words = ["The", "documents", "may", "come", "from", "teaching"];
+    assert_eq!(
+        set(&words, 0.17).text(),
+        "The documents may come from teaching"
+    );
+    // Kerning-sized gaps are not spaces.
+    assert_eq!(set(&words, 0.05).text(), "Thedocumentsmaycomefromteaching");
+}
+
+#[test]
+fn a_space_after_every_letter_is_dropped() {
+    let spaced = "T h e  N a ti o n al  P oli c e  C hi efs";
+    let glyphs: Vec<Glyph> = spaced
+        .chars()
+        .enumerate()
+        .map(|(i, c)| glyph(&c.to_string(), 10.0 + i as f64 * 3.0, 3.0, 0))
+        .collect();
+    let spaced = page(glyphs);
+    assert_eq!(spaced.text(), "The National Police Chiefs");
+    assert_eq!(spaced.find("police").len(), 1);
+    // Ordinary words with a double space stay as they are.
+    let plain = "The office is open  from nine";
+    let glyphs: Vec<Glyph> = plain
+        .chars()
+        .enumerate()
+        .map(|(i, c)| glyph(&c.to_string(), 10.0 + i as f64 * 3.0, 3.0, 0))
+        .collect();
+    assert_eq!(page(glyphs).text(), plain);
+}
