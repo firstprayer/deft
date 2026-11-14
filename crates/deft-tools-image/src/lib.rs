@@ -878,10 +878,12 @@ pub fn render_svg_sized(
     let (tw, th) = spec.target(w.ceil() as u32, h.ceil() as u32);
     let (sx, sy) = (tw as f64 / w, th as f64 / h);
     // Fill and cover draw too large, and the resize below brings them to size.
-    let scale = if spec.is_box() && fit == Fit::Contain {
-        sx.min(sy)
-    } else {
-        sx.max(sy)
+    // One side given: scale by that side, so it comes out exactly as asked.
+    let scale = match (spec.is_box(), fit) {
+        (true, Fit::Contain) => sx.min(sy),
+        (true, _) => sx.max(sy),
+        _ if spec.width.is_none() && spec.height.is_some() => sy,
+        _ => sx,
     };
     let (pw, ph) = ((w * scale).round() as u64, (h * scale).round() as u64);
     if pw * ph > max_pixels {
