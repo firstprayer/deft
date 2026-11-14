@@ -2,7 +2,7 @@ use super::_common::IN;
 use deft_core::prelude::*;
 use deft_tools_image::exif::Fields;
 
-const OUT: &[Format] = &[Format::Jpeg, Format::Png];
+const OUT: &[Format] = &[Format::Jpeg, Format::Png, Format::Webp];
 
 pub static OP: Op = Op {
     id: "image.meta",
@@ -10,6 +10,7 @@ pub static OP: Op = Op {
     details: &[
         "With no options it prints every tag, with GPS as decimal degrees.",
         "With options it writes a copy; pixels are untouched. Remove tags with image strip.",
+        "Tags can be written into JPEG, PNG and WebP; other formats are read only.",
     ],
     input: Input::each(IN, "image"),
     output: Output::one(OUT, "image"),
@@ -73,6 +74,17 @@ fn run(job: &Job) -> Result<OpResult> {
         let tags = deft_tools_image::exif::read(input.bytes()?);
         let n = tags.len();
         return Ok(OpResult::report(tags, format!("{n} tags")));
+    }
+    if !OUT.contains(&format) {
+        return Err(err(
+            ErrorCode::InputUnsupported,
+            format!(
+                "{}: image meta writes tags into JPEG, PNG and WebP, not {}",
+                input.display,
+                format.to_string().to_uppercase()
+            ),
+        )
+        .hint("deft image convert <input> -o <name>.jpg first; that re-encodes the picture"));
     }
     let target = job.target(format);
     if target != format {

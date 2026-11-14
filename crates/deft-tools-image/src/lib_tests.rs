@@ -293,3 +293,29 @@ fn cmyk_goes_through_its_profile() {
     assert!(crate::has_adobe_segment(&adobe));
     assert!(!crate::has_adobe_segment(&adobe[..6]));
 }
+
+#[test]
+fn tags_are_written_into_webp_without_touching_the_picture() {
+    let img = DynamicImage::ImageRgb8(RgbImage::from_pixel(6, 3, image::Rgb([10, 200, 30])));
+    let plain = encode(&img, Format::Webp, Encode::default()).unwrap();
+    let fields = crate::exif::Fields {
+        author: Some("Ada".into()),
+        ..Default::default()
+    };
+    let signed = crate::exif::write(&plain, Format::Webp, &fields).unwrap();
+    assert_eq!(crate::exif::read(&signed)["Artist"], "Ada");
+    let again = decode(&signed, Format::Webp, u64::MAX).unwrap();
+    assert_eq!(again.to_rgb8(), img.to_rgb8());
+    // A second write replaces the tags instead of adding a second chunk.
+    let fields = crate::exif::Fields {
+        title: Some("Sea".into()),
+        ..Default::default()
+    };
+    let twice = crate::exif::write(&signed, Format::Webp, &fields).unwrap();
+    let tags = crate::exif::read(&twice);
+    assert_eq!(
+        (tags["Artist"].as_str(), tags["ImageDescription"].as_str()),
+        (Some("Ada"), Some("Sea"))
+    );
+    assert_eq!(twice.windows(4).filter(|w| *w == b"EXIF").count(), 1);
+}

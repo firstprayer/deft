@@ -138,8 +138,7 @@ fn tiff(bytes: &[u8], fields: &Fields, orientation: bool) -> Result<Vec<u8>> {
             value: Value::Undefined(raw, 0),
         });
     }
-    let old: Vec<exif::Field> = exif::Reader::new()
-        .read_from_container(&mut std::io::Cursor::new(bytes))
+    let old: Vec<exif::Field> = parse(bytes)
         .map(|e| e.fields().filter(|f| keep(f)).cloned().collect())
         .unwrap_or_default();
     let kept: Vec<&exif::Field> = old
@@ -211,6 +210,11 @@ pub(crate) fn into_png(bytes: &[u8], block: &[u8]) -> Vec<u8> {
     out
 }
 
+fn into_webp(bytes: &[u8], block: &[u8]) -> Result<Vec<u8>> {
+    crate::webp::with_exif(bytes, block)
+        .ok_or_else(|| err(ErrorCode::InputCorrupt, "the WebP file is damaged"))
+}
+
 /// Copy the EXIF of `from` into `to`, an encoded image of the given format.
 /// Orientation stays behind, because decoded pixels are already upright.
 pub fn copy(from: &[u8], to: &[u8], format: Format) -> Result<Vec<u8>> {
@@ -218,6 +222,7 @@ pub fn copy(from: &[u8], to: &[u8], format: Format) -> Result<Vec<u8>> {
     match format {
         Format::Jpeg => into_jpeg(to, &block),
         Format::Png => Ok(into_png(to, &block)),
+        Format::Webp => into_webp(to, &block),
         other => Err(err(
             ErrorCode::InputUnsupported,
             format!("cannot write metadata into {other}"),
@@ -232,6 +237,7 @@ pub fn write(bytes: &[u8], format: Format, fields: &Fields) -> Result<Vec<u8>> {
     match format {
         Format::Jpeg => into_jpeg(bytes, &block),
         Format::Png => Ok(into_png(bytes, &block)),
+        Format::Webp => into_webp(bytes, &block),
         other => Err(err(
             ErrorCode::InputUnsupported,
             format!("cannot write metadata into {other}"),
