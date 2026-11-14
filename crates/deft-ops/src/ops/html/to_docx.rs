@@ -1,4 +1,4 @@
-use super::_common::{IN, MAIN, content_with_pictures, text};
+use super::_common::{IN, content_with_pictures, text};
 use crate::generated::md::_common::{load_images, svg_fallbacks};
 use deft_core::prelude::*;
 use deft_tools_doc::Document;
@@ -9,7 +9,7 @@ pub static OP: Op = Op {
     input: Input::each(IN, "html"),
     output: Output::one(&[Format::Docx], "docx"),
     mounts: &["doc from-html"],
-    params: &[MAIN],
+    params: &[],
     converts: &[Edge {
         from: IN,
         to: &[Format::Docx],

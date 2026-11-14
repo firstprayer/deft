@@ -1,4 +1,4 @@
-use super::_common::{IN, MAIN, content};
+use super::_common::{IN, content};
 use deft_core::prelude::*;
 
 pub static OP: Op = Op {
@@ -7,7 +7,7 @@ pub static OP: Op = Op {
     input: Input::each(IN, "html"),
     output: Output::one(&[Format::Md], "md"),
     mounts: &["md from-html"],
-    params: &[MAIN],
+    params: &[],
     converts: &[Edge {
         from: IN,
         to: &[Format::Md],

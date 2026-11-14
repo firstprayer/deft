@@ -29,13 +29,7 @@ pub fn text(input: &InputFile) -> Result<String> {
     Ok(deft_tools_file::decode_text(bytes, encoding).0)
 }
 
-pub const MAIN: ParamSpec = param(
-    "main",
-    Kind::Flag,
-    "Only the article, without site navigation",
-);
-
-/// The page, or its article, for a writer that embeds pictures: pictures
+/// The page, for a writer that embeds pictures: pictures
 /// that are not beside the page are the site's, at the page's address.
 pub fn content_with_pictures(job: &Job) -> Result<String> {
     let page = text(job.input())?;
@@ -49,12 +43,7 @@ pub fn content_with_pictures(job: &Job) -> Result<String> {
     ))
 }
 
-/// The page, or just its article with `--main`.
+/// The page.
 pub fn content(job: &Job) -> Result<String> {
-    let html = text(job.input())?;
-    Ok(if job.params.flag("main") {
-        deft_tools_doc::html::main_content(&html)
-    } else {
-        html
-    })
+    text(job.input())
 }

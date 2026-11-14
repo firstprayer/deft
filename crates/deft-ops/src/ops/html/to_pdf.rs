@@ -1,4 +1,4 @@
-use super::_common::{IN, MAIN, content_with_pictures};
+use super::_common::{IN, content_with_pictures};
 use crate::generated::md::_common::{FONT, FONT_SIZE, MARGIN, PAGE_SIZE, markdown_pdf};
 use deft_core::prelude::*;
 
@@ -8,7 +8,7 @@ pub static OP: Op = Op {
     details: &["The page's CSS and scripts are not applied."],
     input: Input::each(IN, "html"),
     output: Output::one(&[Format::Pdf], "pdf"),
-    params: &[PAGE_SIZE, MARGIN, FONT_SIZE, FONT, MAIN],
+    params: &[PAGE_SIZE, MARGIN, FONT_SIZE, FONT],
     converts: &[Edge {
         from: IN,
         to: &[Format::Pdf],

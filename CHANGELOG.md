@@ -8,7 +8,6 @@ Deft follows semantic versioning. Before 1.0, a minor version may change command
 
 - `gps` group: GPX and KML conversion, distance, time and climb.
 - `deft find` says when no command does a job.
-- `html to-docx --main` and `html to-pdf --main`.
 - `calendar to-csv` adds `status` and `except` columns, and `calendar from-csv` reads them.
 
 ### Changed
@@ -37,6 +36,7 @@ Deft follows semantic versioning. Before 1.0, a minor version may change command
 - `video stabilize`: `ffmpeg -vf deshake` does it in one line, and on real handheld clips deft's two-pass vidstab smeared a third of them.
 - `pdf strip`: metadata hides in figures, attachments and scripts inside a PDF, and on real files authors' names survived. Deft does not promise a clean file it cannot guarantee.
 - `json format`, `merge` and `diff`: `jq` does each in one line. `xml diff` and `validate`: `xmllint` does them. `yaml format`, `xml format` and `xml merge`: on real files they lost comments, namespaces or element order by design.
+- `html --main`: on article pages from sites it had not been tuned on, it kept the article alone on 20 of 32; comment boxes, subscribe forms and related lists differ on every site. trafilatura does this job.
 - `pdf redact`: a redaction that misses a word is a leak, and on real files it missed text in attachments, comments and fonts it could not decode. Deft does not promise safety it cannot give.
 - `video add-audio`, `add-subtitles`, `chunk`, `compress`, `convert`, `frames`, `from-images`, `info`, `merge`, `speed`, `strip` and `to-gif`: on real files an agent did each as well with one ffmpeg line. 
 - `sheet query`, `filter`, `sort`, `select`, `group`, `dedupe` and `join`: an agent does these in one line with sqlite3, DuckDB or pandas. Deft no longer includes SQLite.
