@@ -84,7 +84,16 @@ pub fn shape(t: &Table) -> String {
 pub fn input_table(job: &Job) -> Result<(Table, Option<String>)> {
     let sheets = tables(job.input())?;
     let wanted = job.params.opt_text("sheet");
-    let warning = other_sheets(&sheets, wanted.as_deref()).map(|w| format!("{w} (see --sheet)"));
+    let mut warning =
+        other_sheets(&sheets, wanted.as_deref()).map(|w| format!("{w} (see --sheet)"));
+    // Rows from a list inside a JSON object: the rest of the file is not in them.
+    let nested = job.input().format == Some(Format::Json) && sheets[0].name != job.input().stem();
+    if warning.is_none() && wanted.is_none() && nested {
+        warning = Some(format!(
+            "rows from {}, the list of records in the file; the rest is left out",
+            sheets[0].name
+        ));
+    }
     Ok((pick(sheets, wanted)?, warning))
 }
 

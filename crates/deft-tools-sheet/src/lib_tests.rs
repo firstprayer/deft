@@ -257,3 +257,19 @@ fn json_keeps_both_of_two_columns_with_one_name() {
     let out: serde_json::Value = serde_json::from_slice(&write_json(&t).unwrap()).unwrap();
     assert_eq!(out, serde_json::json!([{"a": 1, "a_2": 2}]));
 }
+
+#[test]
+fn records_inside_a_json_object_become_tables() {
+    let vote = br##"{"vote": {"meta": {"date": "2026-11-07"},
+        "totals": [{"party": "D", "yea": 1}],
+        "records": [{"who": {"@party": "D", "#text": "Adams"}, "vote": "Yea"},
+                    {"who": {"@party": "R", "#text": "Baker"}, "vote": "Nay"}]}}"##;
+    let tables = read(vote, Format::Json, "vote").unwrap();
+    assert_eq!(tables[0].name, "vote.records");
+    assert_eq!(tables[1].name, "vote.totals");
+    let header: Vec<String> = tables[0].rows[0].iter().map(|c| c.to_string()).collect();
+    assert_eq!(header, ["who.@party", "who.#text", "vote"]);
+    assert_eq!(tables[0].rows.len(), 3);
+    let none = read(br#"{"name": "koa", "version": "2"}"#, Format::Json, "p").unwrap_err();
+    assert_eq!(none.code, ErrorCode::InputUnsupported);
+}

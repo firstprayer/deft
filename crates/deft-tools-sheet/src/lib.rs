@@ -243,6 +243,83 @@ pub fn read_json(bytes: &[u8], name: &str) -> Result<Table> {
             "expected a JSON array of rows",
         ));
     };
+    Ok(json_rows(items, name))
+}
+
+/// The tables in a JSON file: the file itself when it is an array of rows;
+/// otherwise every list of records inside it (an API reply's `"prizes"`, the
+/// votes of an XML roll call), largest first, named by where it is, such as
+/// `rollcall-vote.vote-data.recorded-vote`. Inside such a list, nested objects
+/// become columns of their own (`legislator.@party`).
+pub fn read_json_tables(bytes: &[u8], name: &str) -> Result<Vec<Table>> {
+    use serde_json::Value;
+    let v: Value = serde_json::from_slice(bytes)
+        .map_err(|e| err(ErrorCode::InputCorrupt, format!("json: {e}")))?;
+    if let Value::Array(items) = v {
+        return Ok(vec![json_rows(items, name)]);
+    }
+    let mut found: Vec<(String, Vec<Value>)> = Vec::new();
+    fn walk(v: &Value, path: &str, found: &mut Vec<(String, Vec<Value>)>) {
+        match v {
+            Value::Object(o) => {
+                for (k, child) in o {
+                    let p = if path.is_empty() {
+                        k.clone()
+                    } else {
+                        format!("{path}.{k}")
+                    };
+                    walk(child, &p, found);
+                }
+            }
+            Value::Array(items) if !items.is_empty() && items.iter().all(Value::is_object) => {
+                let rows = items.iter().map(flatten).collect();
+                found.push((path.to_string(), rows));
+            }
+            _ => {}
+        }
+    }
+    walk(&v, "", &mut found);
+    if found.is_empty() {
+        return Err(err(
+            ErrorCode::InputUnsupported,
+            "this JSON holds no list of records to make rows from",
+        )
+        .hint("deft json convert turns any JSON into YAML or TOML"));
+    }
+    found.sort_by_key(|(_, rows)| std::cmp::Reverse(rows.len()));
+    Ok(found
+        .into_iter()
+        .map(|(path, rows)| json_rows(rows, &path))
+        .collect())
+}
+
+/// An object with nested objects spread into dotted keys.
+fn flatten(v: &serde_json::Value) -> serde_json::Value {
+    use serde_json::{Map, Value};
+    fn into(prefix: &str, v: &Value, out: &mut Map<String, Value>) {
+        match v {
+            Value::Object(o) if !o.is_empty() => {
+                for (k, child) in o {
+                    let key = if prefix.is_empty() {
+                        k.clone()
+                    } else {
+                        format!("{prefix}.{k}")
+                    };
+                    into(&key, child, out);
+                }
+            }
+            other => {
+                out.insert(prefix.to_string(), other.clone());
+            }
+        }
+    }
+    let mut out = Map::new();
+    into("", v, &mut out);
+    Value::Object(out)
+}
+
+fn json_rows(items: Vec<serde_json::Value>, name: &str) -> Table {
+    use serde_json::Value;
     let to_cell = |v: &Value| match v {
         Value::Null => Cell::Empty,
         Value::Bool(b) => Cell::Bool(*b),
@@ -279,18 +356,18 @@ pub fn read_json(bytes: &[u8], name: &str) -> Result<Table> {
             }
         }
     }
-    Ok(Table {
+    Table {
         name: name.into(),
         rows,
         ..Table::default()
-    })
+    }
 }
 
 /// Read any supported format into tables (one per sheet).
 pub fn read(bytes: &[u8], format: Format, name: &str) -> Result<Vec<Table>> {
     match format {
         Format::Csv => Ok(vec![read_csv(bytes, name)?]),
-        Format::Json => Ok(vec![read_json(bytes, name)?]),
+        Format::Json => read_json_tables(bytes, name),
         Format::Xlsx | Format::Xls | Format::Ods => read_workbook(bytes),
         other => Err(err(
             ErrorCode::InputUnsupported,
