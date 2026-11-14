@@ -34,6 +34,7 @@ path = "../../tests/unit/properties.rs"
 deft-core.workspace = true
 deft-ops.workspace = true
 deft-engines.workspace = true
+deft-tools-file.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 

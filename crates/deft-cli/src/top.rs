@@ -70,7 +70,7 @@ pub fn info(rest: &[String], stdin: impl FnOnce() -> Vec<u8>) -> Result<Outcome>
     let parsed = args::parse(rest, &[])?;
     if parsed.help {
         return Ok(Outcome::text(
-            "deft info <file>... - Type, size, pages, dimensions, duration\nAdd --json for all fields.\n",
+            "deft info <file>... - Type, size, pages, dimensions, duration\nAdd --json for all fields. Video and audio details need ffprobe (ships with ffmpeg).\n",
         ));
     }
     if parsed.inputs.is_empty() {
@@ -155,6 +155,28 @@ pub fn info(rest: &[String], stdin: impl FnOnce() -> Vec<u8>) -> Result<Outcome>
             item.note =
                 format!("password-protected; for more: deft pdf info {raw} --password <text>");
         }
+        // JSON that is not a list of rows (a package.json, an API reply) is
+        // still identified, with its shape.
+        if format == Some(deft_core::format::Format::Json)
+            && item
+                .error
+                .as_ref()
+                .is_some_and(|e| e.code == ErrorCode::InputUnsupported)
+            && let Some(shape) = std::fs::read(path)
+                .ok()
+                .and_then(|b| deft_tools_file::media::json_shape(&b))
+        {
+            item.error = None;
+            item.note = match (shape.get("keys"), shape.get("items")) {
+                (Some(k), _) => format!("object with {k} keys"),
+                (_, Some(n)) => format!("array of {n} items"),
+                _ => String::new(),
+            };
+            item.facts.extend(shape);
+        }
+        if item.error.is_none() && format.is_some_and(|f| f.is_video() || f.is_audio()) {
+            media_info(&s.ctx, path, &mut item);
+        }
         if item.error.is_none() {
             let label = format.map(|f| f.label()).unwrap_or("unknown");
             item.facts.insert("format".into(), json!(label));
@@ -177,6 +199,42 @@ pub fn info(rest: &[String], stdin: impl FnOnce() -> Vec<u8>) -> Result<Outcome>
         chain: vec![],
     };
     Ok(finish(report, json, quiet))
+}
+
+/// Duration, picture size and codecs of a video or audio file, from ffprobe.
+/// Without ffprobe the file is still identified, and the warning says what is
+/// missing and why.
+fn media_info(ctx: &deft_core::job::Ctx, path: &Path, item: &mut Item) {
+    let Some(ffprobe) = deft_engines::locate(ctx, "ffprobe") else {
+        item.warnings.push(
+            "duration and picture size need ffprobe, which is not installed (see deft doctor)"
+                .into(),
+        );
+        return;
+    };
+    let args = [
+        "-v",
+        "error",
+        "-print_format",
+        "json",
+        "-show_format",
+        "-show_streams",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .chain([path.display().to_string()])
+    .collect::<Vec<_>>();
+    let probe = deft_engines::run(ctx, &ffprobe, &args)
+        .ok()
+        .and_then(|out| serde_json::from_slice::<serde_json::Value>(&out.stdout).ok());
+    let Some(probe) = probe else {
+        item.warnings
+            .push("ffprobe could not read the file: no duration or picture size".into());
+        return;
+    };
+    let facts = deft_tools_file::media::facts(&probe);
+    item.note = deft_tools_file::media::summary(&facts);
+    item.facts.extend(facts);
 }
 
 /// The `--to` option of `deft convert`.

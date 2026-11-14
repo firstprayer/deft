@@ -1,4 +1,6 @@
-//! Text encodings and base64, for commands that read text of unknown origin.
+//! Text encodings and base64, for commands that read text of unknown origin,
+//! and what a media or JSON file holds, for `deft info`.
+pub mod media;
 
 pub use encoding_rs::Encoding;
 
