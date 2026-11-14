@@ -316,6 +316,42 @@ fn with_soft_mask(doc: &Document, dict: &Dictionary, img: RgbImage) -> DynamicIm
     }
 }
 
+/// Whether a JPEG from the PDF looks the same saved on its own. A CMYK JPEG
+/// does not: viewers read an Adobe CMYK JPEG as inverted ink, which a PDF
+/// does not, so it would show as a negative. Nor does one the PDF inverts
+/// with /Decode. Those are decoded as the page draws them instead.
+fn shows_as_drawn(doc: &Document, dict: &Dictionary, jpeg: &[u8]) -> bool {
+    let decoded_as_is = dict
+        .get(b"Decode")
+        .ok()
+        .and_then(|o| deref(doc, o).as_array().ok())
+        .and_then(|a| a.first().and_then(|v| num(deref(doc, v))))
+        .is_none_or(|first| first < 0.5);
+    decoded_as_is && jpeg_components(jpeg).is_some_and(|n| n != 4)
+}
+
+/// The number of colour components a JPEG's frame header names.
+fn jpeg_components(jpeg: &[u8]) -> Option<u8> {
+    let mut i = 2;
+    while i + 4 <= jpeg.len() {
+        if jpeg[i] != 0xFF {
+            return None;
+        }
+        let marker = jpeg[i + 1];
+        if marker == 0xFF {
+            i += 1;
+            continue;
+        }
+        let len = u16::from_be_bytes([jpeg[i + 2], jpeg[i + 3]]) as usize;
+        // Start of frame: SOF0-SOF15 except DHT, JPG and DAC.
+        if (0xC0..=0xCF).contains(&marker) && !matches!(marker, 0xC4 | 0xC8 | 0xCC) {
+            return jpeg.get(i + 9).copied();
+        }
+        i += 2 + len;
+    }
+    None
+}
+
 /// A JPEG packed inside other filters, such as [/FlateDecode /DCTDecode]:
 /// the JPEG bytes with the outer filters undone.
 fn wrapped_jpeg(stream: &Stream, chain: &[Vec<u8>]) -> Option<Vec<u8>> {
@@ -421,7 +457,7 @@ fn decode_scan(
     if samples.len() < (w * h) as usize * channels {
         return None;
     }
-    // /Decode [1 0] inverts a one-channel image; a stencil mask paints its 0s.
+    // /Decode [1 0 ...] inverts the samples; a stencil mask paints its 0s.
     let inverted = d
         .get(b"Decode")
         .ok()
@@ -438,11 +474,19 @@ fn decode_scan(
             };
             DynamicImage::ImageLuma8(GrayImage::from_raw(w, h, gray)?)
         }
-        3 => DynamicImage::ImageRgb8(RgbImage::from_raw(w, h, samples.to_vec())?),
+        3 => {
+            let rgb: Vec<u8> = if inverted {
+                samples.iter().map(|v| 255 - v).collect()
+            } else {
+                samples.to_vec()
+            };
+            DynamicImage::ImageRgb8(RgbImage::from_raw(w, h, rgb)?)
+        }
         4 => {
+            let ink = |v: u8| if inverted { 255 - v } else { v };
             let rgb: Vec<u8> = samples
                 .chunks_exact(4)
-                .flat_map(|p| cmyk_to_rgb(p[0], p[1], p[2], p[3]))
+                .flat_map(|p| cmyk_to_rgb(ink(p[0]), ink(p[1]), ink(p[2]), ink(p[3])))
                 .collect();
             DynamicImage::ImageRgb8(RgbImage::from_raw(w, h, rgb)?)
         }
@@ -485,10 +529,12 @@ pub fn images(doc: &Document, indexes: &[usize]) -> Images {
             };
             let chain = filters(doc, &stream.dict);
             let last = chain.last().map(Vec::as_slice);
-            if chain.len() == 1 && last == Some(b"DCTDecode") {
-                out.images
-                    .push((i, Extracted::Jpeg(stream.content.clone())));
-            } else if let Some(jpeg) = wrapped_jpeg(stream, &chain) {
+            let jpeg = if chain.len() == 1 && last == Some(b"DCTDecode") {
+                Some(stream.content.clone())
+            } else {
+                wrapped_jpeg(stream, &chain)
+            };
+            if let Some(jpeg) = jpeg.filter(|j| shows_as_drawn(doc, &stream.dict, j)) {
                 out.images.push((i, Extracted::Jpeg(jpeg)));
             } else if matches!(
                 last,

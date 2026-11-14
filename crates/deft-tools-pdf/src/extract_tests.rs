@@ -92,3 +92,20 @@ fn a_black_separation_image_is_saved_as_gray() {
     let img = super::decode(&doc, &s).expect("decoded").to_luma8();
     assert_eq!(img.as_raw(), &vec![255, 0]);
 }
+
+#[test]
+fn a_cmyk_jpeg_is_not_kept_as_it_is() {
+    // The frame header of a four-component (CMYK) JPEG and of a gray one.
+    let sof = |n: u8| -> Vec<u8> {
+        let mut j = vec![0xFF, 0xD8, 0xFF, 0xC0];
+        j.extend([0, 8 + 3 * n, 8, 0, 1, 0, 1, n]);
+        j.extend(std::iter::repeat_n(0, 3 * n as usize));
+        j
+    };
+    assert_eq!(super::jpeg_components(&sof(4)), Some(4));
+    let doc = Document::with_version("1.7");
+    assert!(!super::shows_as_drawn(&doc, &Dictionary::new(), &sof(4)));
+    assert!(super::shows_as_drawn(&doc, &Dictionary::new(), &sof(1)));
+    let inverted = dictionary! { "Decode" => vec![1.into(), 0.into()] };
+    assert!(!super::shows_as_drawn(&doc, &inverted, &sof(1)));
+}
