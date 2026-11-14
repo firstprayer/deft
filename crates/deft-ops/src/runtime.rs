@@ -389,6 +389,14 @@ fn plan_target(
                 ));
             }
             Some(o) => Target::File(PathBuf::from(o)),
+            None if op.needs_output => {
+                let ext = op.output.formats.first().map_or("txt", |f| f.ext());
+                return Err(err(
+                    ErrorCode::BadOption,
+                    format!("deft {} needs -o: give the file to write", op.path()),
+                )
+                .hint(format!("-o {stem}.{ext}, or -o - to print it")));
+            }
             None if first.is_some_and(|i| i.path.is_none() && i.url.is_none()) => Target::Stdout,
             None => {
                 let dir = if first.is_some_and(|i| i.url.is_some()) {

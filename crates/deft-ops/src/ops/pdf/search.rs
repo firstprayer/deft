@@ -5,7 +5,9 @@ use serde_json::json;
 pub static OP: Op = Op {
     id: "pdf.search",
     summary: "Find text: --text invoice",
-    details: &["Ignores case. Several files are searched one by one. Scans need pdf ocr first."],
+    details: &[
+        "Ignores case. Several files are searched one by one. A scan has no text to search; deft pdf ocr reads it into a .txt file.",
+    ],
     input: Input::each(&[Format::Pdf], "pdf"),
     output: Output::report(),
     params: &[
@@ -43,10 +45,12 @@ fn run(job: &Job) -> Result<OpResult> {
     let note = format!("{matches} matches on {} pages", pages.len());
     let mut res = OpResult::report(facts![("matches", matches), ("pages", pages)], note);
     if blank == count {
-        res = res.warn("no text found; a scan needs pdf ocr first");
+        res = res.warn(
+            "no text found; a scan has no text to search (deft pdf ocr reads it into a .txt file)",
+        );
     } else if blank > 0 {
         res = res.warn(format!(
-            "{blank} of {count} pages have no text; a scan needs pdf ocr first"
+            "{blank} of {count} pages have no text; a scan has no text to search (deft pdf ocr reads it into a .txt file)"
         ));
     }
     let lost = deft_tools_pdf::text::undecoded(&all);

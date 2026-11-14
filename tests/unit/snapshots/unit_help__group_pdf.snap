@@ -19,7 +19,7 @@ deft pdf - commands (input -> output)
   merge           pdf... -> pdf      Join PDFs in the given order
   meta            pdf -> pdf         Read or set metadata and bookmarks
   number          pdf -> pdf         Add page numbers: --format
-  ocr             pdf -> pdf|txt     Make a scan searchable
+  ocr             pdf -> txt         Read the text of a scanned PDF
   resize          pdf -> pdf         Fit pages to --page-size a4
   rotate          pdf -> pdf         Turn pages clockwise: --angle 90, --pages
   search          pdf -> report      Find text: --text invoice

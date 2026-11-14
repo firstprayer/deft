@@ -170,6 +170,7 @@ pub fn command(op: &Op, path: &str) -> String {
     let out_hint = match op.output.arity {
         OutputArity::Report => " [-o <json>]".into(),
         OutputArity::Many | OutputArity::Dir => " [-o <dir>]".into(),
+        OutputArity::One if op.needs_output => format!(" -o <{}|dir>", op.output.label),
         OutputArity::One => format!(" [-o <{}|dir>]", op.output.label),
     };
     let _ = writeln!(s, "\nUsage: deft {path} {input}{out_hint} [options]");
@@ -180,6 +181,7 @@ pub fn command(op: &Op, path: &str) -> String {
     };
     let default_out = match (op.output.arity, op.suffix) {
         (OutputArity::Report, _) => "printed result".to_string(),
+        (OutputArity::One, _) if op.needs_output => format!("{} (-o is required)", op.output.label),
         (OutputArity::Many, Some(sfx)) => format!("{} files in <name>-{sfx}/", op.output.label),
         (OutputArity::Dir, _) => "directory <name>/".to_string(),
         (_, Some(sfx)) => format!("{} (default <name>.{sfx}.<ext>)", op.output.label),

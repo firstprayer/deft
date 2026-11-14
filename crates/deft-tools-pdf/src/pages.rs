@@ -261,59 +261,6 @@ pub(crate) fn draw_forms(
     Ok(())
 }
 
-/// Put the invisible text of an OCR page over a page of `doc`. The text page
-/// must already be part of `doc`. The text goes straight into the page's
-/// content, not a form XObject, because many extractors skip those.
-pub fn overlay_page(doc: &mut Document, page: ObjectId, text_page: ObjectId) -> Result<()> {
-    let content = doc.get_page_content(text_page);
-    let (tw, th) = display_size(doc, text_page);
-    let (pw, ph) = display_size(doc, page);
-    let m = display_matrix(doc, page);
-    let (sx, sy) = (pw / tw, ph / th);
-    let resources = |doc: &Document, id: ObjectId| {
-        doc.get_dictionary(id)
-            .ok()
-            .and_then(|d| d.get(b"Resources").ok())
-            .map(|o| deref(doc, o))
-            .and_then(|o| o.as_dict().ok())
-            .cloned()
-            .unwrap_or_default()
-    };
-    let fonts = |doc: &Document, res: &Dictionary| {
-        res.get(b"Font")
-            .ok()
-            .map(|o| deref(doc, o))
-            .and_then(|o| o.as_dict().ok())
-            .cloned()
-            .unwrap_or_default()
-    };
-    let text_res = resources(doc, text_page);
-    let mut res = resources(doc, page);
-    let mut merged = fonts(doc, &res);
-    for (name, value) in fonts(doc, &text_res).iter() {
-        merged.set(name.clone(), value.clone());
-    }
-    res.set("Font", Object::Dictionary(merged));
-    // The layer's coordinates, scaled to the page as shown, then to user space.
-    let mut post = format!(
-        "Q\nq {} {} {} {} {} {} cm\n",
-        m[0] * sx,
-        m[1] * sx,
-        m[2] * sy,
-        m[3] * sy,
-        m[4],
-        m[5]
-    )
-    .into_bytes();
-    post.extend_from_slice(&content);
-    post.extend_from_slice(b"\nQ\n");
-    wrap_contents(doc, page, b"q\n".to_vec(), post)?;
-    doc.get_dictionary_mut(page)
-        .map_err(|e| err(ErrorCode::InputCorrupt, e.to_string()))?
-        .set("Resources", Object::Dictionary(res));
-    Ok(())
-}
-
 /// The rectangle of an annotation.
 pub(crate) fn annot_rect(doc: &Document, annot: &Dictionary) -> Option<[f64; 4]> {
     rect_of(doc, annot.get(b"Rect").ok()?)

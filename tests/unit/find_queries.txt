@@ -10,7 +10,7 @@ put a password on this pdf | pdf encrypt
 remove the password from a pdf | pdf decrypt
 add page numbers | pdf number
 stamp draft on every page | pdf watermark
-make a scanned pdf searchable | pdf ocr
+get the text out of a scanned pdf | pdf ocr
 fill in this form | pdf fill
 get the text out of a pdf | pdf to-text
 resize this photo to 1080 wide | image resize

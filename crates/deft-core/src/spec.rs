@@ -249,6 +249,8 @@ pub struct Op {
     /// Default output name suffix: `report.pdf` -> `report.<suffix>.pdf`.
     /// `None` keeps the stem and only changes the extension.
     pub suffix: Option<&'static str>,
+    /// The output path must be given with -o: there is no default name.
+    pub needs_output: bool,
     pub run: RunFn,
 }
 
@@ -280,6 +282,7 @@ impl Op {
         errors: &[],
         stability: Stability::Stable,
         suffix: None,
+        needs_output: false,
         run: not_implemented,
     };
 
