@@ -329,6 +329,12 @@ fn decode_legacy(bytes: &[u8]) -> Option<(String, &'static str)> {
     d.feed(bytes, true);
     let enc = d.guess(None, chardetng::Utf8Detection::Deny);
     let (text, _, _) = enc.decode(bytes);
+    // With few accented letters the guess may be a rarer single-byte code
+    // page that reads them the same; name the common one then.
+    let common = encoding_rs::WINDOWS_1252;
+    if enc != common && enc.is_single_byte() && common.decode(bytes).0 == text {
+        return Some((text.into_owned(), common.name()));
+    }
     Some((text.into_owned(), enc.name()))
 }
 

@@ -272,7 +272,7 @@ fn legacy_csv_encodings_are_decoded_and_named() {
     let t = read_csv(b"area,n\nYnys M\xf4n,1\n", "w").unwrap();
     assert_eq!(t.rows[1][0], Cell::Text("Ynys Môn".into()));
     assert!(
-        t.notes[0].contains("not UTF-8; read it as windows-"),
+        t.notes[0].ends_with("read it as windows-1252"),
         "{:?}",
         t.notes
     );

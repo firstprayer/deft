@@ -980,6 +980,7 @@ dependencies = [
  "chardetng",
  "csv",
  "deft-core",
+ "encoding_rs",
  "regex",
  "rust_xlsxwriter",
  "serde_json",
