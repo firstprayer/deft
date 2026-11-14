@@ -20,6 +20,11 @@ Deft follows semantic versioning. Before 1.0, a minor version may change command
 - `doc to-html` embeds pictures. Pictures in PDFs keep their natural size.
 - `calendar to-csv` shows the last day of an all-day event, not the day after it.
 - `gps info` and `gps convert` treat track segments separately, and `climb_m` ignores rises under 2 m.
+- `pdf ocr` reads at 300 dpi by default, turns sideways and upside-down pages upright, reads scans that carry only a short text stamp, and warns when nothing was recognised.
+- `pdf number` without `--position` moves the number off existing text or pictures, to the first free corner, and says where it went; a given `--position` is kept, with a warning when it is taken.
+- `pdf to-text` points to `pdf ocr` for scans of any length, and keeps word spaces in tightly justified text.
+- `pdf decrypt` decrypts attachments that are encrypted on their own, or refuses; it no longer writes a file that is still encrypted.
+- `pdf encrypt` warns that Apple viewers cannot open a file whose password is not ASCII, and describes `--no-print` and `--no-copy` as requests to the viewer.
 
 ### Removed
 
