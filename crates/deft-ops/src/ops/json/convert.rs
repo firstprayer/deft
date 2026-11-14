@@ -4,6 +4,7 @@ use deft_core::prelude::*;
 pub static OP: Op = Op {
     id: "json.convert",
     summary: "Change format: --to json|jsonl|yaml|toml|xml",
+    details: &["JSON with comments (JSONC) is read too; its comments are dropped."],
     input: Input::each(JSON, "json"),
     output: Output::one(TO_ANY, "data"),
     params: &[param(

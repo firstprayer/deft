@@ -371,6 +371,25 @@ pub fn sniff(head: &[u8], path: Option<&Path>) -> Option<Format> {
     by_ext
 }
 
+/// The format a json, yaml, toml or xml command reads a text file as when its
+/// extension names no format (`Cargo.lock`, `gitlab.yml.example`, `.csproj`,
+/// `.geojson`) or a dialect (GPX, KML and SVG are XML). The command names the
+/// format, so the content is read as that; a parse error says if it is not.
+pub fn read_as_data(found: Option<Format>, allowed: &[Format], head: &[u8]) -> Option<Format> {
+    use Format::*;
+    let data = |f: &Format| matches!(f, Json | Jsonl | Yaml | Toml | Xml);
+    if allowed.is_empty() || !allowed.iter().all(data) || head.contains(&0) {
+        return None;
+    }
+    let text = head.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(head);
+    let looks_xml = text.trim_ascii_start().starts_with(b"<");
+    match found {
+        None | Some(Txt) => Some(allowed[0]),
+        Some(Gpx | Kml | Svg) if allowed.contains(&Xml) && looks_xml => Some(Xml),
+        _ => None,
+    }
+}
+
 fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
     hay.windows(needle.len()).position(|w| w == needle)
 }

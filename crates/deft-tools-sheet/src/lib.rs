@@ -54,6 +54,11 @@ pub struct Table {
     /// Row and column of the first cell, counted from 0. A sheet need not
     /// start at A1, and readers drop the empty rows and columns before it.
     pub origin: (usize, usize),
+    /// A sheet hidden in the workbook (Excel's hidden and very hidden, an
+    /// ODS table with display off).
+    pub hidden: bool,
+    /// What reading had to decide, such as the text encoding of a CSV file.
+    pub notes: Vec<String>,
 }
 
 impl Table {
@@ -100,10 +105,102 @@ fn cell(d: &Data) -> Cell {
     }
 }
 
+/// ODS cells can hold pictures; a picture's title and description are not
+/// cell text, but calamine collects all text inside a cell. Drop drawings
+/// from content.xml before reading.
+fn without_drawings(bytes: &[u8]) -> Option<Vec<u8>> {
+    use std::io::{Read, Write};
+    let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).ok()?;
+    let mut content = String::new();
+    zip.by_name("content.xml")
+        .ok()?
+        .read_to_string(&mut content)
+        .ok()?;
+    if !content.contains("<draw:") {
+        return None;
+    }
+    let cleaned = strip_elements(&content, "draw:");
+    let mut out = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    for i in 0..zip.len() {
+        let mut f = zip.by_index(i).ok()?;
+        let name = f.name().to_string();
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        out.start_file(name.as_str(), options).ok()?;
+        if name == "content.xml" {
+            out.write_all(cleaned.as_bytes()).ok()?;
+        } else {
+            let mut buf = Vec::new();
+            f.read_to_end(&mut buf).ok()?;
+            out.write_all(&buf).ok()?;
+        }
+    }
+    Some(out.finish().ok()?.into_inner())
+}
+
+/// Remove every element whose name starts with `prefix` (such as `draw:`),
+/// with what it contains.
+fn strip_elements(xml: &str, prefix: &str) -> String {
+    let open = format!("<{prefix}");
+    let mut out = String::with_capacity(xml.len());
+    let mut rest = xml;
+    while let Some(at) = rest.find(&open) {
+        out.push_str(&rest[..at]);
+        let tail = &rest[at..];
+        let Some(end) = tail.find('>') else {
+            return out;
+        };
+        if tail[..end].ends_with('/') {
+            rest = &tail[end + 1..];
+            continue;
+        }
+        // Skip to the matching close tag, counting nested drawings.
+        let mut depth = 0usize;
+        let mut i = 0;
+        let close = format!("</{prefix}");
+        loop {
+            let next_open = tail[i..].find(&open).map(|n| n + i);
+            let next_close = tail[i..].find(&close).map(|n| n + i);
+            match (next_open, next_close) {
+                (Some(o), Some(c)) if o < c => {
+                    let e = tail[o..].find('>').map_or(tail.len(), |n| o + n);
+                    if !tail[o..e].ends_with('/') {
+                        depth += 1;
+                    }
+                    i = e + 1;
+                }
+                (_, Some(c)) => {
+                    depth -= 1;
+                    i = tail[c..].find('>').map_or(tail.len(), |n| c + n + 1);
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                _ => return out,
+            }
+        }
+        rest = &tail[i..];
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Read every sheet of a workbook.
 pub fn read_workbook(bytes: &[u8]) -> Result<Vec<Table>> {
+    let cleaned = if bytes.starts_with(b"PK") {
+        without_drawings(bytes)
+    } else {
+        None
+    };
+    let bytes = cleaned.as_deref().unwrap_or(bytes);
     let mut wb = open_workbook_auto_from_rs(Cursor::new(bytes.to_vec()))
         .map_err(|e| err(ErrorCode::InputCorrupt, format!("workbook: {e}")))?;
+    let hidden: std::collections::HashSet<String> = wb
+        .sheets_metadata()
+        .iter()
+        .filter(|s| s.visible != calamine::SheetVisible::Visible)
+        .map(|s| s.name.clone())
+        .collect();
     let mut out = Vec::new();
     for name in wb.sheet_names() {
         let range = wb
@@ -113,7 +210,13 @@ pub fn read_workbook(bytes: &[u8]) -> Result<Vec<Table>> {
         let origin = range
             .start()
             .map_or((0, 0), |(r, c)| (r as usize, c as usize));
-        out.push(Table { name, rows, origin });
+        out.push(Table {
+            hidden: hidden.contains(&name),
+            name,
+            rows,
+            origin,
+            notes: Vec::new(),
+        });
     }
     Ok(out)
 }
@@ -136,7 +239,12 @@ fn number_in_name_only(s: &str, n: f64) -> bool {
     let bare_exponent = digits
         .split_once(['e', 'E'])
         .is_some_and(|(m, e)| !m.contains('.') && e.bytes().all(|b| b.is_ascii_digit()));
-    bare_exponent || (whole && format!("{n:.0}") != s)
+    // A whole number of 16 digits or more is an id (an invoice, a card, a
+    // tracking number): Excel shows it as 2.02425E+15 and edits it with 15
+    // digits. A round amount, ending in many zeros, stays a number.
+    let zeros = digits.len() - digits.trim_end_matches('0').len();
+    let long = whole && digits.len() >= 16 && zeros < 6;
+    bare_exponent || long || (whole && format!("{n:.0}") != s)
 }
 
 pub(crate) fn parse_scalar(s: &str, decimal_comma: bool) -> Cell {
@@ -201,33 +309,87 @@ fn decode_utf16(bytes: &[u8]) -> Option<String> {
     )
 }
 
+/// Text in a legacy encoding (Windows-1252, Latin-1, GBK, Shift-JIS...),
+/// decoded, with the encoding's name. `None` for UTF-8.
+fn decode_legacy(bytes: &[u8]) -> Option<(String, &'static str)> {
+    if std::str::from_utf8(bytes).is_ok() {
+        return None;
+    }
+    // UTF-8 text with a stray byte or two stays UTF-8.
+    let (mut wide, mut invalid) = (0usize, 0usize);
+    for chunk in bytes.utf8_chunks() {
+        wide += chunk.valid().chars().filter(|c| !c.is_ascii()).count();
+        invalid += usize::from(!chunk.invalid().is_empty());
+    }
+    if wide > 10 * invalid {
+        return Some((
+            String::from_utf8_lossy(bytes).into_owned(),
+            "UTF-8 with some bad bytes",
+        ));
+    }
+    let mut d = chardetng::EncodingDetector::new(chardetng::Iso2022JpDetection::Deny);
+    d.feed(bytes, true);
+    let enc = d.guess(None, chardetng::Utf8Detection::Deny);
+    let (text, _, _) = enc.decode(bytes);
+    // With few accented letters the guess may be a rarer single-byte code
+    // page that reads them the same; name the common one then.
+    let common = encoding_rs::WINDOWS_1252;
+    if enc != common && enc.is_single_byte() && common.decode(bytes).0 == text {
+        return Some((text.into_owned(), common.name()));
+    }
+    Some((text.into_owned(), enc.name()))
+}
+
+/// A number with a decimal point, such as 1148.7 or -0.25, that cannot be
+/// a thousands group (1.234).
+fn dot_decimal(s: &str) -> bool {
+    let s = s.strip_prefix('-').unwrap_or(s);
+    s.split_once('.').is_some_and(|(a, b)| {
+        !a.is_empty()
+            && !b.is_empty()
+            && b.len() != 3
+            && a.bytes().chain(b.bytes()).all(|c| c.is_ascii_digit())
+    })
+}
+
 /// Read CSV; the delimiter is detected from the first line.
 pub fn read_csv(bytes: &[u8], name: &str) -> Result<Table> {
-    let decoded = decode_utf16(bytes);
+    let mut notes = Vec::new();
+    let mut decoded = decode_utf16(bytes);
+    if decoded.is_none()
+        && let Some((text, enc)) = decode_legacy(bytes)
+    {
+        notes.push(format!("{name}: the text is not UTF-8; read it as {enc}"));
+        decoded = Some(text);
+    }
     let bytes = decoded.as_deref().map_or(bytes, str::as_bytes);
     let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes);
     let delimiter = detect_delimiter(bytes);
+    let mut records = Vec::new();
     let mut r = csv::ReaderBuilder::new()
         .has_headers(false)
         .flexible(true)
         .delimiter(delimiter)
         .from_reader(bytes);
-    let mut rows = Vec::new();
+    let mut rows: Vec<Vec<Cell>> = Vec::new();
     for rec in r.records() {
         let rec = rec.map_err(|e| match e.kind() {
             csv::ErrorKind::Utf8 { .. } => err(ErrorCode::InputCorrupt, "csv: not UTF-8 text")
                 .hint("convert it to UTF-8 first, for example with iconv"),
             _ => err(ErrorCode::InputCorrupt, format!("csv: {e}")),
         })?;
-        rows.push(
-            rec.iter()
-                .map(|s| parse_scalar(s, delimiter == b';'))
-                .collect(),
-        );
+        records.push(rec);
+    }
+    // A semicolon usually means comma decimals, but not in a file that writes
+    // its numbers with a dot (1148.7), such as Brazil's open data.
+    let decimal_comma = delimiter == b';' && !records.iter().flatten().any(dot_decimal);
+    for rec in &records {
+        rows.push(rec.iter().map(|s| parse_scalar(s, decimal_comma)).collect());
     }
     Ok(Table {
         name: name.into(),
         rows,
+        notes,
         ..Table::default()
     })
 }

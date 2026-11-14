@@ -1,11 +1,15 @@
-use super::_common::{IN, OUT, SHEET, TO, column, input_table, tables, warned, write};
+use super::_common::{
+    IN, OUT, SHEET, TO, column, find_header, input_table, some_names, tables, warned, write,
+};
 use deft_core::prelude::*;
 use deft_tools_sheet::Table;
 
 pub static OP: Op = Op {
     id: "sheet.split",
     summary: "Split up: --sheets, --columns city or --every 1000",
-    details: &["--sheets writes each sheet to its own file; the others split rows."],
+    details: &[
+        "--sheets writes each sheet to its own file, hidden ones left out; the others split rows.",
+    ],
     input: Input::each(IN, "sheet"),
     output: Output::many(OUT, "sheet"),
     params: &[
@@ -42,17 +46,37 @@ pub static OP: Op = Op {
 fn run(job: &Job) -> Result<OpResult> {
     let p = job.params;
     let stem = job.input().stem();
-    let mut warning = None;
+    let mut warning = Vec::new();
     let parts: Vec<(String, Table)> = if p.flag("sheets") {
-        tables(job.input())?
-            .into_iter()
-            .map(|t| (t.name.clone(), t))
+        let all = tables(job.input())?;
+        let hidden: Vec<&str> = all
+            .iter()
+            .filter(|t| t.hidden)
+            .map(|t| t.name.as_str())
+            .collect();
+        // Hidden sheets are left out, unless every sheet is hidden.
+        let skip = !hidden.is_empty() && hidden.len() < all.len();
+        if skip {
+            warning.push(format!(
+                "left out {} hidden sheet{}: {} (use --sheet NAME with deft sheet convert for one)",
+                hidden.len(),
+                if hidden.len() == 1 { "" } else { "s" },
+                some_names(&hidden)
+            ));
+        }
+        all.into_iter()
+            .filter(|t| !(skip && t.hidden))
+            .map(|t| {
+                warning.extend(t.notes.iter().cloned());
+                (t.name.clone(), t)
+            })
             .collect()
     } else {
-        let (t, other_sheets) = input_table(job)?;
+        let (mut t, other_sheets) = input_table(job)?;
         warning = other_sheets;
         match (p.opt_text("columns"), p.opt_int("every")) {
             (Some(name), None) => {
+                warning.extend(find_header(&mut t, std::slice::from_ref(&name)));
                 let c = column(&t, "columns", &name)?;
                 deft_tools_sheet::split_by(&t, c)
                     .into_iter()

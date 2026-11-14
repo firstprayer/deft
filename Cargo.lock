@@ -931,14 +931,19 @@ dependencies = [
  "boon",
  "csv",
  "deft-core",
+ "fancy-regex",
  "jaq-core",
  "jaq-json",
  "jaq-std",
+ "regex",
  "roxmltree 0.21.2",
  "serde",
  "serde_json",
  "serde_yaml",
  "toml 0.8.23",
+ "toml_edit 0.22.27",
+ "url",
+ "yaml-rust",
 ]
 
 [[package]]
@@ -1012,12 +1017,15 @@ name = "deft-tools-sheet"
 version = "0.1.0"
 dependencies = [
  "calamine",
+ "chardetng",
  "csv",
  "deft-core",
+ "encoding_rs",
  "regex",
  "rust_xlsxwriter",
  "serde_json",
  "tempfile",
+ "zip 8.6.0",
 ]
 
 [[package]]

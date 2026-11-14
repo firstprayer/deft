@@ -1,4 +1,4 @@
-use super::_common::{IN, OUT, SHEET, TO, column, finish, input_table, warned};
+use super::_common::{IN, OUT, SHEET, TO, column, find_header, finish, input_table, warned};
 use deft_core::prelude::*;
 use deft_tools_sheet::Agg;
 
@@ -31,7 +31,12 @@ pub static OP: Op = Op {
 
 fn run(job: &Job) -> Result<OpResult> {
     let p = job.params;
-    let (t, warning) = input_table(job)?;
+    let (mut t, mut warning) = input_table(job)?;
+    let named: Vec<String> = ["rows", "columns", "values"]
+        .iter()
+        .filter_map(|o| p.opt_text(o))
+        .collect();
+    warning.extend(find_header(&mut t, &named));
     let row = column(&t, "rows", &p.text("rows"))?;
     let col = column(&t, "columns", &p.text("columns"))?;
     let value = match p.opt_text("values") {

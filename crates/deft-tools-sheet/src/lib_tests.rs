@@ -185,12 +185,22 @@ fn stats_and_splits() {
 
 #[test]
 fn identifiers_are_not_numbers() {
-    for s in ["007", "+1234", "-007", "12E3", "12345678901234567890"] {
+    // 2024897743160061 fits a double, but Excel shows 15 digits: 2024897743160060.
+    // 2024251305450100 is exact in a double, and still an invoice number.
+    for s in [
+        "007",
+        "+1234",
+        "-007",
+        "12E3",
+        "12345678901234567890",
+        "2024897743160061",
+        "2024251305450100",
+    ] {
         assert_eq!(parse_scalar(s, false), Cell::Text(s.into()), "{s}");
     }
     assert_eq!(parse_scalar("1.5e-7", false).number(), Some(1.5e-7));
     assert_eq!(parse_scalar("1E+5", false).number(), Some(1e5));
-    // Exactly what a double holds, so a large amount stays a number.
+    // A round amount stays a number.
     assert_eq!(
         parse_scalar("15832800000000000", false).number(),
         Some(15832800000000000.0)
@@ -272,4 +282,37 @@ fn records_inside_a_json_object_become_tables() {
     assert_eq!(tables[0].rows.len(), 3);
     let none = read(br#"{"name": "koa", "version": "2"}"#, Format::Json, "p").unwrap_err();
     assert_eq!(none.code, ErrorCode::InputUnsupported);
+}
+
+#[test]
+fn legacy_csv_encodings_are_decoded_and_named() {
+    // "Ynys Môn" in Windows-1252, and 交易 in GBK.
+    let t = read_csv(b"area,n\nYnys M\xf4n,1\n", "w").unwrap();
+    assert_eq!(t.rows[1][0], Cell::Text("Ynys Môn".into()));
+    assert!(
+        t.notes[0].ends_with("read it as windows-1252"),
+        "{:?}",
+        t.notes
+    );
+    let gbk = b"\xbd\xbb\xd2\xd7\xc3\xfb\xb3\xc6,\xbd\xf0\xb6\xee\n\xd6\xa7\xb8\xb6\xb1\xa6,12\n";
+    let t = read_csv(gbk, "g").unwrap();
+    assert_eq!(t.rows[0][0], Cell::Text("交易名称".into()), "{:?}", t.notes);
+}
+
+#[test]
+fn drawings_in_ods_cells_are_not_text() {
+    let xml = r#"<table:table-cell><text:p>Back</text:p><draw:frame a="1"><draw:image/><svg:desc>Logo</svg:desc></draw:frame></table:table-cell>"#;
+    assert_eq!(
+        strip_elements(xml, "draw:"),
+        "<table:table-cell><text:p>Back</text:p></table:table-cell>"
+    );
+}
+
+#[test]
+fn semicolon_files_with_dot_decimals_keep_comma_text() {
+    let t = read_csv(b"doc;value\n3800,00;1148.7\n", "br").unwrap();
+    assert_eq!(t.rows[1][0], Cell::Text("3800,00".into()));
+    assert_eq!(t.rows[1][1].number(), Some(1148.7));
+    let t = read_csv(b"doc;value\nx;1.234,50\n", "de").unwrap();
+    assert_eq!(t.rows[1][1].number(), Some(1234.5));
 }

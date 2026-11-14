@@ -13,6 +13,9 @@ rust_xlsxwriter.workspace = true
 csv.workspace = true
 serde_json.workspace = true
 regex.workspace = true
+zip.workspace = true
+chardetng.workspace = true
+encoding_rs.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
