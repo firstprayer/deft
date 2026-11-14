@@ -4,6 +4,7 @@ use deft_core::prelude::*;
 pub static OP: Op = Op {
     id: "gps.info",
     summary: "Distance, time, climb and point counts",
+    details: &["Areas (KML polygons) are counted apart and add no distance."],
     input: Input::each(IN, "gpx|kml"),
     output: Output::report(),
     examples: &["deft gps info ride.gpx"],
@@ -11,6 +12,7 @@ pub static OP: Op = Op {
     result: &[
         "tracks",
         "places",
+        "areas",
         "points",
         "distance_km",
         "seconds",
@@ -29,6 +31,7 @@ fn run(job: &Job) -> Result<OpResult> {
         facts![
             ("tracks", geo.tracks.len()),
             ("places", geo.places.len()),
+            ("areas", geo.areas.len()),
             ("points", s.points),
             ("distance_km", km),
             ("seconds", s.seconds),

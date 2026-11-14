@@ -13,7 +13,7 @@ pub fn load(input: &InputFile) -> Result<Geo> {
     };
     let geo =
         parsed.map_err(|e| err(ErrorCode::InputCorrupt, format!("{}: {e}", input.display)))?;
-    if geo.tracks.is_empty() && geo.places.is_empty() {
+    if geo.tracks.is_empty() && geo.places.is_empty() && geo.areas.is_empty() {
         return Err(err(
             ErrorCode::InputCorrupt,
             format!("{}: no tracks or places found", input.display),
