@@ -141,7 +141,7 @@ Several inputs run in parallel, one job per CPU core; set the count with `-j`. F
 ## Safety
 
 - `--dry-run` shows what would happen and writes nothing.
-- Deft never uses the network.
+- Deft uses the network only to download pictures a document links to when it writes PDF, Word or EPUB. Without a connection those pictures are left out, with a warning.
 - Deft collects no usage data and keeps no logs of your runs.
 
 ## Agent setup

@@ -63,6 +63,80 @@ pub fn count_words(text: &str) -> usize {
     count
 }
 
+/// The `<img ...>` tags in raw HTML, as byte ranges.
+pub fn img_tags(html: &str) -> Vec<std::ops::Range<usize>> {
+    // ASCII lowercasing keeps every byte where it was.
+    let lower = html.to_ascii_lowercase();
+    let mut out = Vec::new();
+    let mut from = 0;
+    while let Some(at) = lower[from..].find("<img") {
+        let start = from + at;
+        let end = lower[start..]
+            .find('>')
+            .map_or(lower.len(), |e| start + e + 1);
+        if lower[start + 4..]
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_whitespace() || c == '/' || c == '>')
+        {
+            out.push(start..end);
+        }
+        from = end.max(start + 4);
+    }
+    out
+}
+
+/// Where the value of attribute `name` sits in one HTML tag, as a byte range.
+pub fn attribute(tag: &str, name: &str) -> Option<std::ops::Range<usize>> {
+    let lower = tag.to_ascii_lowercase();
+    let b = lower.as_bytes();
+    let end = lower.len();
+    let mut i = 0;
+    while let Some(found) = lower[i..].find(name) {
+        let s = i + found;
+        i = s + name.len();
+        // "src", not "data-src" or "srcset".
+        if s == 0 || b[s - 1].is_ascii_alphanumeric() || matches!(b[s - 1], b'-' | b'_' | b':') {
+            continue;
+        }
+        let mut j = s + name.len();
+        while j < end && b[j].is_ascii_whitespace() {
+            j += 1;
+        }
+        if j >= end || b[j] != b'=' {
+            continue;
+        }
+        j += 1;
+        while j < end && b[j].is_ascii_whitespace() {
+            j += 1;
+        }
+        if j >= end {
+            return None;
+        }
+        return Some(if matches!(b[j], b'"' | b'\'') {
+            let quote = b[j] as char;
+            let open = j + 1;
+            open..lower[open..].find(quote).map_or(end, |e| open + e)
+        } else {
+            j..lower[j..]
+                .find(|c: char| c.is_ascii_whitespace() || c == '>')
+                .map_or(end, |e| j + e)
+        });
+    }
+    None
+}
+
+/// Text of an HTML attribute value with the common entities read.
+pub fn unescape_attribute(value: &str) -> String {
+    value
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&apos;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -83,5 +157,18 @@ mod tests {
         assert_eq!(a.next("`md toc` & more!"), "md-toc--more");
         assert_eq!(a.next("Table of Contents"), "table-of-contents-1");
         assert_eq!(a.next("😀 Smileys"), "-smileys");
+    }
+
+    #[test]
+    fn img_tags_and_their_attributes() {
+        let html = "<p><IMG alt='A &amp; B' data-src=\"x\" src=\"img/a b.png\"/> <imgx src=no></p>";
+        let tags = img_tags(html);
+        assert_eq!(tags.len(), 1);
+        let tag = &html[tags[0].clone()];
+        assert_eq!(&tag[attribute(tag, "src").unwrap()], "img/a b.png");
+        assert_eq!(
+            unescape_attribute(&tag[attribute(tag, "alt").unwrap()]),
+            "A & B"
+        );
     }
 }

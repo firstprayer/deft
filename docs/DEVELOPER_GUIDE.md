@@ -22,7 +22,7 @@ There is no central list. Each operation is one file, `crates/deft-ops/src/ops/<
 - An operation has one implementation. To reach it from another group, add a mount; do not copy it.
 - The same option name must mean the same thing everywhere (`specs_are_well_formed` enforces this).
 - Help text is the product. Keep summaries short, stay inside the token budgets, review snapshot diffs with `cargo insta review`.
-- Never overwrite inputs. Deft never touches the network.
+- Never overwrite inputs. The network is used only to download pictures a document links to, through `deft_tools_file::web`, within its limits; every other job runs offline.
 - Pin new dependencies to releases at least two weeks old.
 
 ## Checks

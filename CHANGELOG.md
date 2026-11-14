@@ -20,13 +20,14 @@ Deft follows semantic versioning. Before 1.0, a minor version may change command
 - `doc to-html` embeds pictures. Pictures in PDFs keep their natural size.
 - `calendar to-csv` shows the last day of an all-day event, not the day after it.
 - `gps info` and `gps convert` treat track segments separately, and `climb_m` ignores rises under 2 m.
+- `md to-pdf`, `md to-docx`, `md to-epub`, `html to-pdf` and `html to-docx` download the web pictures a document links to and embed them. A picture that cannot be downloaded is left out with one warning, keeping its alt text. This is the only time deft goes online.
 
 ### Removed
 
 - `--in-place`. Deft never changes an input: not through `-o`, `--force`, a hard or symbolic link, a folder output, or pictures saved with `--images`.
 - The `archive`, `subtitle` and `audio` groups. An agent does each audio job with one ffmpeg line.
 - `html screenshot` and `html to-pdf --browser`. Deft no longer uses Chrome.
-- The `youtube` group, `deft engine install` and `update`, `--offline` and `--install-engines`. Deft no longer touches the network.
+- The `youtube` group, `deft engine install` and `update`, `--offline` and `--install-engines`. Deft no longer downloads videos or programs.
 - Commands an agent does in one ordinary line: `file hash`, `base64`, `split`, `join`, `rename` and `organize`; `video crop`, `resize`, `rotate`, `mute`, `fade`, `repeat`, `reverse`, `stack`, `thumbnail`, `extract-audio` and `extract-subtitles`; `image diff`, `invert` and `sharpen`; `pdf grayscale` and `repair`; `video split` (`ffmpeg -ss … -to …`); `data query`; `sheet transpose`; `email info`.
 - The `video` group: `pad` and `watermark` are one ffmpeg line each.
 - `video stabilize`: `ffmpeg -vf deshake` does it in one line, and on real handheld clips deft's two-pass vidstab smeared a third of them.
