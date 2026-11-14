@@ -148,9 +148,11 @@ pub fn pad(
 }
 
 /// Make a colour transparent, within a tolerance from 0 to 100. Returns the
-/// image and how many pixels changed. Unless `everywhere`, only the colour
-/// joined to the image's edge goes: the background around a white cup goes,
-/// the cup's own white stays.
+/// image and how many pixels changed. When most of the colour is joined to
+/// the image's edge it is a background, and only that part goes: the white
+/// around a white cup goes, the cup's own white stays. Otherwise, as with
+/// `everywhere`, it goes wherever it appears, such as the paper of a scan
+/// inside a dark border or a frame.
 pub fn make_transparent(
     img: &DynamicImage,
     color: [u8; 4],
@@ -170,29 +172,13 @@ pub fn make_transparent(
     let clear = if everywhere {
         matches
     } else {
-        let mut clear = vec![false; w * h];
-        let mut todo: Vec<usize> = (0..w)
-            .flat_map(|x| [x, (h - 1) * w + x])
-            .chain((0..h).flat_map(|y| [y * w, y * w + w - 1]))
-            .filter(|&i| matches[i])
-            .collect();
-        while let Some(i) = todo.pop() {
-            if clear[i] {
-                continue;
-            }
-            clear[i] = true;
-            let (x, y) = (i % w, i / w);
-            let mut near = |ok: bool, j: usize| {
-                if ok && matches[j] && !clear[j] {
-                    todo.push(j);
-                }
-            };
-            near(x > 0, i.wrapping_sub(1));
-            near(x + 1 < w, i + 1);
-            near(y > 0, i.wrapping_sub(w));
-            near(y + 1 < h, i + w);
+        let edge = edge_joined(&matches, w, h);
+        let joined = edge.iter().filter(|c| **c).count();
+        if joined * 2 >= matches.iter().filter(|m| **m).count() {
+            edge
+        } else {
+            matches
         }
-        clear
     };
     let mut n = 0;
     for (p, c) in out.pixels_mut().zip(clear) {
@@ -202,6 +188,33 @@ pub fn make_transparent(
         }
     }
     (DynamicImage::ImageRgba8(out), n)
+}
+
+/// The marked pixels joined to the image's edge through marked neighbours.
+fn edge_joined(matches: &[bool], w: usize, h: usize) -> Vec<bool> {
+    let mut clear = vec![false; w * h];
+    let mut todo: Vec<usize> = (0..w)
+        .flat_map(|x| [x, (h - 1) * w + x])
+        .chain((0..h).flat_map(|y| [y * w, y * w + w - 1]))
+        .filter(|&i| matches[i])
+        .collect();
+    while let Some(i) = todo.pop() {
+        if clear[i] {
+            continue;
+        }
+        clear[i] = true;
+        let (x, y) = (i % w, i / w);
+        let mut near = |ok: bool, j: usize| {
+            if ok && matches[j] && !clear[j] {
+                todo.push(j);
+            }
+        };
+        near(x > 0, i.wrapping_sub(1));
+        near(x + 1 < w, i + 1);
+        near(y > 0, i.wrapping_sub(w));
+        near(y + 1 < h, i + w);
+    }
+    clear
 }
 
 /// How a grid of pictures is laid out.

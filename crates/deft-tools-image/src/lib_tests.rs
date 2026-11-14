@@ -360,6 +360,17 @@ fn only_the_background_joined_to_the_edge_goes() {
     assert_eq!(n, 81 - 25);
     let (_, all) = crate::edit::make_transparent(&img, [255, 255, 255, 255], 10.0, true);
     assert_eq!(all, 81 - 16);
+    // A scan in a dark border: the paper does not touch the edge, and goes.
+    let scan = DynamicImage::ImageRgb8(RgbImage::from_fn(9, 9, |x, y| {
+        let border = x == 0 || y == 0 || x == 8 || y == 8;
+        image::Rgb(if border || (x, y) == (4, 4) {
+            [0, 0, 0]
+        } else {
+            [255, 255, 255]
+        })
+    }));
+    let (_, paper) = crate::edit::make_transparent(&scan, [255, 255, 255, 255], 10.0, false);
+    assert_eq!(paper, 49 - 1);
 }
 
 #[test]

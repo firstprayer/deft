@@ -13,7 +13,7 @@ pub static OP: Op = Op {
     id: "image.transparent",
     summary: "Make a colour see-through: --color white --fuzz 10",
     details: &[
-        "The colour goes where it joins the edge of the picture, so a white product on white keeps its own white. --everywhere removes it wherever it appears.",
+        "When most of the colour touches the picture's edge it is the background, and only the part joined to the edge goes: a white product on white keeps its own white. Otherwise it goes everywhere, like the paper of a scan in a dark border. --everywhere always removes it everywhere.",
         "JPEG cannot hold transparency, so JPEG input becomes PNG.",
     ],
     input: Input::each(IN, "image"),
