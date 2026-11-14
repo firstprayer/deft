@@ -91,3 +91,73 @@ pub(crate) fn detach(node: &Handle) {
     }
     node.parent.set(None);
 }
+
+/// Put a node's children where it is, and take it out.
+pub(crate) fn unwrap(node: &Handle) {
+    let Some(p) = parent(node) else { return };
+    let kids = children(node);
+    for k in &kids {
+        k.parent.set(Some(std::rc::Rc::downgrade(&p)));
+    }
+    node.children.borrow_mut().clear();
+    let mut siblings = p.children.borrow_mut();
+    if let Some(at) = siblings.iter().position(|c| std::rc::Rc::ptr_eq(c, node)) {
+        siblings.splice(at..at + 1, kids);
+    }
+    node.parent.set(None);
+}
+
+/// A new text node at `at` among `parent`'s children.
+pub(crate) fn insert_text(parent: &Handle, at: usize, text: &str) {
+    let node = markup5ever_rcdom::Node::new(NodeData::Text {
+        contents: std::cell::RefCell::new(text.into()),
+    });
+    node.parent.set(Some(std::rc::Rc::downgrade(parent)));
+    let mut kids = parent.children.borrow_mut();
+    let at = at.min(kids.len());
+    kids.insert(at, node);
+}
+
+/// Take `text` off the start (or end) of the text under `node`, after any
+/// whitespace there. Returns whether it was there to take.
+pub(crate) fn strip_text(node: &Handle, text: &str, start: bool) -> bool {
+    let mut texts = Vec::new();
+    fn walk(n: &Handle, out: &mut Vec<Handle>) {
+        for c in n.children.borrow().iter() {
+            match &c.data {
+                NodeData::Text { contents } if !contents.borrow().trim().is_empty() => {
+                    out.push(c.clone())
+                }
+                _ => walk(c, out),
+            }
+        }
+    }
+    walk(node, &mut texts);
+    let Some(t) = (if start { texts.first() } else { texts.last() }) else {
+        return false;
+    };
+    let NodeData::Text { contents } = &t.data else {
+        return false;
+    };
+    let current = contents.borrow().to_string();
+    let changed = if start {
+        let trimmed = current.trim_start();
+        let space = &current[..current.len() - trimmed.len()];
+        trimmed
+            .strip_prefix(text)
+            .map(|rest| format!("{space}{rest}"))
+    } else {
+        let trimmed = current.trim_end();
+        let space = &current[trimmed.len()..];
+        trimmed
+            .strip_suffix(text)
+            .map(|rest| format!("{rest}{space}"))
+    };
+    match changed {
+        Some(new) => {
+            *contents.borrow_mut() = new.into();
+            true
+        }
+        None => false,
+    }
+}

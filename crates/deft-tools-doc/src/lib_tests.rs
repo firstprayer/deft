@@ -20,10 +20,17 @@ fn word(body: &str, parts: &[(&str, &str)]) -> Vec<u8> {
     let notes: Vec<(String, String)> = parts
         .iter()
         .map(|(name, xml)| {
+            if name.ends_with(".rels") {
+                return (name.to_string(), xml.to_string());
+            }
             let root = if name.contains("foot") {
                 "footnotes"
             } else if name.contains("numbering") {
                 "numbering"
+            } else if name.contains("styles") {
+                "styles"
+            } else if name.contains("header") {
+                "hdr"
             } else {
                 "endnotes"
             };
@@ -88,7 +95,7 @@ fn word_tables_keep_nested_and_controlled_text() {
         panic!("{:?}", doc.blocks)
     };
     let cell = |i: usize| -> String { rows[0][i].iter().map(|s| s.text.as_str()).collect() };
-    assert_eq!(cell(0), "outer inner");
+    assert_eq!(cell(0), "outer\ninner");
     assert_eq!(cell(1), "control");
     assert!(doc.text().contains("wrapped"), "{}", doc.text());
 }
@@ -934,4 +941,276 @@ fn a_cover_no_chapter_shows_goes_first() {
         ..Default::default()
     };
     assert_eq!(shown.markdown().unwrap().matches("c.jpg").count(), 1);
+}
+
+#[test]
+fn word_emphasis_reads_as_emphasis_in_markdown() {
+    let styled = |props: &str, text: &str| {
+        format!("<w:r><w:rPr>{props}</w:rPr><w:t xml:space=\"preserve\">{text}</w:t></w:r>")
+    };
+    let b = "<w:b/>";
+    let body = [
+        // A bold run ending in a tab, a bold run of punctuation after a
+        // word, bold whitespace between words, bold text with a no-break space.
+        format!(
+            "<w:p>{}{}</w:p>",
+            styled(b, "Platform\u{9}"),
+            run(": MATLAB")
+        ),
+        format!(
+            "<w:p>{}{}</w:p>",
+            run("Professional experience"),
+            styled(b, ":")
+        ),
+        format!(
+            "<w:p>{}{}{}</w:p>",
+            run("Cebu"),
+            styled(b, "\u{9}\u{9}"),
+            run("Android")
+        ),
+        format!(
+            "<w:p>{}{}</w:p>",
+            styled(b, "Large Text:\u{a0}"),
+            run("Large-scale")
+        ),
+        format!("<w:p>{}{}</w:p>", styled(b, "二、"), run("将")),
+        format!("<w:p>{}{}</w:p>", styled(b, "a"), styled("<w:i/>", "b")),
+    ]
+    .concat();
+    let doc = docx::read(&word(&body, &[])).unwrap();
+    let md = markdown::render(&doc);
+    // Every bold or italic piece comes back from the Markdown as styled
+    // text, and no asterisk is left as text.
+    let back = markdown::parse(&md);
+    let mut text = String::new();
+    let mut styled_text = String::new();
+    for b in &back {
+        if let Block::Paragraph(spans) = b {
+            for s in spans {
+                text.push_str(&s.text);
+                if s.bold || s.italic {
+                    styled_text.push_str(&s.text);
+                }
+            }
+        }
+    }
+    assert!(!text.contains('*'), "{md}");
+    for want in ["Platform", "Large Text:", "二", "a", "b"] {
+        assert!(styled_text.contains(want), "{want} lost its style in {md}");
+    }
+}
+
+#[test]
+fn word_indents_are_not_code() {
+    let body = [
+        para("\u{9}(b) The Company shall"),
+        para("    1. typed number"),
+        para("# not a heading"),
+    ]
+    .concat();
+    let doc = docx::read(&word(&body, &[])).unwrap();
+    let md = markdown::render(&doc);
+    let back = markdown::parse(&md);
+    assert!(
+        back.iter().all(|b| matches!(b, Block::Paragraph(_))),
+        "{md}"
+    );
+    assert!(md.contains("1\\. typed number"), "{md}");
+}
+
+#[test]
+fn word_numbers_from_styles_and_outline_levels() {
+    let numbering = "<w:abstractNum w:abstractNumId=\"0\">\
+<w:lvl w:ilvl=\"0\"><w:start w:val=\"1\"/><w:numFmt w:val=\"decimal\"/><w:pStyle w:val=\"N1\"/><w:lvlText w:val=\"%1\"/></w:lvl>\
+<w:lvl w:ilvl=\"1\"><w:start w:val=\"1\"/><w:numFmt w:val=\"decimal\"/><w:pStyle w:val=\"N2\"/><w:lvlText w:val=\"%1.%2\"/></w:lvl>\
+<w:lvl w:ilvl=\"2\"><w:start w:val=\"1\"/><w:numFmt w:val=\"lowerLetter\"/><w:lvlText w:val=\"(%3)\"/></w:lvl>\
+</w:abstractNum><w:num w:numId=\"5\"><w:abstractNumId w:val=\"0\"/></w:num>";
+    let styles = "<w:style w:type=\"paragraph\" w:styleId=\"N1\"><w:name w:val=\"Numbered 1\"/><w:pPr><w:numPr><w:numId w:val=\"5\"/></w:numPr><w:outlineLvl w:val=\"0\"/></w:pPr></w:style>\
+<w:style w:type=\"paragraph\" w:styleId=\"N2\"><w:name w:val=\"Numbered 1.1\"/><w:basedOn w:val=\"N1\"/><w:pPr><w:outlineLvl w:val=\"9\"/></w:pPr></w:style>";
+    let styled = |style: &str, text: &str| {
+        format!(
+            "<w:p><w:pPr><w:pStyle w:val=\"{style}\"/></w:pPr>{}</w:p>",
+            run(text)
+        )
+    };
+    let deep = format!(
+        "<w:p><w:pPr><w:pStyle w:val=\"N2\"/><w:numPr><w:ilvl w:val=\"2\"/></w:numPr></w:pPr>{}</w:p>",
+        run("the first thing")
+    );
+    let body = [
+        styled("N1", "Definitions"),
+        styled("N2", "In this contract:"),
+        deep,
+        styled("N1", "Due Diligence"),
+        styled("N2", "The Supplier acknowledges"),
+    ]
+    .concat();
+    let doc = docx::read(&word(
+        &body,
+        &[
+            ("word/numbering.xml", numbering),
+            ("word/styles.xml", styles),
+        ],
+    ))
+    .unwrap();
+    let md = markdown::render(&doc);
+    assert_eq!(
+        md,
+        "# 1 Definitions\n\n1.1 In this contract:\n\n(a) the first thing\n\n# 2 Due Diligence\n\n2.1 The Supplier acknowledges\n"
+    );
+    // Plain text keeps the numbers; the word count leaves them out, as Word does.
+    assert!(doc.text().contains("2.1 The Supplier acknowledges"));
+    assert_eq!(doc.words(), 12);
+}
+
+#[test]
+fn word_plain_text_keeps_list_numbers() {
+    let blocks = markdown::parse("1. one\n2. two\n\n- dot\n");
+    let doc = Document {
+        blocks,
+        ..Default::default()
+    };
+    assert_eq!(doc.text(), "1. one\n2. two\n\n- dot\n");
+    assert_eq!(doc.words(), 3);
+}
+
+#[test]
+fn word_first_page_header_comes_first_without_page_numbers() {
+    let rels = "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rH\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/header\" Target=\"header1.xml\"/></Relationships>";
+    let header = format!(
+        "{}<w:p><w:r><w:fldChar w:fldCharType=\"begin\"/></w:r><w:r><w:instrText> PAGE </w:instrText></w:r><w:r><w:t>1</w:t></w:r></w:p>",
+        para("Patrick Galloway | patrick@example.com")
+    );
+    let body = format!(
+        "{}<w:sectPr><w:headerReference w:type=\"default\" r:id=\"rH\"/></w:sectPr>",
+        para("Experience")
+    );
+    let doc = docx::read(&word(
+        &body,
+        &[
+            ("word/_rels/document.xml.rels", rels),
+            ("word/header1.xml", &header),
+        ],
+    ))
+    .unwrap();
+    assert_eq!(
+        doc.text(),
+        "Patrick Galloway | patrick@example.com\n\nExperience\n"
+    );
+}
+
+#[test]
+fn word_cell_paragraphs_keep_their_breaks() {
+    let cell = format!("<w:tc>{}{}</w:tc>", para("Dear sir,"), para("Thank you."));
+    let body = format!("<w:tbl><w:tr>{cell}</w:tr></w:tbl>");
+    let doc = docx::read(&word(&body, &[])).unwrap();
+    assert_eq!(doc.text(), "Dear sir,\nThank you.\n");
+    assert!(markdown::render(&doc).contains("Dear sir,<br>Thank you."));
+}
+
+#[test]
+fn front_matter_is_data_not_text() {
+    let md =
+        "---\ntitle: 'Jekyll 4.4.0 Released'\nauthor: ashmaroli\ntags: [a, b]\n---\n\nBody text.\n";
+    let (meta, body) = markdown::split_front_matter(md);
+    assert_eq!(meta.title.as_deref(), Some("Jekyll 4.4.0 Released"));
+    assert_eq!(meta.author.as_deref(), Some("ashmaroli"));
+    assert_eq!(body.trim(), "Body text.");
+    let toml = "+++\ntitle = \"Hugo post\"\n+++\nText\n";
+    assert_eq!(
+        markdown::split_front_matter(toml).0.title.as_deref(),
+        Some("Hugo post")
+    );
+    // A rule that opens the text, followed by prose and another rule, stays.
+    let ruled = "---\n\nSome prose here.\n\n---\n";
+    assert_eq!(markdown::split_front_matter(ruled).1, ruled);
+}
+
+#[test]
+fn html_pictures_in_markdown_are_pictures() {
+    let blocks = markdown::parse(
+        "Text\n\n<img alt=\"Figure 4-1\" src=\"img/trpl04-01.svg\" class=\"center\" />\n",
+    );
+    let images: Vec<(String, String)> = blocks
+        .iter()
+        .flat_map(|b| match b {
+            Block::Paragraph(s) => s.clone(),
+            _ => vec![],
+        })
+        .filter_map(|s| Some((s.image?, s.text)))
+        .collect();
+    assert_eq!(
+        images,
+        vec![("img/trpl04-01.svg".to_string(), "Figure 4-1".to_string())]
+    );
+}
+
+#[test]
+fn html_bold_punctuation_reads_as_text() {
+    let md =
+        html::to_markdown("<p><strong>二、</strong>将《戒毒条例》 and <b>·</b> sep</p>").unwrap();
+    let back = markdown::parse(&md);
+    let text: String = back
+        .iter()
+        .flat_map(|b| match b {
+            Block::Paragraph(s) => s.clone(),
+            _ => vec![],
+        })
+        .map(|s| s.text)
+        .collect();
+    assert!(!text.contains('*'), "{md}");
+    assert!(text.contains("二、将"), "{md}");
+}
+
+#[test]
+fn book_self_closed_elements_are_empty() {
+    let chapter = "<?xml version=\"1.0\"?><html xmlns=\"http://www.w3.org/1999/xhtml\"><body><pre/><p>Prose that follows.</p><div id=\"x\"/><p>More.</p></body></html>";
+    let book = epub::Book {
+        title: None,
+        author: None,
+        language: None,
+        chapters: vec![epub::open_self_closed(chapter)],
+        images: vec![],
+        cover: None,
+    };
+    let md = book.markdown().unwrap();
+    assert!(!md.contains("```"), "{md}");
+    assert!(md.contains("Prose that follows."));
+}
+
+#[test]
+fn main_content_puts_a_headline_above_the_article_first() {
+    let page = format!(
+        "<html><head><title>Krakow: three more found | Example News</title></head><body><header><h1>Krakow: three more found</h1></header><main><article><p>{}</p></article></main></body></html>",
+        "Body text of the story, long enough to count as the article. ".repeat(20)
+    );
+    let md = html::to_markdown(&html::main_content(&page)).unwrap();
+    assert!(md.starts_with("# Krakow: three more found"), "{md}");
+}
+
+#[test]
+fn saved_page_links_resolve_against_its_address() {
+    let base = "https://de.wikipedia.org/wiki/Berlin?x=1";
+    assert_eq!(
+        html::resolve(base, "/static/a.png"),
+        "https://de.wikipedia.org/static/a.png"
+    );
+    assert_eq!(
+        html::resolve(base, "//upload.wikimedia.org/b.png"),
+        "https://upload.wikimedia.org/b.png"
+    );
+    assert_eq!(
+        html::resolve(base, "img/c.png"),
+        "https://de.wikipedia.org/wiki/img/c.png"
+    );
+    assert_eq!(
+        html::resolve(base, "../d.png?v=2"),
+        "https://de.wikipedia.org/d.png?v=2"
+    );
+    let page = "<html><head><link rel=\"canonical\" href=\"https://ex.org/news/a.html\"></head><body><img src=\"/logo.png\"><img src=\"https://cdn.ex.org/x.jpg\"></body></html>";
+    let address = html::page_address(page);
+    assert_eq!(address.as_deref(), Some("https://ex.org/news/a.html"));
+    let fixed = html::absolute_pictures(page, None, address.as_deref());
+    assert!(fixed.contains("src=\"https://ex.org/logo.png\""), "{fixed}");
+    assert!(fixed.contains("src=\"https://cdn.ex.org/x.jpg\""));
 }
