@@ -28,11 +28,12 @@ pub static OP: Op = Op {
 
 fn run(job: &Job) -> Result<OpResult> {
     let input = job.input();
-    let md = String::from_utf8_lossy(input.bytes()?).to_string();
+    let source = String::from_utf8_lossy(input.bytes()?).to_string();
+    let (_, md) = deft_tools_doc::markdown::split_front_matter(&source);
     let base = input
         .path
         .as_ref()
         .and_then(|x| x.parent())
         .map(|x| x.to_path_buf());
-    markdown_pdf(job, &md, base.as_deref())
+    markdown_pdf(job, md, base.as_deref())
 }

@@ -35,16 +35,20 @@ pub static OP: Op = Op {
 fn run(job: &Job) -> Result<OpResult> {
     let p = job.params;
     let input = job.input();
-    let md = String::from_utf8_lossy(input.bytes()?).to_string();
+    let source = String::from_utf8_lossy(input.bytes()?).to_string();
+    let (meta, md) = deft_tools_doc::markdown::split_front_matter(&source);
     let base = input.path.as_ref().and_then(|x| x.parent());
-    let mut blocks = deft_tools_doc::markdown::parse(&md);
+    let mut blocks = deft_tools_doc::markdown::parse(md);
     let (images, mut warnings) = load_images(&mut blocks, base);
     let (fallbacks, problems) = svg_fallbacks(&images);
     warnings.extend(problems);
     let doc = Document {
         fallbacks,
-        title: p.opt_text("title").or_else(|| deft_tools_text::title(&md)),
-        author: p.opt_text("author"),
+        title: p
+            .opt_text("title")
+            .or(meta.title)
+            .or_else(|| deft_tools_text::title(md)),
+        author: p.opt_text("author").or(meta.author),
         blocks,
         images,
         ..Default::default()

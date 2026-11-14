@@ -1,4 +1,4 @@
-use super::_common::{IN, MAIN, content, text};
+use super::_common::{IN, MAIN, content_with_pictures, text};
 use crate::generated::md::_common::{load_images, svg_fallbacks};
 use deft_core::prelude::*;
 use deft_tools_doc::Document;
@@ -22,7 +22,7 @@ pub static OP: Op = Op {
 };
 
 fn run(job: &Job) -> Result<OpResult> {
-    let md = deft_tools_doc::html::to_markdown(&content(job)?)?;
+    let md = deft_tools_doc::html::to_markdown(&content_with_pictures(job)?)?;
     let mut blocks = deft_tools_doc::markdown::parse(&md);
     let base = job.input().path.as_ref().and_then(|p| p.parent());
     let (images, mut warnings) = load_images(&mut blocks, base);

@@ -1,4 +1,4 @@
-use super::_common::load_images;
+use super::_common::load_images_named;
 use deft_core::prelude::*;
 use deft_tools_doc::epub::{NewBook, chapter_name, write};
 
@@ -50,11 +50,19 @@ fn run(job: &Job) -> Result<OpResult> {
     let mut parts: Vec<(String, Vec<String>)> = Vec::new();
     let mut images = Vec::new();
     let mut warnings = Vec::new();
+    let mut front: Option<deft_tools_doc::markdown::FrontMatter> = None;
+    // Web pictures, downloaded into the book, by address.
+    let mut web_names: Vec<(String, String)> = Vec::new();
     for input in &job.inputs {
-        let md = String::from_utf8_lossy(input.bytes()?).to_string();
+        let source = String::from_utf8_lossy(input.bytes()?).to_string();
+        let (meta, md) = deft_tools_doc::markdown::split_front_matter(&source);
+        if front.is_none() {
+            front = Some(meta);
+        }
         let base = input.path.as_ref().and_then(|x| x.parent());
-        let mut blocks = deft_tools_doc::markdown::parse(&md);
-        let (found, problems) = load_images(&mut blocks, base);
+        let mut blocks = deft_tools_doc::markdown::parse(md);
+        let (found, problems, named) = load_images_named(&mut blocks, base);
+        web_names.extend(named);
         warnings.extend(problems);
         for image in found {
             if !images
@@ -65,8 +73,8 @@ fn run(job: &Job) -> Result<OpResult> {
             }
         }
         // Anchors are counted over the whole file, as `md toc` counts them.
-        let mut ids = deft_tools_text::heading_ids(&md).into_iter();
-        for chapter in chapters(&md) {
+        let mut ids = deft_tools_text::heading_ids(md).into_iter();
+        for chapter in chapters(md) {
             let n = deft_tools_text::heading_ids(&chapter).len();
             let own: Vec<String> = ids.by_ref().take(n).collect();
             parts.push((chapter, own));
@@ -83,6 +91,7 @@ fn run(job: &Job) -> Result<OpResult> {
         .iter()
         .map(|(md, ids)| {
             let mut html = deft_tools_text::html_fragment(md, ids);
+            html = web_pictures_by_name(&html, &web_names);
             // Paths inside the book are flat, so only file names remain.
             for image in &images {
                 let quoted = format!("/{}\"", image.name);
@@ -111,11 +120,13 @@ fn run(job: &Job) -> Result<OpResult> {
     }
     let list: Vec<(String, String)> = titles.into_iter().zip(cleaned.bodies).collect();
     let first = parts.first().and_then(|(m, _)| deft_tools_text::title(m));
+    let front = front.unwrap_or_default();
     let title = p
         .opt_text("title")
+        .or(front.title)
         .or(first)
         .unwrap_or_else(|| job.input().stem());
-    let author = p.opt_text("author");
+    let author = p.opt_text("author").or(front.author);
     let n = list.len();
     let bytes = write(&NewBook {
         title: &title,
@@ -129,4 +140,21 @@ fn run(job: &Job) -> Result<OpResult> {
         .note(format!("{n} chapters"));
     res.warnings = warnings;
     Ok(res)
+}
+
+/// The page with each downloaded web picture linked by its name in the book.
+fn web_pictures_by_name(html: &str, names: &[(String, String)]) -> String {
+    if names.is_empty() {
+        return html.to_string();
+    }
+    let same = |a: &str| deft_core::value::percent_decode(&deft_core::text::unescape_attribute(a));
+    let names: Vec<(String, &String)> = names.iter().map(|(u, n)| (same(u), n)).collect();
+    let mut out = html.to_string();
+    for range in deft_tools_text::img_sources(html).into_iter().rev() {
+        let src = same(&html[range.clone()]);
+        if let Some((_, name)) = names.iter().find(|(u, _)| *u == src) {
+            out.replace_range(range, name);
+        }
+    }
+    out
 }

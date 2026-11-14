@@ -31,19 +31,35 @@ const CLOSE: &str = "<!-- /toc -->";
 fn entries(headings: &[deft_tools_doc::markdown::Heading], depth: usize) -> Vec<String> {
     let mut anchors = deft_core::text::Anchors::default();
     let mut out = Vec::new();
+    let title = has_title(headings);
+    let top = headings
+        .iter()
+        .skip(usize::from(title))
+        .map(|h| h.level)
+        .min()
+        .unwrap_or(1);
     for (i, h) in headings.iter().enumerate() {
         let anchor = anchors.next(&h.plain);
         // A leading title names the document, so it is not an entry.
-        let is_title = i == 0 && h.level == 1;
-        if !is_title && h.level <= depth {
+        if !(title && i == 0) && h.level <= depth {
             out.push(format!(
                 "{}- [{}](#{anchor})",
-                "  ".repeat(h.level.saturating_sub(2)),
+                "  ".repeat(h.level.saturating_sub(top)),
                 h.label
             ));
         }
     }
     out
+}
+
+/// Whether the first heading is the document's title: a level-one heading,
+/// or one of any level or syntax that every later heading is below, as a
+/// README's underlined title or an mdBook chapter's "## Title" is.
+fn has_title(headings: &[deft_tools_doc::markdown::Heading]) -> bool {
+    let Some(first) = headings.first() else {
+        return false;
+    };
+    first.level == 1 || (headings.len() > 1 && headings[1..].iter().all(|h| h.level > first.level))
 }
 
 fn run(job: &Job) -> Result<OpResult> {
@@ -68,8 +84,9 @@ fn run(job: &Job) -> Result<OpResult> {
         lines.splice(i..=end, [block]);
     } else {
         let first = &headings[0];
+        let title = has_title(&headings);
         // Under a title, or above the first section when there is no title.
-        let at = if first.level == 1 {
+        let at = if title {
             first.end_line + 1
         } else {
             first.line
@@ -77,7 +94,7 @@ fn run(job: &Job) -> Result<OpResult> {
         let at = at.min(lines.len());
         lines.insert(
             at,
-            if first.level == 1 {
+            if title {
                 format!("\n{block}")
             } else {
                 format!("{block}\n")
