@@ -19,6 +19,7 @@ pub fn to_markdown(html: &str) -> Result<String> {
         .build();
     let tree = converter.html_to_tree(html).map_err(|e| bad("html", e))?;
     mark_bangs(&tree);
+    fit_emphasis(&tree);
     let text = converter.tree_to_markdown(&tree);
     Ok(tidy(&text).replace(BANG, "\\!"))
 }
@@ -32,7 +33,7 @@ fn mark_bangs(node: &Handle) {
     for (i, c) in kids.iter().enumerate() {
         if let NodeData::Text { contents } = &c.data
             && contents.borrow().ends_with('!')
-            && kids.get(i + 1).is_some_and(|n| dom::is(n, &["a"]))
+            && kids.get(i + 1).is_some_and(starts_with_link)
         {
             let mut t = contents.borrow_mut();
             let keep = t.len() - 1;
@@ -44,10 +45,145 @@ fn mark_bangs(node: &Handle) {
     }
 }
 
+/// Whether Markdown for a node starts with a link: a link, or an inline
+/// element such as `<sup>` whose first content is one, as note markers are.
+fn starts_with_link(node: &Handle) -> bool {
+    if dom::is(node, &["a"]) {
+        return true;
+    }
+    if !dom::is(
+        node,
+        &[
+            "sup", "sub", "span", "small", "b", "strong", "i", "em", "cite",
+        ],
+    ) {
+        return false;
+    }
+    let first = dom::children(node).into_iter().find(|c| match &c.data {
+        NodeData::Text { contents } => !contents.borrow().is_empty(),
+        _ => dom::tag(c).is_some(),
+    });
+    first.is_some_and(|c| starts_with_link(&c))
+}
+
+/// Bold and italic that Markdown can show. A delimiter between punctuation
+/// and a letter is not one, so `<b>二、</b>将` would print its asterisks:
+/// punctuation at the edge of such an element moves outside it, and an
+/// element of punctuation alone, such as a bold separator, loses its style.
+fn fit_emphasis(node: &Handle) {
+    const EMPHASIS: &[&str] = &["b", "strong", "i", "em", "s", "del", "strike"];
+    for e in dom::descendants(node) {
+        if !dom::is(&e, EMPHASIS)
+            || dom::ancestors(&e)
+                .iter()
+                .any(|a| dom::is(a, &["pre", "code"]))
+        {
+            continue;
+        }
+        // <b>a</b><b>b</b> would meet as "****": one element instead.
+        while let Some(parent) = dom::parent(&e) {
+            let kids = dom::children(&parent);
+            let Some(at) = kids.iter().position(|k| std::rc::Rc::ptr_eq(k, &e)) else {
+                break;
+            };
+            match kids.get(at + 1) {
+                Some(next) if dom::tag(next) == dom::tag(&e) => {
+                    for c in dom::children(next) {
+                        c.parent.set(Some(std::rc::Rc::downgrade(&e)));
+                        e.children.borrow_mut().push(c);
+                    }
+                    next.children.borrow_mut().clear();
+                    dom::detach(next);
+                }
+                _ => break,
+            }
+        }
+        if dom::parent(&e).is_none() {
+            continue;
+        }
+        let text = dom::text(&e);
+        let inner =
+            text.trim_matches(|c: char| c.is_whitespace() || crate::markdown::is_punctuation(c));
+        if inner.is_empty() {
+            if !text.trim().is_empty() {
+                dom::unwrap(&e);
+            }
+            continue;
+        }
+        let Some(parent) = dom::parent(&e) else {
+            continue;
+        };
+        let kids = dom::children(&parent);
+        let Some(at) = kids.iter().position(|k| std::rc::Rc::ptr_eq(k, &e)) else {
+            continue;
+        };
+        let wordy = |c: Option<char>| {
+            c.is_some_and(|c| !c.is_whitespace() && !crate::markdown::is_punctuation(c))
+        };
+        // The letters beside it, past empty elements.
+        let before = kids[..at]
+            .iter()
+            .rev()
+            .find_map(|k| dom::text(k).chars().last());
+        let after = kids[at + 1..]
+            .iter()
+            .find_map(|k| dom::text(k).chars().next());
+        let body = text.trim();
+        // A link, picture or code at the edge starts or ends with Markdown's
+        // own punctuation, which cannot move out: such emphasis goes.
+        let edge = |first: bool| {
+            let kids = dom::children(&e);
+            let meaningful = |c: &Handle| match &c.data {
+                NodeData::Text { contents } => !contents.borrow().trim().is_empty(),
+                _ => dom::tag(c).is_some(),
+            };
+            let pick = if first {
+                kids.iter().find(|c| meaningful(c))
+            } else {
+                kids.iter().rev().find(|c| meaningful(c))
+            };
+            pick.is_some_and(|c| dom::is(c, &["a", "img", "code"]))
+        };
+        if (wordy(before) && edge(true)) || (wordy(after) && edge(false)) {
+            dom::unwrap(&e);
+            continue;
+        }
+        if wordy(before) && body.starts_with(crate::markdown::is_punctuation) {
+            let lead: String = body
+                .chars()
+                .take_while(|c| crate::markdown::is_punctuation(*c))
+                .collect();
+            if dom::strip_text(&e, &lead, true) {
+                dom::insert_text(&parent, at, &lead);
+            }
+        }
+        if wordy(after) && body.ends_with(crate::markdown::is_punctuation) {
+            let kids = dom::children(&parent);
+            let at = kids
+                .iter()
+                .position(|k| std::rc::Rc::ptr_eq(k, &e))
+                .unwrap_or(at);
+            let mut trail: Vec<char> = body
+                .chars()
+                .rev()
+                .take_while(|c| crate::markdown::is_punctuation(*c))
+                .collect();
+            trail.reverse();
+            let trail: String = trail.into_iter().collect();
+            if dom::strip_text(&e, &trail, false) {
+                dom::insert_text(&parent, at + 1, &trail);
+            }
+        }
+    }
+}
+
 /// Preformatted text is code: its content is kept as it is, in a fence.
 fn pre(_: &dyn htmd::element_handler::Handlers, e: htmd::Element) -> Option<HandlerResult> {
     let code = dom::text(e.node);
     let code = code.trim_end_matches(['\n', ' ', '\t']);
+    if code.trim().is_empty() {
+        return Some(String::new().into());
+    }
     let language = std::iter::once(e.node.clone())
         .chain(dom::children(e.node))
         .filter_map(|n| dom::attr(&n, "class"))
@@ -134,6 +270,10 @@ pub fn main_content(html: &str) -> String {
         .into_iter()
         .filter(|n| dom::is(n, &["h1"]))
         .collect();
+    let title_texts: Vec<String> = titles
+        .iter()
+        .map(|t| dom::text(t).trim().to_string())
+        .collect();
     prune(&doc, total, &titles);
     drop_furniture_sections(&doc, total);
     let root = choose_root(&doc);
@@ -147,11 +287,64 @@ pub fn main_content(html: &str) -> String {
         traversal_scope: html5ever::serialize::TraversalScope::IncludeNode,
         ..Default::default()
     };
+    // A headline set outside the article, in the page's header, goes first.
+    let squash = |t: &str| -> String {
+        t.chars()
+            .filter(|c| c.is_alphanumeric())
+            .flat_map(char::to_lowercase)
+            .collect()
+    };
+    let headline =
+        headline(&title_texts, html).filter(|h| !squash(&dom::text(&root)).contains(&squash(h)));
     let handle: markup5ever_rcdom::SerializableHandle = root.into();
     if html5ever::serialize(&mut out, &handle, opts).is_err() {
         return html.to_string();
     }
-    String::from_utf8_lossy(&out).into_owned()
+    let body = String::from_utf8_lossy(&out).into_owned();
+    match headline {
+        Some(h) => format!("<h1>{}</h1>\n{body}", escape_html(&h)),
+        None => body,
+    }
+}
+
+fn escape_html(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+/// The page's headline among its `<h1>` texts: the one that its og:title or
+/// `<title>` holds, as "Headline | Site" does, else the first.
+fn headline(h1s: &[String], html: &str) -> Option<String> {
+    let squash = |t: &str| -> String {
+        t.chars()
+            .filter(|c| c.is_alphanumeric())
+            .flat_map(char::to_lowercase)
+            .collect()
+    };
+    let page = squash(&og_title(html).or_else(|| title(html)).unwrap_or_default());
+    let h1s: Vec<String> = h1s
+        .iter()
+        .map(|h| h.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|h| !h.is_empty())
+        .collect();
+    let matching = h1s.iter().find(|h| {
+        let t = squash(h);
+        !t.is_empty() && !page.is_empty() && (page.contains(&t) || t.contains(&page))
+    });
+    matching.or(h1s.first()).cloned()
+}
+
+/// The `og:title` a page declares for sharing.
+fn og_title(html: &str) -> Option<String> {
+    let lower = html.to_ascii_lowercase();
+    let at = lower.find("og:title")?;
+    let start = lower[..at].rfind('<')?;
+    let end = start + lower[start..].find('>')?;
+    let tag = &html[start..end];
+    let r = deft_core::text::attribute(tag, "content")?;
+    let t = deft_core::text::unescape_attribute(tag[r].trim());
+    (!t.is_empty()).then_some(t)
 }
 
 /// Characters of running text under a node: paragraphs and code, less
@@ -261,6 +454,13 @@ fn is_furniture(n: &Handle, holds_title: bool) -> bool {
         && dom::ancestors(n).iter().any(|a| dom::is(a, &["article"]))
         && dom::text(n).trim().chars().count() < 200
         && link_density(n) < 0.5
+    {
+        return false;
+    }
+    // Footnotes and endnotes as Sphinx and docutils write them.
+    if dom::is(n, &["aside"])
+        && (dom::attr(n, "class").is_some_and(|c| c.to_ascii_lowercase().contains("footnote"))
+            || dom::attr(n, "role").is_some_and(|r| r.starts_with("doc-")))
     {
         return false;
     }
@@ -411,7 +611,12 @@ fn drop_furniture_sections(doc: &Handle, total: usize) {
             continue;
         }
         while let Some(up) = dom::parent(&block) {
-            if dom::is(&up, &["main", "article", "body", "html"]) || headings(&up) > 1 {
+            // Not past the largest block that is still small: one more step
+            // could take in the article.
+            if dom::is(&up, &["main", "article", "body", "html"])
+                || headings(&up) > 1
+                || prose(&up) * 4 > total.max(1)
+            {
                 break;
             }
             block = up;
@@ -486,7 +691,11 @@ fn choose_root(doc: &Handle) -> Handle {
                     .any(|a| std::rc::Rc::ptr_eq(a, &root))
                 && !std::rc::Rc::ptr_eq(h, &root)
         });
-        if extra * 10 > text(&root) && !(title_outside && extra * 10 <= text(&root) * 3) {
+        // A root that holds its headline needs no more; what a long article
+        // may take in around it is capped, or it climbs into the page.
+        let has_h1 = dom::descendants(&root).iter().any(|d| dom::is(d, &["h1"]));
+        let limit = (text(&root) / 10).min(400);
+        if extra > limit && !(title_outside && !has_h1 && extra * 10 <= text(&root) * 3) {
             break;
         }
         let at_main = dom::is(&up, &["main"]);
@@ -593,4 +802,122 @@ pub fn title(html: &str) -> Option<String> {
     let end = start + lower[start..].find("</title")?;
     let t = html[start..end].trim();
     (!t.is_empty()).then(|| t.to_string())
+}
+
+/// The address a saved page came from: its `<base href>`, canonical link or
+/// og:url, when absolute.
+pub fn page_address(html: &str) -> Option<String> {
+    use deft_core::text::{attribute, unescape_attribute};
+    let lower = html.to_ascii_lowercase();
+    let head = &lower[..lower.find("</head").unwrap_or(lower.len())];
+    let tags = |name: &str| -> Vec<std::ops::Range<usize>> {
+        let open = format!("<{name}");
+        let mut out = Vec::new();
+        let mut from = 0;
+        while let Some(at) = head[from..].find(&open) {
+            let start = from + at;
+            let end = head[start..]
+                .find('>')
+                .map_or(head.len(), |e| start + e + 1);
+            out.push(start..end);
+            from = end;
+        }
+        out
+    };
+    let value =
+        |tag: &str, name: &str| attribute(tag, name).map(|r| unescape_attribute(tag[r].trim()));
+    let absolute = |u: &String| u.starts_with("http://") || u.starts_with("https://");
+    let mut found: Vec<String> = Vec::new();
+    for r in tags("base") {
+        found.extend(value(&html[r], "href"));
+    }
+    for r in tags("link") {
+        let tag = &html[r];
+        if value(tag, "rel").is_some_and(|v| v.eq_ignore_ascii_case("canonical")) {
+            found.extend(value(tag, "href"));
+        }
+    }
+    for r in tags("meta") {
+        let tag = &html[r];
+        if value(tag, "property").is_some_and(|v| v.eq_ignore_ascii_case("og:url")) {
+            found.extend(value(tag, "content"));
+        }
+    }
+    found.into_iter().find(absolute)
+}
+
+/// A link resolved against the address of the page it is on.
+pub fn resolve(base: &str, link: &str) -> String {
+    let scheme_end = base.find("://").map_or(0, |i| i + 3);
+    let origin_end = base[scheme_end..]
+        .find('/')
+        .map_or(base.len(), |i| scheme_end + i);
+    if link.starts_with("//") {
+        return format!("{}{link}", &base[..scheme_end.saturating_sub(2)]);
+    }
+    let path = if link.starts_with('/') {
+        link.to_string()
+    } else {
+        let dir_end = base[..base.find(['?', '#']).unwrap_or(base.len())]
+            .rfind('/')
+            .filter(|i| *i >= origin_end)
+            .map_or(origin_end, |i| i + 1);
+        let dir = &base[origin_end..dir_end];
+        format!("{}{link}", if dir.is_empty() { "/" } else { dir })
+    };
+    let (path, rest) = path.split_at(path.find(['?', '#']).unwrap_or(path.len()));
+    let mut parts: Vec<&str> = Vec::new();
+    for seg in path.split('/') {
+        match seg {
+            "." => {}
+            ".." => {
+                if parts.len() > 1 {
+                    parts.pop();
+                }
+            }
+            s => parts.push(s),
+        }
+    }
+    format!("{}{}{rest}", &base[..origin_end], parts.join("/"))
+}
+
+/// A saved page with its pictures made absolute where the file beside the
+/// page is not there: `/static/logo.png` on a saved news page is the site's.
+pub fn absolute_pictures(
+    html: &str,
+    folder: Option<&std::path::Path>,
+    address: Option<&str>,
+) -> String {
+    use deft_core::text::{attribute, img_tags};
+    let Some(address) = address else {
+        return html.to_string();
+    };
+    let mut out = html.to_string();
+    for tag in img_tags(html).into_iter().rev() {
+        let Some(r) = attribute(&html[tag.clone()], "src") else {
+            continue;
+        };
+        let range = tag.start + r.start..tag.start + r.end;
+        let src = deft_core::text::unescape_attribute(&html[range.clone()]);
+        let lower = src.trim().to_ascii_lowercase();
+        if src.trim().is_empty()
+            || ["http://", "https://", "//", "data:"]
+                .iter()
+                .any(|p| lower.starts_with(p))
+        {
+            continue;
+        }
+        let local = !src.starts_with('/')
+            && folder.is_some_and(|f| {
+                let path = &src[..src.find(['?', '#']).unwrap_or(src.len())];
+                f.join(path).is_file() || f.join(deft_core::value::percent_decode(path)).is_file()
+            });
+        if !local {
+            let full = resolve(address, src.trim())
+                .replace('&', "&amp;")
+                .replace('"', "&quot;");
+            out.replace_range(range, &full);
+        }
+    }
+    out
 }

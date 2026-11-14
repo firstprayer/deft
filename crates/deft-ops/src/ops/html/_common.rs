@@ -35,6 +35,20 @@ pub const MAIN: ParamSpec = param(
     "Only the article, without site navigation",
 );
 
+/// The page, or its article, for a writer that embeds pictures: pictures
+/// that are not beside the page are the site's, at the page's address.
+pub fn content_with_pictures(job: &Job) -> Result<String> {
+    let page = text(job.input())?;
+    let address = deft_tools_doc::html::page_address(&page);
+    let html = content(job)?;
+    let folder = job.input().path.as_ref().and_then(|p| p.parent());
+    Ok(deft_tools_doc::html::absolute_pictures(
+        &html,
+        folder,
+        address.as_deref(),
+    ))
+}
+
 /// The page, or just its article with `--main`.
 pub fn content(job: &Job) -> Result<String> {
     let html = text(job.input())?;

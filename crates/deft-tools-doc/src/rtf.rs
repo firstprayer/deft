@@ -282,11 +282,17 @@ impl Reader {
             let marker = marker.trim();
             let ordered = marker.chars().next().is_some_and(char::is_alphanumeric)
                 && marker.ends_with(['.', ')']);
+            // The number the writer printed, when it is a plain one.
+            let number = marker
+                .trim_end_matches(['.', ')'])
+                .parse::<u64>()
+                .ok()
+                .filter(|_| ordered);
             crate::docx::add_item(
                 &mut self.blocks,
                 level,
                 ordered,
-                None,
+                number,
                 vec![Block::Paragraph(spans)],
             );
         } else if let Some(level) = heading.filter(|l| (1..=6).contains(l)) {

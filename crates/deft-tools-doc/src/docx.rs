@@ -100,7 +100,7 @@ fn relationships(pkg: &Package, part: &str) -> HashMap<String, (String, bool)> {
 struct Reader<'a> {
     pkg: &'a Package,
     rels: HashMap<String, (String, bool)>,
-    styles: HashMap<String, u8>,
+    styles: Styles,
     numbering: Numbering,
     /// Counters by numbering key, one per level.
     counters: HashMap<String, Vec<u64>>,
@@ -110,6 +110,8 @@ struct Reader<'a> {
     notes: Vec<(String, String)>,
     /// A drop capital waiting for the paragraph it belongs to.
     dropcap: Vec<Span>,
+    /// Styles whose paragraphs mostly read as headings, not sentences.
+    heading_like_styles: std::collections::HashSet<String>,
 }
 
 impl Reader<'_> {
@@ -129,16 +131,15 @@ impl Reader<'_> {
         Some(name)
     }
 
-    /// Whether list `id` is numbered at `level`, and the number Word shows.
-    /// Lists sharing a format count on together, unless one restarts.
-    fn number(&mut self, id: &str, level: usize) -> (bool, u64) {
-        let Some((abs, levels)) = self.numbering.nums.get(id) else {
-            return (false, 1);
-        };
+    /// The level format of list `id` at `level`, the number Word shows
+    /// there, and its whole label, such as "2.1" or "(a)". Lists sharing a
+    /// format count on together, unless one restarts.
+    fn number(&mut self, id: &str, level: usize) -> Option<(Level, u64, String)> {
+        let (abs, levels) = self.numbering.nums.get(id)?;
         let lvl = levels
             .get(level)
             .or(levels.first())
-            .copied()
+            .cloned()
             .unwrap_or_default();
         let restart = self
             .numbering
@@ -163,7 +164,25 @@ impl Reader<'_> {
         counters[level] = n;
         // A deeper level starts again under each new item.
         counters.truncate(level + 1);
-        (lvl.ordered, n)
+        let mut label = lvl.text.clone();
+        for (k, upper) in levels.iter().enumerate().take(9).rev() {
+            let mark = format!("%{}", k + 1);
+            if !label.contains(&mark) {
+                continue;
+            }
+            let value = counters
+                .get(k)
+                .copied()
+                .filter(|v| *v > 0)
+                .unwrap_or(upper.start);
+            let format = if lvl.legal && k < level {
+                "decimal"
+            } else {
+                upper.format.as_str()
+            };
+            label = label.replace(&mark, &format_number(value, format));
+        }
+        Some((lvl, n, label.trim().to_string()))
     }
 
     fn run(&mut self, r: Node, link: Option<&str>, out: &mut Vec<Span>) {
@@ -290,20 +309,66 @@ impl Reader<'_> {
         out
     }
 
-    /// All the text under a node as one line, for a table cell or a note.
-    fn flat(&mut self, node: Node) -> Vec<Span> {
+    /// All the text under a node, its paragraphs joined by `between`: a
+    /// line break in a table cell, a space in a note.
+    fn flat(&mut self, node: Node, between: &str) -> Vec<Span> {
         let mut out = Vec::new();
         for p in paragraphs_in(node) {
-            let spans = self.spans(p);
+            let mut spans = self.spans(p);
+            // A paragraph's own indent is layout.
+            if let Some(first) = spans.first_mut()
+                && first.image.is_none()
+            {
+                first.text = first.text.trim_start_matches([' ', '\t']).to_string();
+            }
+            spans.retain(|s| s.image.is_some() || s.note || !s.text.is_empty());
             if spans.is_empty() {
                 continue;
             }
+            if let Some(label) = self.label_of(p) {
+                spans.insert(0, Span::label(format!("{label} ")));
+            }
             if !out.is_empty() {
-                out.push(Span::plain(" "));
+                out.push(Span::plain(between));
             }
             out.extend(spans);
         }
         out
+    }
+
+    /// The number Word shows before a paragraph in a cell, if it has one
+    /// that is not a bullet.
+    fn label_of(&mut self, p: Node) -> Option<String> {
+        let (id, level) = self.numbered(p)?;
+        let (lvl, _, label) = self.number(&id, level)?;
+        (lvl.ordered && !label.is_empty()).then_some(label)
+    }
+
+    /// The list and level a paragraph is numbered with, directly or through
+    /// its style.
+    fn numbered(&self, p: Node) -> Option<(String, usize)> {
+        let ppr = w(p, "pPr");
+        let style = ppr
+            .and_then(|x| w(x, "pStyle"))
+            .and_then(|s| s.attribute((W, "val")))
+            .unwrap_or("");
+        let own = ppr.and_then(|x| w(x, "numPr"));
+        let val = |n: Option<Node>, name: &str| {
+            n.and_then(|x| w(x, name))
+                .and_then(|x| x.attribute((W, "val")))
+                .map(String::from)
+        };
+        let from_style = self.styles.numbering(style);
+        let id = val(own, "numId").or_else(|| from_style.as_ref().map(|s| s.0.clone()))?;
+        if id == "0" || id.is_empty() {
+            return None;
+        }
+        let level = val(own, "ilvl")
+            .and_then(|v| v.parse().ok())
+            .or_else(|| from_style.as_ref().and_then(|s| s.1))
+            .or_else(|| self.numbering.style_levels.get(style).copied())
+            .unwrap_or(0);
+        Some((id, level.min(8)))
     }
 
     /// Rows of a table or cells of a row, also when a content control wraps them.
@@ -329,6 +394,69 @@ impl Reader<'_> {
                     out.push(t);
                 }
                 "sdt" | "sdtContent" | "customXml" => self.blocks(node, out),
+                _ => {}
+            }
+        }
+    }
+
+    /// The page header of the first page, when it holds more than page
+    /// numbers: a résumé or a letterhead keeps its name and contact details
+    /// there. Footers, mostly page numbers and notices, are left out.
+    fn header(&mut self, doc: &Xml, blocks: &mut Vec<Block>) {
+        let Some(sect) = doc
+            .descendants()
+            .find(|n| n.tag_name().name() == "sectPr" && n.tag_name().namespace() == Some(W))
+        else {
+            return;
+        };
+        let title_page = w(sect, "titlePg")
+            .is_some_and(|t| !matches!(t.attribute((W, "val")), Some("0" | "false")));
+        let of_kind = |kind: &str| {
+            sect.children()
+                .filter(|c| c.tag_name().name() == "headerReference")
+                .find(|r| r.attribute((W, "type")).unwrap_or("default") == kind)
+                .and_then(|r| r.attribute((R, "id")))
+                .and_then(|id| self.rels.get(id))
+                .map(|(target, _)| join("word/document.xml", target))
+        };
+        let mut parts = Vec::new();
+        if title_page {
+            parts.extend(of_kind("first"));
+        }
+        parts.extend(of_kind("default"));
+        let document_rels = std::mem::take(&mut self.rels);
+        for part in parts {
+            let Some(text) = self.pkg.text(&part) else {
+                continue;
+            };
+            let Ok(xml) = Xml::parse(&text) else {
+                continue;
+            };
+            self.rels = relationships(self.pkg, &part);
+            let mut found = Vec::new();
+            self.header_blocks(xml.root_element(), &mut found);
+            if !found.is_empty() {
+                blocks.extend(found);
+                break;
+            }
+        }
+        self.rels = document_rels;
+    }
+
+    fn header_blocks(&mut self, parent: Node, out: &mut Vec<Block>) {
+        for node in parent.children().filter(Node::is_element) {
+            match node.tag_name().name() {
+                // A page number, and text boxes, which hold watermarks.
+                "p" if !page_field(node) => self.own_text(node, out),
+                "tbl" => {
+                    let t = self.table(node);
+                    let empty = matches!(&t, Block::Table(rows, _)
+                        if rows.iter().flatten().flatten().all(|s| s.text.trim().is_empty() && s.image.is_none()));
+                    if !empty {
+                        out.push(t);
+                    }
+                }
+                "sdt" | "sdtContent" | "customXml" => self.header_blocks(node, out),
                 _ => {}
             }
         }
@@ -365,7 +493,7 @@ impl Reader<'_> {
             });
             let Some(note) = found else { continue };
             let mut spans = vec![Span::note(format!("[{at}]:")), Span::plain(" ")];
-            let mut body = self.flat(note);
+            let mut body = self.flat(note, " ");
             // Word starts a note with a space after its number.
             if let Some(first) = body.first_mut() {
                 first.text = first.text.trim_start().to_string();
@@ -421,7 +549,7 @@ impl Reader<'_> {
                         cols: span,
                     });
                 }
-                row.push(self.flat(tc));
+                row.push(self.flat(tc, "\n"));
                 row.extend(std::iter::repeat_n(vec![], span - 1));
             }
             for _ in 0..count(trpr.and_then(|p| w(p, "gridAfter")))
@@ -449,7 +577,6 @@ impl Reader<'_> {
             .and_then(|x| w(x, "pStyle"))
             .and_then(|s| s.attribute((W, "val")))
             .unwrap_or("");
-        let num = ppr.and_then(|x| w(x, "numPr"));
         let breaks_page = p
             .descendants()
             .any(|d| d.tag_name().name() == "br" && d.attribute((W, "type")) == Some("page"));
@@ -474,30 +601,60 @@ impl Reader<'_> {
             first.append(&mut spans);
             spans = first;
         }
-        if let Some(level) = self.styles.get(style) {
-            if *level == 0 {
-                blocks.push(Block::Heading(1, spans));
-            } else {
-                blocks.push(Block::Heading(*level, spans));
-            }
+        // A paragraph's own indent is layout, and Markdown would read it as code.
+        if let Some(first) = spans.first_mut()
+            && first.image.is_none()
+        {
+            first.text = first.text.trim_start_matches([' ', '\t']).to_string();
+        }
+        spans.retain(|s| s.image.is_some() || s.note || !s.text.is_empty());
+        if spans.is_empty() {
             return;
         }
-        if let Some(n) = num {
-            let id = w(n, "numId")
-                .and_then(|x| x.attribute((W, "val")))
-                .unwrap_or("");
-            let level = w(n, "ilvl")
-                .and_then(|x| x.attribute((W, "val")))
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(0);
-            let (ordered, number) = self.number(id, level);
-            add_item(
-                blocks,
-                level,
-                ordered,
-                ordered.then_some(number),
-                vec![Block::Paragraph(spans)],
-            );
+        let own_outline = ppr
+            .and_then(|x| w(x, "outlineLvl"))
+            .and_then(|o| o.attribute((W, "val")))
+            .and_then(|v| v.parse::<u8>().ok())
+            .filter(|v| *v < 9);
+        // An outline level makes a heading in Word's navigation pane. A
+        // style that sets one for clauses of running text, as contracts do
+        // for "1.1", is not a heading style: most of its paragraphs read as
+        // sentences.
+        let text: String = spans.iter().map(|s| s.text.as_str()).collect();
+        let heading = match (self.styles.heading(style), own_outline) {
+            (Some((level, true)), _) => Some(level),
+            (_, Some(own)) if headline_like(&text) => Some(own + 1),
+            (Some((level, false)), None) if self.heading_like_styles.contains(style) => Some(level),
+            _ => None,
+        };
+        // A list the numbering part does not define shows bullets.
+        let numbered = self.numbered(p).map(|(id, level)| {
+            let (lvl, n, label) = self.number(&id, level).unwrap_or_default();
+            (level, lvl, n, label)
+        });
+        if let Some(level) = heading {
+            if let Some((_, lvl, _, label)) = &numbered
+                && lvl.ordered
+                && !label.is_empty()
+            {
+                spans.insert(0, Span::label(format!("{label} ")));
+            }
+            blocks.push(Block::Heading(level.clamp(1, 6), spans));
+            return;
+        }
+        if let Some((level, lvl, n, label)) = numbered {
+            // A plain "1." numbers a Markdown list; "2.1", "(a)" or "Article
+            // 3" stay with the paragraph as its text.
+            if !lvl.ordered {
+                add_item(blocks, level, false, None, vec![Block::Paragraph(spans)]);
+            } else if lvl.format == "decimal" && lvl.text == format!("%{}.", level + 1) {
+                add_item(blocks, level, true, Some(n), vec![Block::Paragraph(spans)]);
+            } else {
+                if !label.is_empty() {
+                    spans.insert(0, Span::label(format!("{label} ")));
+                }
+                blocks.push(Block::Paragraph(spans));
+            }
             return;
         }
         let lower = style.to_lowercase();
@@ -512,45 +669,165 @@ impl Reader<'_> {
     }
 }
 
-/// Style id -> heading level, from styles.xml.
-fn heading_styles(pkg: &Package) -> HashMap<String, u8> {
-    let mut out = HashMap::new();
-    for n in 1..=9u8 {
-        out.insert(format!("Heading{n}"), n);
-        out.insert(format!("heading{n}"), n);
+/// Whether text reads as a heading: short, and not ending as a sentence or
+/// a lead-in does.
+fn headline_like(text: &str) -> bool {
+    let t = text.trim();
+    !t.is_empty()
+        && t.chars().count() <= 120
+        && !t.ends_with(['.', ';', ':', ',', '。', '；', '：', '，'])
+}
+
+/// The styles of the document whose paragraphs are mostly heading-like.
+fn heading_like_styles(doc: &Xml) -> std::collections::HashSet<String> {
+    let mut counts: HashMap<String, (usize, usize)> = HashMap::new();
+    for p in doc
+        .descendants()
+        .filter(|d| d.tag_name().name() == "p" && d.tag_name().namespace() == Some(W))
+    {
+        let Some(style) = w(p, "pPr")
+            .and_then(|x| w(x, "pStyle"))
+            .and_then(|s| s.attribute((W, "val")))
+        else {
+            continue;
+        };
+        let text: String = p
+            .descendants()
+            .filter(|d| d.tag_name().name() == "t")
+            .filter_map(|d| d.text())
+            .collect();
+        if text.trim().is_empty() {
+            continue;
+        }
+        let entry = counts.entry(style.to_string()).or_default();
+        entry.0 += 1;
+        entry.1 += usize::from(headline_like(&text));
     }
-    out.insert("Title".into(), 1);
+    counts
+        .into_iter()
+        .filter(|(_, (all, like))| *like * 10 >= *all * 8)
+        .map(|(s, _)| s)
+        .collect()
+}
+
+/// Whether a paragraph shows a page number or count.
+fn page_field(p: Node) -> bool {
+    p.descendants().any(|d| {
+        let code = match d.tag_name().name() {
+            "instrText" => d.text().unwrap_or(""),
+            "fldSimple" => d.attribute((W, "instr")).unwrap_or(""),
+            _ => return false,
+        };
+        let code = code.trim_start().to_ascii_uppercase();
+        code.starts_with("PAGE") || code.starts_with("NUMPAGES") || code.starts_with("SECTIONPAGES")
+    })
+}
+
+/// What the styles of styles.xml say about headings and numbering.
+#[derive(Default)]
+struct Styles {
+    /// Style id -> (name, based on, numbering (numId, level), outline level).
+    defs: HashMap<String, StyleDef>,
+}
+
+#[derive(Default)]
+struct StyleDef {
+    name: String,
+    based_on: Option<String>,
+    num: Option<(String, Option<usize>)>,
+    outline: Option<u8>,
+}
+
+impl Styles {
+    /// The style and the styles it is based on, nearest first.
+    fn chain(&self, id: &str) -> Vec<&StyleDef> {
+        let mut out = Vec::new();
+        let mut at = Some(id.to_string());
+        while let Some(id) = at {
+            let Some(def) = self.defs.get(&id) else { break };
+            if out.len() > 20 {
+                break;
+            }
+            out.push(def);
+            at = def.based_on.clone();
+        }
+        out
+    }
+
+    /// The heading level of a style, and whether its name says so ("heading
+    /// 2", "Title") rather than only its outline level.
+    fn heading(&self, id: &str) -> Option<(u8, bool)> {
+        let by_name = |name: &str| -> Option<u8> {
+            let lower = name.to_lowercase();
+            if lower == "title" {
+                return Some(1);
+            }
+            lower.strip_prefix("heading")?.trim().parse().ok()
+        };
+        let chain = self.chain(id);
+        // By its name, or by its id when styles.xml does not have it.
+        let named = match chain.first() {
+            Some(def) => by_name(&def.name).or_else(|| by_name(id)),
+            None => by_name(id),
+        };
+        if let Some(n) = named.filter(|n| (1..=9).contains(n)) {
+            return Some((n, true));
+        }
+        chain
+            .iter()
+            .find_map(|d| d.outline)
+            .filter(|o| *o < 9)
+            .map(|o| (o + 1, false))
+    }
+
+    /// The list a style numbers its paragraphs with, through its base styles.
+    fn numbering(&self, id: &str) -> Option<(String, Option<usize>)> {
+        self.chain(id).iter().find_map(|d| d.num.clone())
+    }
+}
+
+fn read_styles(pkg: &Package) -> Styles {
+    let mut out = Styles::default();
     let Some(text) = pkg.text("word/styles.xml") else {
         return out;
     };
     let Ok(doc) = Xml::parse(&text) else {
         return out;
     };
+    let val = |n: Option<Node>| n.and_then(|x| x.attribute((W, "val"))).map(String::from);
     for s in doc.descendants().filter(|n| n.tag_name().name() == "style") {
-        let (Some(id), Some(name)) = (
-            s.attribute((W, "styleId")),
-            w(s, "name").and_then(|n| n.attribute((W, "val"))),
-        ) else {
+        let Some(id) = s.attribute((W, "styleId")) else {
             continue;
         };
-        let lower = name.to_lowercase();
-        if let Some(n) = lower
-            .strip_prefix("heading ")
-            .and_then(|n| n.trim().parse().ok())
-        {
-            out.insert(id.to_string(), n);
-        } else if lower == "title" {
-            out.insert(id.to_string(), 1);
-        }
+        let ppr = w(s, "pPr");
+        let num = ppr.and_then(|p| w(p, "numPr")).and_then(|n| {
+            let id = val(w(n, "numId"))?;
+            Some((id, val(w(n, "ilvl")).and_then(|v| v.parse().ok())))
+        });
+        out.defs.insert(
+            id.to_string(),
+            StyleDef {
+                name: val(w(s, "name")).unwrap_or_default(),
+                based_on: val(w(s, "basedOn")),
+                num,
+                outline: val(ppr.and_then(|p| w(p, "outlineLvl"))).and_then(|v| v.parse().ok()),
+            },
+        );
     }
     out
 }
 
-/// One level of a list format: numbered or not, and its first number.
-#[derive(Clone, Copy, Default)]
+/// One level of a list format.
+#[derive(Clone, Default)]
 struct Level {
     ordered: bool,
     start: u64,
+    /// Word's number format, such as "decimal", "lowerLetter" or "bullet".
+    format: String,
+    /// The label with %1, %2 ... for the numbers of each level, as "%1.%2".
+    text: String,
+    /// Legal numbering: the numbers of the levels above are decimal.
+    legal: bool,
 }
 
 /// Numbering definitions from numbering.xml.
@@ -560,6 +837,81 @@ struct Numbering {
     nums: HashMap<String, (String, Vec<Level>)>,
     /// numId -> level -> start value that restarts the list there.
     restarts: HashMap<String, HashMap<usize, u64>>,
+    /// Style id -> the level of a list that names the style.
+    style_levels: HashMap<String, usize>,
+}
+
+/// A number in one of Word's number formats.
+fn format_number(n: u64, format: &str) -> String {
+    let letters = |upper: bool| {
+        // a ... z, then aa, bb ...
+        let base = if upper { b'A' } else { b'a' };
+        let n = n.max(1) - 1;
+        let letter = (base + (n % 26) as u8) as char;
+        letter.to_string().repeat((n / 26 + 1) as usize)
+    };
+    let roman = |upper: bool| {
+        let mut n = n;
+        let mut out = String::new();
+        for (v, s) in [
+            (1000, "m"),
+            (900, "cm"),
+            (500, "d"),
+            (400, "cd"),
+            (100, "c"),
+            (90, "xc"),
+            (50, "l"),
+            (40, "xl"),
+            (10, "x"),
+            (9, "ix"),
+            (5, "v"),
+            (4, "iv"),
+            (1, "i"),
+        ] {
+            while n >= v {
+                out.push_str(s);
+                n -= v;
+            }
+        }
+        if upper { out.to_uppercase() } else { out }
+    };
+    let chinese = |n: u64| {
+        const D: [&str; 10] = ["〇", "一", "二", "三", "四", "五", "六", "七", "八", "九"];
+        if n >= 100 {
+            return n.to_string();
+        }
+        let (tens, ones) = ((n / 10) as usize, (n % 10) as usize);
+        match (tens, ones) {
+            (0, o) => D[o].to_string(),
+            (1, 0) => "十".to_string(),
+            (1, o) => format!("十{}", D[o]),
+            (t, 0) => format!("{}十", D[t]),
+            (t, o) => format!("{}十{}", D[t], D[o]),
+        }
+    };
+    match format {
+        "lowerLetter" => letters(false),
+        "upperLetter" => letters(true),
+        "lowerRoman" => roman(false),
+        "upperRoman" => roman(true),
+        "decimalZero" if n < 10 => format!("0{n}"),
+        "decimalEnclosedCircle" | "decimalEnclosedCircleChinese" if (1..=20).contains(&n) => {
+            char::from_u32(0x245F + n as u32).map_or(n.to_string(), String::from)
+        }
+        "decimalFullWidth" | "decimalFullWidth2" => n
+            .to_string()
+            .chars()
+            .map(|c| char::from_u32(c as u32 - '0' as u32 + 0xFF10).unwrap_or(c))
+            .collect(),
+        "chineseCounting"
+        | "chineseCountingThousand"
+        | "japaneseCounting"
+        | "ideographTraditional"
+        | "taiwaneseCounting"
+        | "koreanCounting" => chinese(n),
+        "none" | "bullet" => String::new(),
+        _ => n.to_string(),
+    }
 }
 
 fn numbering(pkg: &Package) -> Numbering {
@@ -574,24 +926,65 @@ fn numbering(pkg: &Package) -> Numbering {
         n.and_then(|x| x.attribute((W, "val")))
             .and_then(|v| v.parse::<u64>().ok())
     };
+    let val = |n: Option<Node>| n.and_then(|x| x.attribute((W, "val"))).map(String::from);
+    let level = |l: Node, at: usize| {
+        let format = val(w(l, "numFmt")).unwrap_or_else(|| "decimal".into());
+        Level {
+            ordered: !matches!(format.as_str(), "bullet" | "none"),
+            start: number(w(l, "start")).unwrap_or(1),
+            // Without a label of its own a level shows its number.
+            text: val(w(l, "lvlText")).unwrap_or_else(|| format!("%{}.", at + 1)),
+            legal: w(l, "isLgl").is_some_and(|x| x.attribute((W, "val")) != Some("0")),
+            format,
+        }
+    };
     let mut abstracts = HashMap::new();
     for a in doc
         .descendants()
         .filter(|n| n.tag_name().name() == "abstractNum")
     {
         let id = a.attribute((W, "abstractNumId")).unwrap_or("");
-        let levels: Vec<Level> = a
-            .children()
-            .filter(|c| c.tag_name().name() == "lvl")
-            .map(|l| Level {
-                ordered: w(l, "numFmt")
-                    .and_then(|f| f.attribute((W, "val")))
-                    .unwrap_or("bullet")
-                    != "bullet",
-                start: number(w(l, "start")).unwrap_or(1),
-            })
-            .collect();
+        let mut levels: Vec<Level> = Vec::new();
+        for l in a.children().filter(|c| c.tag_name().name() == "lvl") {
+            let at = l
+                .attribute((W, "ilvl"))
+                .and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or(levels.len())
+                .min(8);
+            if let Some(style) = val(w(l, "pStyle")) {
+                out.style_levels.insert(style, at);
+            }
+            if levels.len() <= at {
+                levels.resize(at + 1, Level::default());
+            }
+            levels[at] = level(l, at);
+        }
         abstracts.insert(id.to_string(), levels);
+    }
+    // A list format can be a numbering style, whose levels are defined by the
+    // format that links to that style.
+    let linked: HashMap<String, String> = doc
+        .descendants()
+        .filter(|n| n.tag_name().name() == "abstractNum")
+        .filter_map(|a| {
+            Some((
+                val(w(a, "styleLink"))?,
+                a.attribute((W, "abstractNumId"))?.to_string(),
+            ))
+        })
+        .collect();
+    for a in doc
+        .descendants()
+        .filter(|n| n.tag_name().name() == "abstractNum")
+    {
+        let id = a.attribute((W, "abstractNumId")).unwrap_or("");
+        if let Some(link) = val(w(a, "numStyleLink"))
+            && let Some(source) = linked.get(&link)
+            && abstracts.get(id).is_none_or(Vec::is_empty)
+            && let Some(levels) = abstracts.get(source).cloned()
+        {
+            abstracts.insert(id.to_string(), levels);
+        }
     }
     for n in doc.descendants().filter(|n| n.tag_name().name() == "num") {
         let id = n.attribute((W, "numId")).unwrap_or("").to_string();
@@ -599,20 +992,28 @@ fn numbering(pkg: &Package) -> Numbering {
             .and_then(|x| x.attribute((W, "val")))
             .unwrap_or("")
             .to_string();
-        let levels = abstracts.get(&abs).cloned().unwrap_or_default();
+        let mut levels = abstracts.get(&abs).cloned().unwrap_or_default();
         for o in n
             .children()
             .filter(|c| c.tag_name().name() == "lvlOverride")
         {
-            let level = o
+            let at = o
                 .attribute((W, "ilvl"))
                 .and_then(|v| v.parse().ok())
-                .unwrap_or(0usize);
+                .unwrap_or(0usize)
+                .min(8);
             if let Some(start) = number(w(o, "startOverride")) {
                 out.restarts
                     .entry(id.clone())
                     .or_default()
-                    .insert(level, start);
+                    .insert(at, start);
+            }
+            // A list can bring its own format for a level.
+            if let Some(l) = w(o, "lvl") {
+                if levels.len() <= at {
+                    levels.resize(at + 1, Level::default());
+                }
+                levels[at] = level(l, at);
             }
         }
         out.nums.insert(id, (abs, levels));
@@ -656,15 +1057,17 @@ pub fn read(bytes: &[u8]) -> Result<Document> {
     let mut reader = Reader {
         pkg: &pkg,
         rels: relationships(&pkg, "word/document.xml"),
-        styles: heading_styles(&pkg),
+        styles: read_styles(&pkg),
         numbering: numbering(&pkg),
         counters: HashMap::new(),
         images: vec![],
         seen: HashMap::new(),
         notes: vec![],
         dropcap: vec![],
+        heading_like_styles: heading_like_styles(&doc),
     };
     let mut blocks = Vec::new();
+    reader.header(&doc, &mut blocks);
     for body in bodies {
         reader.blocks(body, &mut blocks);
     }
@@ -901,7 +1304,7 @@ impl Writer<'_> {
         format!("<w:r><w:rPr>{props}</w:rPr>{body}</w:r>")
     }
 
-    fn picture(&mut self, name: &str) -> String {
+    fn picture(&mut self, name: &str, alt: &str) -> String {
         let Some(image) = self.doc.images.iter().find(|i| i.name == name) else {
             return String::new();
         };
@@ -944,7 +1347,8 @@ impl Writer<'_> {
         );
         let n = self.picture;
         format!(
-            "<w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\"><wp:extent cx=\"{cx}\" cy=\"{cy}\"/><wp:docPr id=\"{n}\" name=\"Picture {n}\"/><a:graphic xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:pic xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:nvPicPr><pic:cNvPr id=\"{n}\" name=\"{}\"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill>{blip}<a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>",
+            "<w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\"><wp:extent cx=\"{cx}\" cy=\"{cy}\"/><wp:docPr id=\"{n}\" name=\"Picture {n}\" descr=\"{}\"/><a:graphic xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:pic xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:nvPicPr><pic:cNvPr id=\"{n}\" name=\"{}\"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill>{blip}<a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>",
+            xml_text(alt),
             xml_text(&file)
         )
     }
@@ -953,7 +1357,7 @@ impl Writer<'_> {
         let mut out = String::new();
         for s in spans {
             if let Some(name) = &s.image {
-                out.push_str(&self.picture(name));
+                out.push_str(&self.picture(name, &s.text));
             } else if let Some(link) = &s.link {
                 let run = self.run(s, "<w:color w:val=\"0563C1\"/><w:u w:val=\"single\"/>");
                 // A link to a heading of this document goes to its bookmark.

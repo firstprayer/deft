@@ -137,7 +137,7 @@ pub fn read(bytes: &[u8]) -> Result<Book> {
             });
         }
         if let Some(html) = pkg.text(path) {
-            chapters.push(html);
+            chapters.push(open_self_closed(&html));
         }
     }
     Ok(Book {
@@ -148,6 +148,30 @@ pub fn read(bytes: &[u8]) -> Result<Book> {
         images,
         cover,
     })
+}
+
+/// A chapter is XHTML, where `<pre/>` or `<div/>` is empty. Read as HTML,
+/// as the reader does, such a tag would open an element that holds the rest
+/// of the chapter, so it is written out as a pair.
+pub(crate) fn open_self_closed(xhtml: &str) -> String {
+    const VOID: &[&str] = &[
+        "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param",
+        "source", "track", "wbr",
+    ];
+    let Ok(re) = regex::Regex::new(
+        r#"<([A-Za-z][\w:.-]*)((?:\s+[^\s<>"'=/]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s<>"']+))?)*)\s*/>"#,
+    ) else {
+        return xhtml.to_string();
+    };
+    re.replace_all(xhtml, |c: &regex::Captures| {
+        let name = &c[1];
+        if VOID.contains(&name.to_ascii_lowercase().as_str()) {
+            c[0].to_string()
+        } else {
+            format!("<{name}{}></{name}>", &c[2])
+        }
+    })
+    .into_owned()
 }
 
 impl Book {

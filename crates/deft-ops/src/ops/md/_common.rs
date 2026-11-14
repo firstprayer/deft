@@ -186,6 +186,36 @@ pub fn svg_fallbacks(
 struct Loaded {
     images: Vec<Image>,
     warnings: Vec<String>,
+    /// Web pictures, downloaded before the document is read.
+    web: std::collections::HashMap<String, std::result::Result<Vec<u8>, String>>,
+    /// Web pictures that could not be had.
+    failed: Vec<String>,
+    /// Picture files that are not there.
+    missing: Vec<String>,
+    /// Web address -> the name its picture goes by.
+    named: Vec<(String, String)>,
+}
+
+/// A file name for a web picture: the last part of its address, with the
+/// extension its bytes call for.
+fn web_name(url: &str, bytes: &[u8]) -> String {
+    let path = url.split(['?', '#']).next().unwrap_or("");
+    let last = path.rsplit('/').next().unwrap_or("");
+    let last = percent_decode(last);
+    let stem: String = last
+        .rsplit_once('.')
+        .map_or(last.as_str(), |(s, _)| s)
+        .chars()
+        .filter(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        .take(60)
+        .collect();
+    let stem = if stem.is_empty() {
+        "picture".to_string()
+    } else {
+        stem
+    };
+    let ext = deft_tools_file::web::picture_extension(bytes).unwrap_or("png");
+    format!("{stem}.{ext}")
 }
 
 impl Loaded {
@@ -219,6 +249,16 @@ pub fn load_images(
     blocks: &mut [deft_tools_doc::Block],
     base: Option<&Path>,
 ) -> (Vec<Image>, Vec<String>) {
+    let (images, warnings, _) = load_images_named(blocks, base);
+    (images, warnings)
+}
+
+/// `load_images`, also giving the name each web picture goes by, for
+/// writers that link pictures by name.
+pub fn load_images_named(
+    blocks: &mut [deft_tools_doc::Block],
+    base: Option<&Path>,
+) -> (Vec<Image>, Vec<String>, Vec<(String, String)>) {
     use deft_tools_doc::{Block, Span};
     fn spans(list: &mut [Span], base: Option<&Path>, out: &mut Loaded) {
         for s in list {
@@ -238,18 +278,28 @@ pub fn load_images(
                         .map_or(path.clone(), |n| n.to_string_lossy().to_string());
                     s.image = Some(out.add(&name, bytes));
                 }
-                // A web image or a missing file: keep its text.
-                None => {
-                    let remote = path.starts_with("http://") || path.starts_with("https://");
-                    out.warnings.push(if remote {
-                        format!("remote image not embedded: {path}")
-                    } else {
-                        format!("image not found: {path}")
-                    });
-                    s.image = None;
-                    if s.text.is_empty() {
-                        s.text = path;
+                None if deft_tools_text::is_web_address(&path) => {
+                    match deft_tools_text::web_picture(&path, &out.web) {
+                        Some(bytes) => {
+                            let name = out.add(&web_name(&path, &bytes), bytes);
+                            out.named.push((path, name.clone()));
+                            s.image = Some(name);
+                        }
+                        // Its alt text stays.
+                        None => {
+                            if !out.failed.contains(&path) {
+                                out.failed.push(path);
+                            }
+                            s.image = None;
+                        }
                     }
+                }
+                // A missing file: its alt text stays.
+                None => {
+                    if !out.missing.contains(&path) {
+                        out.missing.push(path);
+                    }
+                    s.image = None;
                 }
             }
         }
@@ -275,9 +325,36 @@ pub fn load_images(
             }
         }
     }
-    let mut out = Loaded::default();
+    fn addresses(blocks: &[Block], out: &mut Vec<String>) {
+        let spans = |list: &[Span], out: &mut Vec<String>| {
+            out.extend(list.iter().filter_map(|s| s.image.clone()));
+        };
+        for b in blocks {
+            match b {
+                Block::Heading(_, s) | Block::Paragraph(s) => spans(s, out),
+                Block::List { items, .. } => items.iter().for_each(|i| addresses(i, out)),
+                Block::Quote(inner) => addresses(inner, out),
+                Block::Table(rows, _) => rows.iter().flatten().for_each(|c| spans(c, out)),
+                _ => {}
+            }
+        }
+    }
+    let mut urls = Vec::new();
+    addresses(blocks, &mut urls);
+    let mut out = Loaded {
+        web: deft_tools_text::fetch_web_pictures(&urls),
+        ..Default::default()
+    };
     walk(blocks, base, &mut out);
-    (out.images, out.warnings)
+    if !out.missing.is_empty() {
+        out.warnings
+            .push(deft_tools_text::missing_pictures_warning(&out.missing));
+    }
+    if !out.failed.is_empty() {
+        out.warnings
+            .push(deft_tools_text::web_pictures_warning(&out.failed));
+    }
+    (out.images, out.warnings, out.named)
 }
 
 #[cfg(test)]

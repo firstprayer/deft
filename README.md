@@ -55,7 +55,7 @@ deft pdf fill form.pdf --data values.json --flatten -o filled.pdf
 - **Find a command.** `deft` lists groups, `deft pdf` lists commands, `deft pdf compress --help` shows options, and `deft find "shrink pdf"` searches. Each layer has a token budget that tests enforce.
 - **Read one line.** A result starts with `ok`, `partial` or `error`. Add `--json` for structure.
 - **Fix it in one turn.** Errors carry a stable code and a `hint:` with the fix.
-- **Stay safe.** Inputs are never overwritten and writes are atomic. Everything runs locally: deft never touches the network and collects no usage data.
+- **Stay safe.** Inputs are never overwritten and writes are atomic. Deft reads and writes local files and collects no usage data; it goes online only to download pictures a document links to, when it converts that document to PDF, Word or EPUB.
 
 ## Engines
 
