@@ -5,7 +5,10 @@ use deft_tools_pdf::extract::Extracted;
 pub static OP: Op = Op {
     id: "pdf.extract-images",
     summary: "Save embedded pictures, unchanged",
-    details: &["JPEGs come out byte for byte; other images as PNG. Each image appears once."],
+    details: &[
+        "JPEGs come out byte for byte; other images as PNG. Each image appears once.",
+        "A CMYK JPEG becomes an RGB PNG: saved as it is, viewers would show it as a negative.",
+    ],
     input: Input::each(&[Format::Pdf], "pdf"),
     output: Output::many(&[Format::Png, Format::Jpeg], "image"),
     params: &[

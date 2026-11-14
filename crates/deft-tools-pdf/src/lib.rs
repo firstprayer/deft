@@ -1611,6 +1611,41 @@ impl Renderer {
         image::RgbImage::from_raw(pw, ph, rgb)
             .ok_or_else(|| err(ErrorCode::Internal, "render buffer"))
     }
+
+    /// For each box on a page (zero-based), the share of it, from 0 to 1, that
+    /// already has ink: anything clearly darker or more colourful than white.
+    /// Boxes are (left, bottom, right, top) in points from the bottom-left of
+    /// the page as shown. Rendered coarsely, which is enough to see text.
+    pub fn ink(&self, index: usize, boxes: &[[f64; 4]]) -> Result<Vec<f64>> {
+        let pages = self.pdf.pages();
+        let Some(page) = pages.get(index) else {
+            return Ok(vec![0.0; boxes.len()]);
+        };
+        let (w, h) = page.render_dimensions();
+        // About 50 dpi, less for a poster.
+        let dpi = (50.0f64).min((2.0e6 / (w as f64 * h as f64).max(1.0)).sqrt() * 72.0);
+        let img = self.render(index, dpi, u64::MAX)?;
+        let (iw, ih) = (img.width() as f64, img.height() as f64);
+        let (sx, sy) = (iw / w as f64, ih / h as f64);
+        Ok(boxes
+            .iter()
+            .map(|&[l, b, r, t]| {
+                let x0 = (l * sx).floor().clamp(0.0, iw) as u32;
+                let x1 = (r * sx).ceil().clamp(0.0, iw) as u32;
+                let y0 = ((h as f64 - t) * sy).floor().clamp(0.0, ih) as u32;
+                let y1 = ((h as f64 - b) * sy).ceil().clamp(0.0, ih) as u32;
+                let (mut all, mut inked) = (0u32, 0u32);
+                for y in y0..y1 {
+                    for x in x0..x1 {
+                        let px = img.get_pixel(x, y).0;
+                        all += 1;
+                        inked += u32::from(px.iter().any(|&c| c < 195));
+                    }
+                }
+                f64::from(inked) / f64::from(all.max(1))
+            })
+            .collect())
+    }
 }
 
 #[cfg(test)]
