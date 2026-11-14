@@ -136,7 +136,10 @@ fn number_in_name_only(s: &str, n: f64) -> bool {
     let bare_exponent = digits
         .split_once(['e', 'E'])
         .is_some_and(|(m, e)| !m.contains('.') && e.bytes().all(|b| b.is_ascii_digit()));
-    bare_exponent || (whole && format!("{n:.0}") != s)
+    // Excel keeps 15 significant digits; a whole number with more is an id
+    // (an invoice, a card, a tracking number) and stays text.
+    let long = whole && digits.trim_matches('0').len() > 15;
+    bare_exponent || long || (whole && format!("{n:.0}") != s)
 }
 
 pub(crate) fn parse_scalar(s: &str, decimal_comma: bool) -> Cell {
