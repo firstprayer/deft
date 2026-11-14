@@ -35,15 +35,25 @@ pub const ARRAYS: ParamSpec = param(
 .default("replace");
 pub const SCHEMA: ParamSpec = param("schema", Kind::Path, "JSON Schema file, in JSON or YAML");
 
-fn load(input: &InputFile) -> Result<Json> {
+fn read(input: &InputFile, lenient: bool) -> Result<deft_tools_data::Doc> {
     let format = input.require_format()?;
-    deft_tools_data::parse(input.bytes()?, format).map_err(|mut e| {
+    let bytes = input.bytes()?;
+    let doc = if lenient {
+        deft_tools_data::read_lenient(bytes, format)
+    } else {
+        deft_tools_data::read(bytes, format)
+    };
+    doc.map_err(|mut e| {
         e.message = format!("{}: {}", input.display, e.message);
         e
     })
 }
 
-/// What reading these inputs dropped, to pass on as warnings.
+fn load(input: &InputFile) -> Result<Json> {
+    read(input, false).map(|d| d.value)
+}
+
+/// What reading these inputs changed, to pass on as warnings.
 fn lost(inputs: &[InputFile]) -> Vec<String> {
     let mut all = Vec::new();
     for input in inputs {
@@ -67,11 +77,23 @@ fn target(job: &Job) -> Format {
         .unwrap_or_else(|| job.target(input.unwrap_or(Format::Json)))
 }
 
-fn write(job: &Job, value: &Json, style: deft_tools_data::Style) -> Result<OpResult> {
+fn write(job: &Job, doc: &deft_tools_data::Doc, style: deft_tools_data::Style) -> Result<OpResult> {
     let format = target(job);
-    let (bytes, warnings) = deft_tools_data::render(value, format, style)?;
+    let (bytes, warnings) = deft_tools_data::render_doc(doc, format, style)?;
     let mut res = OpResult::one(Produced::bytes(bytes, format));
-    for w in lost(&job.inputs).into_iter().chain(warnings) {
+    let mut all: Vec<String> = Vec::new();
+    for w in doc
+        .warnings
+        .iter()
+        .cloned()
+        .chain(lost(&job.inputs))
+        .chain(warnings)
+    {
+        if !all.contains(&w) {
+            all.push(w);
+        }
+    }
+    for w in all {
         res = res.warn(w);
     }
     Ok(res)
@@ -84,7 +106,7 @@ pub fn convert(job: &Job) -> Result<OpResult> {
             "--to is required (or give -o name.ext)",
         ));
     }
-    write(job, &load(job.input())?, Default::default())
+    write(job, &read(job.input(), true)?, Default::default())
 }
 
 /// TOML is tidied in its own text, so comments and spellings stay.
@@ -110,12 +132,20 @@ pub fn format(job: &Job) -> Result<OpResult> {
 
 pub fn merge(job: &Job) -> Result<OpResult> {
     let append = job.params.text("arrays") == "append";
-    let mut all = job.inputs.iter().map(load);
-    let mut value = all.next().expect("two inputs")?;
+    let mut all = job.inputs.iter().map(|i| read(i, false));
+    let mut doc = all.next().expect("two inputs")?;
     for next in all {
-        deft_tools_data::merge(&mut value, next?, append);
+        let next = next?;
+        deft_tools_data::merge(&mut doc.value, next.value, append);
+        // Each file's comments stay with their keys; the first file's win.
+        for (path, note) in next.comments.at {
+            doc.comments.at.entry(path).or_insert(note);
+        }
+        doc.comments_unplaced |= next.comments_unplaced;
+        doc.floats.extend(next.floats);
+        doc.warnings.extend(next.warnings);
     }
-    write(job, &value, Default::default())
+    write(job, &doc, Default::default())
 }
 
 pub fn diff(job: &Job) -> Result<OpResult> {
@@ -136,8 +166,14 @@ pub fn diff(job: &Job) -> Result<OpResult> {
 }
 
 pub fn validate(job: &Job) -> Result<OpResult> {
-    let value = load(job.input())?;
-    let mut res_warnings = Vec::new();
+    let doc = read(job.input(), false)?;
+    let value = doc.value;
+    // A repeated YAML key is worth knowing about even when the file reads.
+    let mut res_warnings: Vec<String> = doc
+        .warnings
+        .into_iter()
+        .filter(|w| w.contains("twice"))
+        .collect();
     if let Some(path) = job.params.opt_path("schema") {
         let bytes = std::fs::read(&path)
             .map_err(|e| bad_value("schema", format!("{}: {e}", path.display())))?;

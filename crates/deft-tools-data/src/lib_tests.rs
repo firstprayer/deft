@@ -103,8 +103,9 @@ fn yaml_quotes_what_older_parsers_would_misread() {
 #[test]
 fn losses_are_named() {
     let lost = |t: &str, f| lost_on_reading(t.as_bytes(), f);
-    assert_eq!(lost("a: 1 # why\n", Format::Yaml).len(), 1);
-    assert!(lost("a: 'x # y'\nb: c#d\n", Format::Yaml).is_empty());
+    let comments = |t: &str| read(t.as_bytes(), Format::Yaml).unwrap().comments.count();
+    assert_eq!(comments("a: 1 # why\n"), 1);
+    assert_eq!(comments("a: 'x # y'\nb: c#d\n"), 0);
     assert_eq!(lost("version: 1.10\n", Format::Yaml).len(), 1);
     assert!(lost("version: 1.15\nname: v1.10a\n", Format::Yaml).is_empty());
     assert!(lost("<a><b>x</b> <c>y</c></a>", Format::Xml).is_empty());
@@ -119,4 +120,89 @@ fn losses_are_named() {
 fn a_diff_of_lists_gives_jq_paths() {
     let d = diff(&json!([{"id": 1}]), &json!([{"id": 2}]));
     assert_eq!(d[0].path, ".[0].id");
+}
+
+#[test]
+fn yaml_merge_key_lists_apply_inside_merged_mappings() {
+    let src = b"r: &r {restart: always}\np: &p {pull: never}\nd: &d\n  <<: [*r, *p]\n  image: x\nsvc:\n  <<: *d\n  pull: always\n";
+    let v = parse(src, Format::Yaml).unwrap();
+    assert_eq!(
+        v["svc"],
+        json!({"restart": "always", "pull": "always", "image": "x"})
+    );
+    assert!(v["d"].get("<<").is_none());
+}
+
+#[test]
+fn yaml_tags_are_kept_as_text_and_reported() {
+    let doc = read(
+        b"emoji: !!python/name:material.emoji.twemoji\nn: !Ref Bucket\nslug: !!python/object/apply:s.slugify\n  kwargs: {case: lower}\n",
+        Format::Yaml,
+    )
+    .unwrap();
+    assert_eq!(
+        doc.value["emoji"],
+        json!("!!python/name:material.emoji.twemoji")
+    );
+    assert_eq!(doc.value["n"], json!("Bucket"));
+    assert!(
+        doc.warnings[0].contains("not kept on 3 values"),
+        "{:?}",
+        doc.warnings
+    );
+}
+
+#[test]
+fn jsonc_is_read_for_converting_and_named_when_validating() {
+    let src = b"{\n  // editor\n  \"a\": 1, /* x */\n  \"b\": [1, 2,],\n}\n";
+    let e = read(src, Format::Json).unwrap_err();
+    assert!(
+        e.message
+            .contains("comments or trailing commas are not allowed in JSON (line 2"),
+        "{}",
+        e.message
+    );
+    let doc = read_lenient(src, Format::Json).unwrap();
+    assert_eq!(doc.value, json!({"a": 1, "b": [1, 2]}));
+    assert!(doc.warnings[0].contains("JSONC"));
+}
+
+#[test]
+fn toml_comments_survive_a_trip_to_yaml_and_back() {
+    let src = b"# the package\n[package]\nname = \"x\" # its name\n\n# features\n[features]\ndefault = []\n";
+    let doc = read(src, Format::Toml).unwrap();
+    let (yaml, warnings) = render_doc(&doc, Format::Yaml, Style::default()).unwrap();
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let yaml = String::from_utf8(yaml).unwrap();
+    assert_eq!(
+        yaml,
+        "# the package\npackage:\n  name: x # its name\n# features\nfeatures:\n  default: []\n"
+    );
+    let back = read(yaml.as_bytes(), Format::Yaml).unwrap();
+    let (toml, _) = render_doc(&back, Format::Toml, Style::default()).unwrap();
+    let toml = String::from_utf8(toml).unwrap();
+    for c in ["# the package", "# its name", "# features"] {
+        assert!(toml.contains(c), "{c} in {toml}");
+    }
+}
+
+#[test]
+fn nan_and_inf_survive_into_yaml_and_toml_and_are_reported_for_json() {
+    let doc = read(b"a = nan\nb = -inf\n", Format::Toml).unwrap();
+    let (toml, w) = render_doc(&doc, Format::Toml, Style::default()).unwrap();
+    assert_eq!(String::from_utf8(toml).unwrap(), "a = nan\nb = -inf\n");
+    assert!(w.is_empty());
+    let (_, w) = render_doc(&doc, Format::Json, Style::default()).unwrap();
+    assert!(w[0].contains("no nan or inf"), "{w:?}");
+}
+
+#[test]
+fn a_repeated_yaml_key_takes_the_last_value_with_a_warning() {
+    let doc = read(b"a:\n  x: 1\n  x: 2\nb: [1]\n", Format::Yaml).unwrap();
+    assert_eq!(doc.value, json!({"a": {"x": 2}, "b": [1]}));
+    assert!(
+        doc.warnings[0].contains("the last value is used"),
+        "{:?}",
+        doc.warnings
+    );
 }
