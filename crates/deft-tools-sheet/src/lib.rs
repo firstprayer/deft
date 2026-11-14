@@ -54,6 +54,8 @@ pub struct Table {
     /// Row and column of the first cell, counted from 0. A sheet need not
     /// start at A1, and readers drop the empty rows and columns before it.
     pub origin: (usize, usize),
+    /// What reading had to decide, such as the text encoding of a CSV file.
+    pub notes: Vec<String>,
 }
 
 impl Table {
@@ -199,7 +201,12 @@ pub fn read_workbook(bytes: &[u8]) -> Result<Vec<Table>> {
         let origin = range
             .start()
             .map_or((0, 0), |(r, c)| (r as usize, c as usize));
-        out.push(Table { name, rows, origin });
+        out.push(Table {
+            name,
+            rows,
+            origin,
+            notes: Vec::new(),
+        });
     }
     Ok(out)
 }
@@ -290,9 +297,41 @@ fn decode_utf16(bytes: &[u8]) -> Option<String> {
     )
 }
 
+/// Text in a legacy encoding (Windows-1252, Latin-1, GBK, Shift-JIS...),
+/// decoded, with the encoding's name. `None` for UTF-8.
+fn decode_legacy(bytes: &[u8]) -> Option<(String, &'static str)> {
+    if std::str::from_utf8(bytes).is_ok() {
+        return None;
+    }
+    // UTF-8 text with a stray byte or two stays UTF-8.
+    let (mut wide, mut invalid) = (0usize, 0usize);
+    for chunk in bytes.utf8_chunks() {
+        wide += chunk.valid().chars().filter(|c| !c.is_ascii()).count();
+        invalid += usize::from(!chunk.invalid().is_empty());
+    }
+    if wide > 10 * invalid {
+        return Some((
+            String::from_utf8_lossy(bytes).into_owned(),
+            "UTF-8 with some bad bytes",
+        ));
+    }
+    let mut d = chardetng::EncodingDetector::new(chardetng::Iso2022JpDetection::Deny);
+    d.feed(bytes, true);
+    let enc = d.guess(None, chardetng::Utf8Detection::Deny);
+    let (text, _, _) = enc.decode(bytes);
+    Some((text.into_owned(), enc.name()))
+}
+
 /// Read CSV; the delimiter is detected from the first line.
 pub fn read_csv(bytes: &[u8], name: &str) -> Result<Table> {
-    let decoded = decode_utf16(bytes);
+    let mut notes = Vec::new();
+    let mut decoded = decode_utf16(bytes);
+    if decoded.is_none()
+        && let Some((text, enc)) = decode_legacy(bytes)
+    {
+        notes.push(format!("{name}: the text is not UTF-8; read it as {enc}"));
+        decoded = Some(text);
+    }
     let bytes = decoded.as_deref().map_or(bytes, str::as_bytes);
     let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes);
     let delimiter = detect_delimiter(bytes);
@@ -317,6 +356,7 @@ pub fn read_csv(bytes: &[u8], name: &str) -> Result<Table> {
     Ok(Table {
         name: name.into(),
         rows,
+        notes,
         ..Table::default()
     })
 }

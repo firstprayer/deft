@@ -79,21 +79,26 @@ pub fn shape(t: &Table) -> String {
     format!("{} rows x {} columns", t.rows.len(), t.columns())
 }
 
-/// The table a one-input operation works on, and a warning if the file has
-/// more sheets than the one taken.
-pub fn input_table(job: &Job) -> Result<(Table, Option<String>)> {
+/// The table a one-input operation works on, and warnings: other sheets
+/// in the file, the text encoding a CSV file was read in.
+pub fn input_table(job: &Job) -> Result<(Table, Vec<String>)> {
     let sheets = tables(job.input())?;
     let wanted = job.params.opt_text("sheet");
-    let warning = other_sheets(&sheets, wanted.as_deref()).map(|w| format!("{w} (see --sheet)"));
-    Ok((pick(sheets, wanted)?, warning))
+    let mut warnings: Vec<String> = other_sheets(&sheets, wanted.as_deref())
+        .map(|w| format!("{w} (see --sheet)"))
+        .into_iter()
+        .collect();
+    let t = pick(sheets, wanted)?;
+    warnings.extend(t.notes.iter().cloned());
+    Ok((t, warnings))
 }
 
-/// Add a warning, if there is one.
-pub fn warned(res: OpResult, warning: Option<String>) -> OpResult {
-    match warning {
-        Some(w) => res.warn(w),
-        None => res,
+/// Add the warnings.
+pub fn warned(mut res: OpResult, warnings: Vec<String>) -> OpResult {
+    for w in warnings {
+        res = res.warn(w);
     }
+    res
 }
 
 /// Map a column lookup failure to the option that named the column.

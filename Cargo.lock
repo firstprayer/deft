@@ -972,6 +972,7 @@ name = "deft-tools-sheet"
 version = "0.1.0"
 dependencies = [
  "calamine",
+ "chardetng",
  "csv",
  "deft-core",
  "regex",

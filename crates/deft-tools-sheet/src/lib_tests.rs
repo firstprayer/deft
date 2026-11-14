@@ -267,6 +267,21 @@ fn json_keeps_both_of_two_columns_with_one_name() {
 }
 
 #[test]
+fn legacy_csv_encodings_are_decoded_and_named() {
+    // "Ynys Môn" in Windows-1252, and 交易 in GBK.
+    let t = read_csv(b"area,n\nYnys M\xf4n,1\n", "w").unwrap();
+    assert_eq!(t.rows[1][0], Cell::Text("Ynys Môn".into()));
+    assert!(
+        t.notes[0].contains("not UTF-8; read it as windows-"),
+        "{:?}",
+        t.notes
+    );
+    let gbk = b"\xbd\xbb\xd2\xd7\xc3\xfb\xb3\xc6,\xbd\xf0\xb6\xee\n\xd6\xa7\xb8\xb6\xb1\xa6,12\n";
+    let t = read_csv(gbk, "g").unwrap();
+    assert_eq!(t.rows[0][0], Cell::Text("交易名称".into()), "{:?}", t.notes);
+}
+
+#[test]
 fn drawings_in_ods_cells_are_not_text() {
     let xml = r#"<table:table-cell><text:p>Back</text:p><draw:frame a="1"><draw:image/><svg:desc>Logo</svg:desc></draw:frame></table:table-cell>"#;
     assert_eq!(

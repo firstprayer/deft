@@ -24,5 +24,9 @@ fn run(job: &Job) -> Result<OpResult> {
         .map(|s| format!("{}: {}", s.name, super::_common::shape(s)))
         .collect::<Vec<_>>()
         .join(", ");
-    Ok(OpResult::report(facts![("sheets", sheets)], note))
+    let mut res = OpResult::report(facts![("sheets", sheets)], note);
+    for w in t.iter().flat_map(|s| s.notes.iter()) {
+        res = res.warn(w.clone());
+    }
+    Ok(res)
 }

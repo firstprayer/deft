@@ -26,7 +26,9 @@ fn run(job: &Job) -> Result<OpResult> {
     for input in &job.inputs {
         let mut sheets = tables(input)?;
         warnings.extend(other_sheets(&sheets, None));
-        all.push(sheets.remove(0));
+        let t = sheets.remove(0);
+        warnings.extend(t.notes.iter().cloned());
+        all.push(t);
     }
     let (t, unrelated) = deft_tools_sheet::concat(&all);
     let format = Format::from_name(&job.params.text("to")).expect("choice");

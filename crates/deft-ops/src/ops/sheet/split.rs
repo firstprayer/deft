@@ -42,11 +42,14 @@ pub static OP: Op = Op {
 fn run(job: &Job) -> Result<OpResult> {
     let p = job.params;
     let stem = job.input().stem();
-    let mut warning = None;
+    let mut warning = Vec::new();
     let parts: Vec<(String, Table)> = if p.flag("sheets") {
         tables(job.input())?
             .into_iter()
-            .map(|t| (t.name.clone(), t))
+            .map(|t| {
+                warning.extend(t.notes.iter().cloned());
+                (t.name.clone(), t)
+            })
             .collect()
     } else {
         let (t, other_sheets) = input_table(job)?;
