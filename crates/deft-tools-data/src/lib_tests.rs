@@ -223,6 +223,14 @@ fn plist_keys_stay_with_their_values() {
 
 #[test]
 fn mixed_xml_content_keeps_its_order() {
+    let v = parse(b"<p><b>DOI:</b> <a>10.7554</a></p>", Format::Xml).unwrap();
+    assert_eq!(
+        v,
+        json!({"p": {"#content": [{"b": "DOI:"}, " ", {"a": "10.7554"}]}})
+    );
+    // Indentation between elements is not text.
+    let v = parse(b"<p>\n  <b>x</b>\n  <a>y</a>\n</p>", Format::Xml).unwrap();
+    assert_eq!(v, json!({"p": {"b": "x", "a": "y"}}));
     let v = parse(b"<p>Some <b>bold</b> <i>and</i> text</p>", Format::Xml).unwrap();
     assert_eq!(
         v,

@@ -102,7 +102,16 @@ fn element(node: roxmltree::Node, plist: bool) -> Value {
             Value::String(a.value().to_string()),
         );
     }
-    let mixed = node.children().any(|c| filled(&c)) && node.children().any(|c| c.is_element());
+    // A space between two elements on one line (`<b>DOI:</b> <link/>`) is
+    // text too; indentation has a line break.
+    let spaced = |c: &roxmltree::Node| {
+        c.is_text()
+            && c.prev_sibling().is_some_and(|p| p.is_element())
+            && c.next_sibling().is_some_and(|n| n.is_element())
+            && c.text().is_some_and(|t| !t.is_empty() && !t.contains('\n'))
+    };
+    let mixed = node.children().any(|c| filled(&c) || spaced(&c))
+        && node.children().any(|c| c.is_element());
     if mixed {
         // Text and elements in their order, so a paragraph still reads right.
         let kids: Vec<roxmltree::Node> = node.children().collect();
