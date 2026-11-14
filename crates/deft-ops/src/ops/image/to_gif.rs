@@ -5,7 +5,9 @@ use deft_tools_image::Fit;
 pub static OP: Op = Op {
     id: "image.to-gif",
     summary: "Animate images into a GIF: --fps 2",
-    details: &["Frames are fitted to the largest image (or --size), on white."],
+    details: &[
+        "Each picture is fitted inside the frame, on white. The frame is --size, or the largest picture; one side (200x) sets that side and the other fits the tallest or widest picture.",
+    ],
     input: Input::all(IN, 1, "image"),
     output: Output::one(&[Format::Gif], "gif"),
     params: &[
@@ -41,10 +43,16 @@ fn run(job: &Job) -> Result<OpResult> {
         .map(|i| decode_srgb(job, i))
         .collect::<Result<Vec<_>>>()?;
     let (w, h) = match p.opt_size("size") {
-        Some(s) => {
-            let first = deft_tools_image::resize(&images[0], &s, Fit::Contain, true)?;
-            (first.width(), first.height())
-        }
+        Some(SizeSpec {
+            width: Some(w),
+            height: Some(h),
+            ..
+        }) => (w, h),
+        // One side or a percentage: each picture at that size, in a frame that holds them all.
+        Some(s) => images.iter().fold((1, 1), |(w, h), img| {
+            let (iw, ih) = s.target(img.width(), img.height());
+            (w.max(iw), h.max(ih))
+        }),
         None => (
             images.iter().map(|i| i.width()).max().unwrap_or(1),
             images.iter().map(|i| i.height()).max().unwrap_or(1),
@@ -74,4 +82,24 @@ fn run(job: &Job) -> Result<OpResult> {
     Ok(OpResult::one(Produced::bytes(bytes, Format::Gif))
         .fact("frames", n)
         .note(format!("{n} frames")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::_common::testing::{picture, png, run};
+
+    #[test]
+    fn size_is_the_frame_size() {
+        let wide = png(80, 40, [0, 0, 200], None);
+        let tall = png(40, 80, [0, 0, 200], None);
+        let res = run(
+            &super::OP,
+            vec![wide.clone(), tall.clone()],
+            &[("size", "60x60")],
+        );
+        assert_eq!(picture(&res).to_rgb8().dimensions(), (60, 60));
+        // One side: the other comes from the tallest picture.
+        let res = run(&super::OP, vec![wide, tall], &[("size", "30x")]);
+        assert_eq!(picture(&res).to_rgb8().dimensions(), (30, 60));
+    }
 }
