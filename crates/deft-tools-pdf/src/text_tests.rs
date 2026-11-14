@@ -15,6 +15,7 @@ fn page(glyphs: Vec<Glyph>) -> PageText {
         glyphs,
         width: 612.0,
         height: 792.0,
+        images: vec![],
     }
 }
 
@@ -176,4 +177,32 @@ fn vertical_text_reads_down_the_column() {
     ])
     .text();
     assert_eq!(text, "あいう");
+}
+
+#[test]
+fn a_picture_with_a_short_stamp_of_text_is_a_scan() {
+    let stamp: Vec<Glyph> = "Published: October 2, 1880 Copyright The New York Times"
+        .chars()
+        .enumerate()
+        .map(|(i, c)| glyph(&c.to_string(), 10.0 + i as f64 * 5.0, 5.0, 0))
+        .collect();
+    let mut scan = page(stamp.clone());
+    scan.images = vec![[0.0, 0.0, 612.0, 792.0]];
+    assert!(scan.chars() >= 20);
+    assert!(scan.is_scan());
+    // The same line on a page without a picture is a text page.
+    assert!(!page(stamp).is_scan());
+    // A full text layer over the picture makes it searchable already.
+    let mut layer = Vec::new();
+    for line in 0..60 {
+        for i in 0..90 {
+            let mut g = glyph("e", 10.0 + i as f64 * 6.5, 6.0, line);
+            g.start.y = 20.0 + line as f64 * 12.0;
+            g.end.y = g.start.y;
+            layer.push(g);
+        }
+    }
+    let mut ocred = page(layer);
+    ocred.images = vec![[0.0, 0.0, 612.0, 792.0]];
+    assert!(!ocred.is_scan(), "{}", ocred.text_cover());
 }

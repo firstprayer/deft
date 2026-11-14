@@ -139,6 +139,8 @@ fn unicode(glyph: &Drawn<'_>) -> String {
 struct Collector {
     glyphs: Vec<Glyph>,
     runs: usize,
+    /// Where images are drawn, as (left, top, right, bottom).
+    images: Vec<[f64; 4]>,
 }
 
 impl Collector {
@@ -158,7 +160,20 @@ impl<'a> Device<'a> for Collector {
     fn draw_path(&mut self, _: &BezPath, _: DrawProps<'a>, _: &DrawMode) {}
     fn push_clip_path(&mut self, _: &ClipPath) {}
     fn push_transparency_group(&mut self, _: f32, _: Option<SoftMask<'a>>, _: BlendMode) {}
-    fn draw_image(&mut self, _: Image<'a, '_>, _: ImageDrawProps<'a>) {}
+    fn draw_image(&mut self, image: Image<'a, '_>, props: ImageDrawProps<'a>) {
+        // The transform takes the image's pixels to the page.
+        let (w, h) = (f64::from(image.width()), f64::from(image.height()));
+        let corners = [(0.0, 0.0), (w, 0.0), (0.0, h), (w, h)]
+            .map(|(x, y)| props.transform * Point::new(x, y));
+        let xs = corners.map(|p| p.x);
+        let ys = corners.map(|p| p.y);
+        self.images.push([
+            xs.into_iter().fold(f64::MAX, f64::min),
+            ys.into_iter().fold(f64::MAX, f64::min),
+            xs.into_iter().fold(f64::MIN, f64::max),
+            ys.into_iter().fold(f64::MIN, f64::max),
+        ]);
+    }
     fn pop_clip(&mut self) {}
     fn pop_transparency_group(&mut self) {}
 
@@ -378,6 +393,8 @@ pub struct PageText {
     /// The size of the page as shown.
     pub width: f64,
     pub height: f64,
+    /// Where images are drawn, as (left, top, right, bottom) from the top-left.
+    pub images: Vec<[f64; 4]>,
 }
 
 /// A place the text was found.
@@ -391,6 +408,50 @@ pub struct Hit {
 }
 
 impl PageText {
+    /// How many characters the page shows that could be decoded, not counting
+    /// white space.
+    pub fn chars(&self) -> usize {
+        self.glyphs
+            .iter()
+            .flat_map(|g| g.text.chars())
+            .filter(|c| !c.is_whitespace() && *c != '\u{FFFD}')
+            .count()
+    }
+
+    fn share(&self, boxes: impl Iterator<Item = [f64; 4]>) -> f64 {
+        let area = (self.width * self.height).max(1.0);
+        let inside: f64 = boxes
+            .map(|[l, t, r, b]| {
+                let w = r.min(self.width) - l.max(0.0);
+                let h = b.min(self.height) - t.max(0.0);
+                w.max(0.0) * h.max(0.0)
+            })
+            .sum();
+        (inside / area).min(1.0)
+    }
+
+    /// The share of the page, from 0 to 1, that images cover.
+    pub fn image_cover(&self) -> f64 {
+        self.share(self.images.iter().copied())
+    }
+
+    /// The share of the page, from 0 to 1, that the boxes of its characters cover.
+    pub fn text_cover(&self) -> f64 {
+        self.share(
+            self.glyphs
+                .iter()
+                .filter(|g| !g.is_blank())
+                .map(Glyph::bounds),
+        )
+    }
+
+    /// A page that is a picture with little or no text on it, such as a scan
+    /// without a text layer or with only a short stamp: reading it with OCR
+    /// finds the text.
+    pub fn is_scan(&self) -> bool {
+        self.image_cover() > 0.5 && (self.chars() < 20 || self.text_cover() < 0.02)
+    }
+
     /// The page as lines, in drawing order.
     pub fn text(&self) -> String {
         let all: String = reading(&self.glyphs).iter().map(|c| c.0).collect();
@@ -541,6 +602,7 @@ impl Renderer {
                     glyphs: found.glyphs,
                     width: width as f64,
                     height: height as f64,
+                    images: found.images,
                 },
             );
         }

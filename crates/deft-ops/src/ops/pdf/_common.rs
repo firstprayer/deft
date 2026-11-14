@@ -31,6 +31,13 @@ pub fn write(doc: &mut Document) -> Result<Produced> {
     ))
 }
 
+/// Page numbers for a message: the first ten, then "...".
+pub fn page_list(pages: &[usize]) -> String {
+    let list: Vec<String> = pages.iter().take(10).map(usize::to_string).collect();
+    let more = if pages.len() > 10 { ", ..." } else { "" };
+    format!("{}{more}", list.join(", "))
+}
+
 pub fn plural(n: usize, word: &str) -> String {
     format!("{n} {word}{}", if n == 1 { "" } else { "s" })
 }
