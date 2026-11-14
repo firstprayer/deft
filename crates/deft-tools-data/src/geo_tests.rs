@@ -52,7 +52,7 @@ fn segments_survive_conversion() {
     assert_eq!(kml.matches("<LineString>").count(), 2, "{kml}");
     assert!((stats(&parse_kml(&kml).unwrap()).distance_km - 2.0).abs() < 0.01);
     let csv = String::from_utf8(to_csv(&geo).unwrap()).unwrap();
-    assert!(csv.lines().nth(4).unwrap().ends_with(",2"), "{csv}");
+    assert!(csv.lines().nth(4).unwrap().ends_with(",2,"), "{csv}");
 }
 
 #[test]
@@ -90,4 +90,49 @@ fn climb_ignores_noise_but_not_a_slow_climb() {
 fn seconds_match_a_known_time() {
     assert_eq!(seconds("1970-01-02T00:00:01Z"), Some(86_401));
     assert_eq!(seconds("2000-03-01T00:00:00Z"), Some(951_868_800));
+}
+
+#[test]
+fn place_descriptions_survive_every_format() {
+    let gpx = r#"<gpx xmlns="http://www.topografix.com/GPX/1/1">
+<wpt lat="42.2" lon="-71.1"><name>LOOKOUT</name><desc>Lookout Rock &amp; tower</desc></wpt>
+<wpt lat="42.3" lon="-71.2"><name>GATE</name><cmt>North gate</cmt></wpt></gpx>"#;
+    let geo = parse_gpx(gpx).unwrap();
+    assert_eq!(geo.places[0].description, "Lookout Rock & tower");
+    assert_eq!(geo.places[1].description, "North gate");
+    assert_eq!(parse_gpx(&write_gpx(&geo)).unwrap(), geo);
+    let kml = parse_kml(&write_kml(&geo)).unwrap();
+    assert_eq!(kml.places[0].description, "Lookout Rock & tower");
+    let csv = String::from_utf8(to_csv(&geo).unwrap()).unwrap();
+    assert!(csv.lines().next().unwrap().ends_with(",description"));
+    assert!(csv.contains("Lookout Rock & tower"));
+}
+
+#[test]
+fn a_polygon_is_an_area_not_a_track() {
+    let kml = r#"<kml xmlns="http://www.opengis.net/kml/2.2"><Document>
+<Placemark><name>Path</name><LineString><coordinates>0,0,0 1,0,0</coordinates></LineString></Placemark>
+<Placemark><name>Building</name><Polygon><outerBoundaryIs><LinearRing>
+<coordinates>0,0,0 0,1,0 1,1,0 0,0,0</coordinates></LinearRing></outerBoundaryIs></Polygon></Placemark>
+</Document></kml>"#;
+    let geo = parse_kml(kml).unwrap();
+    assert_eq!((geo.tracks.len(), geo.areas.len()), (1, 1));
+    let s = stats(&geo);
+    assert_eq!(s.points, 2);
+    assert!((s.distance_km - 111.2).abs() < 0.1, "{}", s.distance_km);
+    let back = parse_kml(&write_kml(&geo)).unwrap();
+    assert_eq!(back.areas[0].points.len(), 4);
+}
+
+#[test]
+fn extended_data_describes_a_place_without_a_description() {
+    let kml = r#"<kml xmlns="http://www.opengis.net/kml/2.2"><Document><Placemark><name>Cache</name>
+<ExtendedData><Data name="gc_num"><value>GC7FA4</value></Data>
+<SchemaData><SimpleData name="placer">Sverdrup2</SimpleData></SchemaData></ExtendedData>
+<Point><coordinates>-71.2,46.8,0</coordinates></Point></Placemark></Document></kml>"#;
+    let geo = parse_kml(kml).unwrap();
+    assert_eq!(
+        geo.places[0].description,
+        "gc_num: GC7FA4\nplacer: Sverdrup2"
+    );
 }

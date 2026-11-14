@@ -71,6 +71,10 @@ fn a_name_after_to_is_the_output_not_the_input() {
     assert_eq!(inputs("turn notes.md into a PDF"), [Format::Md]);
     assert_eq!(inputs("save clip.mp4 as out.gif"), [Format::Mp4]);
     assert_eq!(inputs("zip my files"), []);
+    assert_eq!(
+        super::files("make a gif from a video").outputs,
+        [Format::Gif]
+    );
 }
 
 #[test]
@@ -122,4 +126,49 @@ fn a_doubled_consonant_is_undone() {
     );
     assert!(registry().unknown_job("padding").is_empty());
     assert_eq!(first("cropping image"), "image crop");
+}
+
+#[test]
+fn a_job_on_a_file_type_no_command_reads_finds_nothing() {
+    for query in [
+        "compress a video to under 25 MB",
+        "convert a wav file to mp3",
+        "trim the first 10 seconds of a video",
+        "make a gif from a video clip",
+        "unzip a zip archive",
+        "merge two json files",
+        "convert pdf to word",
+    ] {
+        let hits: Vec<_> = registry().find(query).into_iter().map(|h| h.0).collect();
+        assert!(hits.is_empty(), "{query}: {hits:?}");
+    }
+}
+
+#[test]
+fn a_verb_alone_does_not_make_a_hit() {
+    // "numbers" names pdf number, but redacting is not numbering.
+    assert!(
+        registry()
+            .find("redact account numbers from a pdf")
+            .is_empty()
+    );
+    assert!(registry().find("add subtitles to a video").is_empty());
+    assert!(
+        registry()
+            .find("translate this document into spanish")
+            .is_empty()
+    );
+}
+
+#[test]
+fn the_files_named_pick_the_direction() {
+    assert_eq!(first("turn a word document into markdown"), "doc to-md");
+    assert_eq!(first("get the text out of a powerpoint"), "slides to-text");
+    assert_eq!(first("how many pages does this pdf have"), "pdf info");
+    assert_eq!(first("make a barcode for a product"), "qr create");
+}
+
+#[test]
+fn a_file_type_alone_lists_its_commands() {
+    assert!(registry().find("pdf").len() > 1);
 }

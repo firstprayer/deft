@@ -30,12 +30,21 @@ pub fn find(rest: &[String]) -> Result<Outcome> {
             hits.iter().map(|(p, op, _)| json!({"command": format!("deft {p}"), "op": op.id, "summary": op.summary, "signature": op.signature()})).collect();
         return Ok(Outcome::text(format!(
             "{}\n",
-            json!({"v": 1, "ok": true, "matches": list, "unknown_words": unknown})
+            if list.is_empty() {
+                json!({"v": 1, "ok": true, "matches": list, "unknown_words": unknown, "note": "no command does this"})
+            } else {
+                json!({"v": 1, "ok": true, "matches": list, "unknown_words": unknown})
+            }
         )));
     }
     if hits.is_empty() {
+        let why = if unknown.is_empty() {
+            String::new()
+        } else {
+            format!(" (nothing knows {:?})", unknown.join(" "))
+        };
         return Ok(Outcome::text(format!(
-            "no match for {query:?}; deft lists all groups\n"
+            "no command does this{why}; use another tool. All groups: deft --help\n"
         )));
     }
     let w = hits.iter().map(|h| h.0.len()).max().unwrap_or(0);
@@ -45,13 +54,6 @@ pub fn find(rest: &[String]) -> Result<Outcome> {
         .max()
         .unwrap_or(0);
     let mut s = String::new();
-    if !unknown.is_empty() {
-        let _ = writeln!(
-            s,
-            "no command does this: nothing knows {:?}. Results below only share a file type.",
-            unknown.join(" ")
-        );
-    }
     for (path, op, _) in &hits {
         let _ = writeln!(s, "{path:<w$}  {:<sw$}  {}", op.signature(), op.summary);
     }
@@ -68,7 +70,7 @@ pub fn info(rest: &[String], stdin: impl FnOnce() -> Vec<u8>) -> Result<Outcome>
     let parsed = args::parse(rest, &[])?;
     if parsed.help {
         return Ok(Outcome::text(
-            "deft info <file>... - Type, size, pages, dimensions, duration\nAdd --json for all fields.\n",
+            "deft info <file>... - Type, size, pages, dimensions, duration\nAdd --json for all fields. Video and audio details need ffprobe (ships with ffmpeg).\n",
         ));
     }
     if parsed.inputs.is_empty() {
@@ -153,6 +155,28 @@ pub fn info(rest: &[String], stdin: impl FnOnce() -> Vec<u8>) -> Result<Outcome>
             item.note =
                 format!("password-protected; for more: deft pdf info {raw} --password <text>");
         }
+        // JSON that is not a list of rows (a package.json, an API reply) is
+        // still identified, with its shape.
+        if format == Some(deft_core::format::Format::Json)
+            && item
+                .error
+                .as_ref()
+                .is_some_and(|e| e.code == ErrorCode::InputUnsupported)
+            && let Some(shape) = std::fs::read(path)
+                .ok()
+                .and_then(|b| deft_tools_file::media::json_shape(&b))
+        {
+            item.error = None;
+            item.note = match (shape.get("keys"), shape.get("items")) {
+                (Some(k), _) => format!("object with {k} keys"),
+                (_, Some(n)) => format!("array of {n} items"),
+                _ => String::new(),
+            };
+            item.facts.extend(shape);
+        }
+        if item.error.is_none() && format.is_some_and(|f| f.is_video() || f.is_audio()) {
+            media_info(&s.ctx, path, &mut item);
+        }
         if item.error.is_none() {
             let label = format.map(|f| f.label()).unwrap_or("unknown");
             item.facts.insert("format".into(), json!(label));
@@ -177,18 +201,66 @@ pub fn info(rest: &[String], stdin: impl FnOnce() -> Vec<u8>) -> Result<Outcome>
     Ok(finish(report, json, quiet))
 }
 
+/// Duration, picture size and codecs of a video or audio file, from ffprobe.
+/// Without ffprobe the file is still identified, and the warning says what is
+/// missing and why.
+fn media_info(ctx: &deft_core::job::Ctx, path: &Path, item: &mut Item) {
+    let Some(ffprobe) = deft_engines::locate(ctx, "ffprobe") else {
+        item.warnings.push(
+            "duration and picture size need ffprobe, part of ffmpeg, which is not installed (see deft doctor)"
+                .into(),
+        );
+        return;
+    };
+    let args = [
+        "-v",
+        "error",
+        "-print_format",
+        "json",
+        "-show_format",
+        "-show_streams",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .chain([path.display().to_string()])
+    .collect::<Vec<_>>();
+    let probe = deft_engines::run(ctx, &ffprobe, &args)
+        .ok()
+        .and_then(|out| serde_json::from_slice::<serde_json::Value>(&out.stdout).ok());
+    let Some(probe) = probe else {
+        item.warnings
+            .push("ffprobe could not read the file: no duration or picture size".into());
+        return;
+    };
+    let facts = deft_tools_file::media::facts(&probe);
+    item.note = deft_tools_file::media::summary(&facts);
+    item.facts.extend(facts);
+}
+
 /// The `--to` option of `deft convert`.
 pub(crate) const CONVERT_PARAMS: &[deft_core::spec::ParamSpec] =
     &[deft_core::spec::param("to", Kind::Text, "Target format")];
 
 pub fn convert(rest: &[String], stdin: impl FnOnce() -> Vec<u8>) -> Result<Outcome> {
-    let parsed = args::parse(rest, CONVERT_PARAMS)?;
+    // Options of the converters a chain may run, such as --images.
+    let mut specs = CONVERT_PARAMS.to_vec();
+    for op in registry().ops.iter().filter(|op| !op.converts.is_empty()) {
+        for p in op.params {
+            if !specs.iter().any(|s| s.name == p.name) {
+                specs.push(*p);
+            }
+        }
+    }
+    let parsed = args::parse(rest, &specs)?;
     if parsed.help {
         let mut s = String::from(
             "deft convert <in>... [-o <file|dir>] [--to <format>] - Any-to-any conversion\n",
         );
         s.push_str("The target comes from --to or the -o extension; deft picks the best chain of converters.\n");
         s.push_str("--dry-run shows the chain. Several inputs need -o <dir>/ or --to.\n");
+        s.push_str(
+            "Options of a step pass through, e.g. --images <dir> when the target is Markdown.\n",
+        );
         s.push_str("\nExamples:\n  deft convert photo.png -o photo.pdf\n  deft convert notes.md --to html\n  deft convert *.png --to webp -o web/\n");
         return Ok(Outcome::text(s));
     }
@@ -363,6 +435,7 @@ Commands:
 Options for install:
   --agent claude|codex|all    Which agent; default all
   --scope user|project        Home folder or this folder; default user
+  --force                     Replace a SKILL.md that differs (an edited copy)
 
 Example:
   deft skill install --agent claude
@@ -406,17 +479,16 @@ pub fn skill(rest: &[String]) -> Result<Outcome> {
                     ));
                 }
             };
-            let mut s = String::new();
-            for a in agents {
-                // Codex reads skills from the shared `.agents` folder.
-                let folder = if *a == "codex" { "agents" } else { a };
-                let path = base.join(format!(".{folder}/skills/deft/SKILL.md"));
-                std::fs::create_dir_all(path.parent().expect("has parent"))
-                    .map_err(|e| err(ErrorCode::OutputUnwritable, e.to_string()))?;
-                std::fs::write(&path, skill_text())
-                    .map_err(|e| err(ErrorCode::OutputUnwritable, e.to_string()))?;
-                let _ = writeln!(s, "ok skill.install {a} -> {}", path.display());
-            }
+            let force = rest.iter().any(|a| a == "--force");
+            let paths: Vec<(&str, PathBuf)> = agents
+                .iter()
+                .map(|a| {
+                    // Codex reads skills from the shared `.agents` folder.
+                    let folder = if *a == "codex" { "agents" } else { a };
+                    (*a, base.join(format!(".{folder}/skills/deft/SKILL.md")))
+                })
+                .collect();
+            let s = install_skill(&paths, force)?;
             Ok(Outcome::text(s))
         }
         other => Err(err(
@@ -427,9 +499,73 @@ pub fn skill(rest: &[String]) -> Result<Outcome> {
     }
 }
 
-pub fn doctor() -> Result<Outcome> {
+/// Write the skill to each path. A SKILL.md that differs may hold the user's
+/// own edits: it is replaced only with `force`, and nothing is written until
+/// every path is clear.
+fn install_skill(paths: &[(&str, PathBuf)], force: bool) -> Result<String> {
+    let text = skill_text();
+    if !force
+        && let Some((_, path)) = paths
+            .iter()
+            .find(|(_, p)| std::fs::read_to_string(p).is_ok_and(|old| old != text))
+    {
+        return Err(err(
+            ErrorCode::OutputExists,
+            format!(
+                "{} differs from this deft's skill (edited, or from another version)",
+                path.display()
+            ),
+        )
+        .hint("add --force to replace it, or deft skill print to compare"));
+    }
+    let mut s = String::new();
+    for (a, path) in paths {
+        std::fs::create_dir_all(path.parent().expect("has parent"))
+            .map_err(|e| err(ErrorCode::OutputUnwritable, e.to_string()))?;
+        std::fs::write(path, &text).map_err(|e| err(ErrorCode::OutputUnwritable, e.to_string()))?;
+        let _ = writeln!(s, "ok skill.install {a} -> {}", path.display());
+    }
+    Ok(s)
+}
+
+pub fn doctor(rest: &[String]) -> Result<Outcome> {
     let (ctx, _tmp) = engine_ctx()?;
     let reg = registry();
+    let engines: Vec<_> = deft_engines::ENGINES
+        .iter()
+        .map(|e| {
+            let path = deft_engines::locate(&ctx, e.name);
+            let version = path
+                .as_ref()
+                .and_then(|p| deft_engines::version(p, e.version_arg));
+            (e, path, version)
+        })
+        .collect();
+    if rest.iter().any(|a| a == "--json") {
+        let list: Vec<_> = engines
+            .iter()
+            .map(|(e, path, version)| {
+                json!({
+                    "name": e.name,
+                    "found": path.is_some(),
+                    "path": path.as_ref().map(|p| p.display().to_string()),
+                    "version": version,
+                    "purpose": e.purpose,
+                    "install": e.manual,
+                })
+            })
+            .collect();
+        let report = json!({
+            "v": 1,
+            "ok": true,
+            "version": help::VERSION,
+            "groups": reg.groups.len(),
+            "operations": reg.ops.len(),
+            "engine_dir": ctx.engine_dir.display().to_string(),
+            "engines": list,
+        });
+        return Ok(Outcome::text(format!("{report}\n")));
+    }
     let mut s = format!(
         "deft {}\n{} groups, {} operations\n",
         help::VERSION,
@@ -437,11 +573,10 @@ pub fn doctor() -> Result<Outcome> {
         reg.ops.len()
     );
     let _ = writeln!(s, "engine dir: {}", ctx.engine_dir.display());
-    for e in deft_engines::ENGINES {
-        match deft_engines::locate(&ctx, e.name) {
-            Some(p) => {
-                let v = deft_engines::version(&p, e.version_arg)
-                    .unwrap_or_else(|| "version unknown".into());
+    for (e, path, version) in &engines {
+        match path {
+            Some(_) => {
+                let v = version.as_deref().unwrap_or("version unknown");
                 let _ = writeln!(s, "ok      {:<8} {v}", e.name);
             }
             None => {
@@ -515,7 +650,24 @@ pub fn run_plugin(path: &Path, args: &[String]) -> Result<Outcome> {
 
 #[cfg(test)]
 mod tests {
-    use super::plugin_name;
+    use super::{install_skill, plugin_name, skill_text};
+    use std::path::PathBuf;
+
+    #[test]
+    fn an_edited_skill_is_kept_unless_forced() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".claude/skills/deft/SKILL.md");
+        let paths: Vec<(&str, PathBuf)> = vec![("claude", path.clone())];
+        install_skill(&paths, false).unwrap();
+        // The same text again is fine.
+        install_skill(&paths, false).unwrap();
+        std::fs::write(&path, "my own notes").unwrap();
+        let e = install_skill(&paths, false).unwrap_err();
+        assert!(e.message.contains("differs"), "{}", e.message);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "my own notes");
+        install_skill(&paths, true).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), skill_text());
+    }
 
     #[test]
     fn only_programs_are_plugins() {

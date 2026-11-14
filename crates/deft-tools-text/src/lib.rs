@@ -425,14 +425,15 @@ impl Translator<'_> {
             return esc(&format!("[image: {url}]"));
         };
         let Some(ext) = drawable(&bytes) else {
+            // An office suite's own drawing format, such as the VCLMTF
+            // stand-ins for formulas and charts in OpenOffice files, has no
+            // file extension to name it by.
             let kind = path
                 .extension()
                 .and_then(|e| e.to_str())
-                .unwrap_or("this")
-                .to_ascii_uppercase();
-            self.warn(format!(
-                "{kind} pictures cannot be drawn in a PDF and were left out"
-            ));
+                .map(|e| format!("{} pictures", e.to_ascii_uppercase()))
+                .unwrap_or_else(|| "pictures in an office suite's own format".into());
+            self.warn(format!("{kind} cannot be drawn in a PDF and were left out"));
             let label = if alt.is_empty() { url } else { alt };
             return esc(&format!("[picture: {label}]"));
         };

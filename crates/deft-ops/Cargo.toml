@@ -21,3 +21,6 @@ deft-engines.workspace = true
 serde_json.workspace = true
 glob.workspace = true
 regex.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

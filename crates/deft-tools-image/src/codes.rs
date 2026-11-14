@@ -55,6 +55,15 @@ pub fn barcode(text: &str, kind: &str) -> Result<Modules> {
         "code39" => Code39::new(text).map_err(bad)?.encode(),
         "ean13" => EAN13::new(text).map_err(bad)?.encode(),
         "ean8" => EAN8::new(text).map_err(bad)?.encode(),
+        // The encoder would add a check digit to an odd count without saying
+        // so, and the label would carry a number nobody typed.
+        "itf" if text.len() % 2 == 1 && text.bytes().all(|b| b.is_ascii_digit()) => {
+            return Err(err(
+                ErrorCode::BadValue,
+                format!("{text:?} cannot be an itf barcode: it needs an even number of digits"),
+            )
+            .hint("add a leading 0, or the check digit if the number has one (ITF-14)"));
+        }
         "itf" => TF::interleaved(text).map_err(bad)?.encode(),
         other => return Err(err(ErrorCode::BadValue, format!("unknown barcode {other}"))),
     };
@@ -131,31 +140,189 @@ pub fn svg(m: &Modules, dark: [u8; 4], light: [u8; 4]) -> String {
     )
 }
 
-/// Decode every QR code in a picture.
+/// Decode every QR code in a picture, each text once, in the order found.
+///
+/// ZXing's reader (rxing) looks at the picture several ways, and every way is
+/// tried, because a photo with two codes often gives up one per look: both
+/// binarizers, light-on-dark, a smaller or larger copy for codes that are tiny
+/// in a big photo or drawn a few pixels per module, and each corner of the
+/// photo alone. Transparent pixels count as white, as a viewer shows them.
 pub fn read_qr(img: &DynamicImage) -> Vec<String> {
-    let try_read = |gray: GrayImage| -> Vec<String> {
-        let mut prepared = rqrr::PreparedImage::prepare(gray);
-        prepared
-            .detect_grids()
-            .iter()
-            .filter_map(|g| g.decode().ok().map(|(_, text)| text))
-            .collect()
-    };
-    let found = try_read(img.to_luma8());
-    if !found.is_empty() {
-        return found;
+    let gray = on_white(img);
+    let (w, h) = gray.dimensions();
+    let long = w.max(h);
+    let mut looks = vec![gray.clone()];
+    if long > 1600 {
+        let scale = 1200.0 / long as f32;
+        looks.push(image::imageops::resize(
+            &gray,
+            ((w as f32 * scale) as u32).max(1),
+            ((h as f32 * scale) as u32).max(1),
+            image::imageops::FilterType::Triangle,
+        ));
     }
-    // Small codes in large photos and light-on-dark codes need a second look.
-    let mut inverted = img.to_luma8();
+    if long < 1000 {
+        looks.push(image::imageops::resize(
+            &gray,
+            w * 2,
+            h * 2,
+            image::imageops::FilterType::Triangle,
+        ));
+    }
+    // Each part of a photo alone, where a second code was hidden by the first.
+    let base = if long > 4000 { &looks[1] } else { &gray }.clone();
+    let (bw, bh) = base.dimensions();
+    if bw.min(bh) >= 300 {
+        let (tw, th) = (bw * 3 / 5, bh * 3 / 5);
+        for (x, y) in [(0, 0), (bw - tw, 0), (0, bh - th), (bw - tw, bh - th)] {
+            looks.push(image::imageops::crop_imm(&base, x, y, tw, th).to_image());
+        }
+    }
+    let mut inverted = gray;
     image::imageops::invert(&mut inverted);
-    let found = try_read(inverted);
-    if !found.is_empty() {
-        return found;
+    looks.push(inverted);
+
+    let mut found: Vec<String> = Vec::new();
+    for look in looks {
+        for text in read_look(look) {
+            if !found.contains(&text) {
+                found.push(text);
+            }
+        }
     }
-    let bigger = img.resize(
-        img.width() * 2,
-        img.height() * 2,
-        image::imageops::FilterType::Triangle,
-    );
-    try_read(bigger.to_luma8())
+    found
 }
+
+/// Gray with transparency flattened onto white.
+fn on_white(img: &DynamicImage) -> GrayImage {
+    if !img.color().has_alpha() {
+        return img.to_luma8();
+    }
+    let rgba = img.to_rgba8();
+    GrayImage::from_fn(rgba.width(), rgba.height(), |x, y| {
+        let [r, g, b, a] = rgba.get_pixel(x, y).0;
+        let luma = (r as f32 * 0.299 + g as f32 * 0.587 + b as f32 * 0.114) / 255.0;
+        let alpha = a as f32 / 255.0;
+        image::Luma([((luma * alpha + (1.0 - alpha)) * 255.0).round() as u8])
+    })
+}
+
+/// Every code rxing finds in one picture, with both of its binarizers.
+fn read_look(gray: GrayImage) -> Vec<String> {
+    use rxing::common::{GlobalHistogramBinarizer, HybridBinarizer};
+    use rxing::multi::MultipleBarcodeReader;
+    use rxing::multi::qrcode::QRCodeMultiReader;
+    use rxing::qrcode::QRCodeReader;
+    use rxing::{BarcodeFormat, BinaryBitmap, DecodeHints, Luma8LuminanceSource, Reader};
+
+    let (w, h) = gray.dimensions();
+    if w == 0 || h == 0 {
+        return vec![];
+    }
+    let hints = DecodeHints {
+        TryHarder: Some(true),
+        PossibleFormats: Some([BarcodeFormat::QR_CODE].into_iter().collect()),
+        ..Default::default()
+    };
+    let luma = gray.into_raw();
+    let mut texts = Vec::new();
+    let mut take = |results: Vec<rxing::RXingResult>| {
+        texts.extend(results.iter().map(text_of));
+    };
+    let source = || Luma8LuminanceSource::new(luma.clone(), w, h);
+    if let Ok(src) = source() {
+        let mut bitmap = BinaryBitmap::new(HybridBinarizer::new(src));
+        take(
+            QRCodeMultiReader::new()
+                .decode_multiple_with_hints(&mut bitmap, &hints)
+                .unwrap_or_default(),
+        );
+        if let Ok(one) = QRCodeReader::new().decode_with_hints(&mut bitmap, &hints) {
+            take(vec![one]);
+        }
+    }
+    if let Ok(src) = source() {
+        let mut bitmap = BinaryBitmap::new(GlobalHistogramBinarizer::new(src));
+        take(
+            QRCodeMultiReader::new()
+                .decode_multiple_with_hints(&mut bitmap, &hints)
+                .unwrap_or_default(),
+        );
+        if let Ok(one) = QRCodeReader::new().decode_with_hints(&mut bitmap, &hints) {
+            take(vec![one]);
+        }
+    }
+    texts
+}
+
+/// The text of a code. rxing 0.9.3 never recognises half-width katakana when
+/// it guesses how a byte segment is encoded, so a Japanese code such as
+/// "筑波ﾎﾃﾙ" comes out as Latin-1 ("筑波ÎÃÙ"). Such a segment is decoded again
+/// with ZXing's own rule for Shift-JIS.
+fn text_of(result: &rxing::RXingResult) -> String {
+    use rxing::{RXingResultMetadataType, RXingResultMetadataValue};
+    let mut text = result.getText().to_string();
+    let segments = result
+        .getRXingResultMetadata()
+        .get(&RXingResultMetadataType::BYTE_SEGMENTS);
+    let Some(RXingResultMetadataValue::ByteSegments(segments)) = segments else {
+        return text;
+    };
+    for bytes in segments {
+        if !looks_shift_jis(bytes) {
+            continue;
+        }
+        let latin: String = bytes.iter().map(|b| *b as char).collect();
+        let (sjis, _, bad) = encoding_rs::SHIFT_JIS.decode(bytes);
+        if !bad && text.contains(&latin) {
+            text = text.replacen(&latin, &sjis, 1);
+        }
+    }
+    text
+}
+
+/// ZXing's test for bytes that are Shift-JIS rather than Latin-1: valid as
+/// Shift-JIS, and three katakana or double-byte characters in a row, or only
+/// two katakana, or many bytes Latin-1 would show as rare symbols.
+fn looks_shift_jis(bytes: &[u8]) -> bool {
+    if bytes.is_ascii() || std::str::from_utf8(bytes).is_ok() {
+        return false;
+    }
+    let (mut left, mut kana, mut kana_run, mut kana_max) = (0, 0, 0, 0);
+    let (mut double_run, mut double_max, mut latin_rare) = (0, 0, 0);
+    for &b in bytes {
+        if (0xA0..0xC0).contains(&b) || b == 0xD7 || b == 0xF7 {
+            latin_rare += 1;
+        }
+        if left > 0 {
+            if matches!(b, 0x40 | 0x7F | 0xFC) {
+                return false;
+            }
+            left -= 1;
+        } else if matches!(b, 0x80 | 0xA0 | 0xEF) {
+            return false;
+        } else if b > 0xA0 && b < 0xE0 {
+            kana += 1;
+            double_run = 0;
+            kana_run += 1;
+            kana_max = kana_max.max(kana_run);
+        } else if b > 0x7F {
+            left += 1;
+            kana_run = 0;
+            double_run += 1;
+            double_max = double_max.max(double_run);
+        } else {
+            kana_run = 0;
+            double_run = 0;
+        }
+    }
+    left == 0
+        && (kana_max >= 3
+            || double_max >= 3
+            || (kana_max == 2 && kana == 2)
+            || latin_rare * 10 >= bytes.len())
+}
+
+#[cfg(test)]
+#[path = "codes_tests.rs"]
+mod tests;

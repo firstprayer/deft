@@ -33,6 +33,8 @@ impl Track {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Place {
     pub name: String,
+    /// What the file says about the place: an address, a full name, notes.
+    pub description: String,
     pub point: Point,
 }
 
@@ -40,6 +42,9 @@ pub struct Place {
 pub struct Geo {
     pub tracks: Vec<Track>,
     pub places: Vec<Place>,
+    /// Outlines of areas (KML polygons): kept in conversions, never counted
+    /// as distance travelled.
+    pub areas: Vec<Track>,
 }
 
 fn child_text(node: roxmltree::Node, name: &str) -> Option<String> {
@@ -66,7 +71,15 @@ pub fn parse_gpx(text: &str) -> Result<Geo, String> {
             "wpt" => {
                 if let Some(point) = gpx_point(node) {
                     let name = child_text(node, "name").unwrap_or_default();
-                    geo.places.push(Place { name, point });
+                    let description = child_text(node, "desc")
+                        .filter(|d| !d.is_empty())
+                        .or_else(|| child_text(node, "cmt"))
+                        .unwrap_or_default();
+                    geo.places.push(Place {
+                        name,
+                        description,
+                        point,
+                    });
                 }
             }
             "trk" | "rte" => {
@@ -138,6 +151,31 @@ fn gx_track(shape: roxmltree::Node) -> Vec<Point> {
         .collect()
 }
 
+/// A placemark's ExtendedData as "name: value" lines, for a place with no
+/// description: Google Earth keeps a geocache's details there.
+fn extended_data(mark: roxmltree::Node) -> String {
+    let Some(data) = mark
+        .children()
+        .find(|c| c.tag_name().name() == "ExtendedData")
+    else {
+        return String::new();
+    };
+    let mut lines = vec![];
+    for field in data.descendants() {
+        let value = match field.tag_name().name() {
+            "Data" => child_text(field, "value"),
+            "SimpleData" => field.text().map(|t| t.trim().to_string()),
+            _ => continue,
+        };
+        if let (Some(name), Some(value)) = (field.attribute("name"), value)
+            && !value.is_empty()
+        {
+            lines.push(format!("{name}: {value}"));
+        }
+    }
+    lines.join("\n")
+}
+
 pub fn parse_kml(text: &str) -> Result<Geo, String> {
     let doc = roxmltree::Document::parse(text).map_err(|e| e.to_string())?;
     let mut geo = Geo::default();
@@ -146,6 +184,9 @@ pub fn parse_kml(text: &str) -> Result<Geo, String> {
         .filter(|n| n.tag_name().name() == "Placemark")
     {
         let name = child_text(mark, "name").unwrap_or_default();
+        let description = child_text(mark, "description")
+            .filter(|d| !d.is_empty())
+            .unwrap_or_else(|| extended_data(mark));
         for shape in mark.descendants().filter(|n| n.is_element()) {
             let points = || {
                 child_text(shape, "coordinates")
@@ -157,12 +198,21 @@ pub fn parse_kml(text: &str) -> Result<Geo, String> {
                     if let Some(point) = points().into_iter().next() {
                         geo.places.push(Place {
                             name: name.clone(),
+                            description: description.clone(),
                             point,
                         });
                     }
                 }
-                "LineString" | "LinearRing" => {
+                "LineString" => {
                     geo.tracks.push(Track {
+                        name: name.clone(),
+                        points: points(),
+                        ..Default::default()
+                    });
+                }
+                // A polygon's outline: an area, not a way travelled.
+                "LinearRing" => {
+                    geo.areas.push(Track {
                         name: name.clone(),
                         points: points(),
                         ..Default::default()
@@ -205,15 +255,21 @@ pub fn write_gpx(geo: &Geo) -> String {
     );
     for place in &geo.places {
         let p = &place.point;
+        let desc = if place.description.is_empty() {
+            String::new()
+        } else {
+            format!("<desc>{}</desc>", xml(&place.description))
+        };
         s.push_str(&format!(
-            "  <wpt lat=\"{}\" lon=\"{}\">{}<name>{}</name></wpt>\n",
+            "  <wpt lat=\"{}\" lon=\"{}\">{}<name>{}</name>{desc}</wpt>\n",
             p.lat,
             p.lon,
             gpx_fields(p),
             xml(&place.name)
         ));
     }
-    for track in &geo.tracks {
+    // GPX has no areas: an outline is written as a track of its own.
+    for track in geo.tracks.iter().chain(&geo.areas) {
         s.push_str(&format!("  <trk><name>{}</name>\n", xml(&track.name)));
         for segment in track.segments() {
             s.push_str("  <trkseg>\n");
@@ -242,10 +298,23 @@ pub fn write_kml(geo: &Geo) -> String {
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<kml xmlns=\"http://www.opengis.net/kml/2.2\"><Document>\n",
     );
     for place in &geo.places {
+        let desc = if place.description.is_empty() {
+            String::new()
+        } else {
+            format!("<description>{}</description>", xml(&place.description))
+        };
         s.push_str(&format!(
-            "  <Placemark><name>{}</name><Point><coordinates>{}</coordinates></Point></Placemark>\n",
+            "  <Placemark><name>{}</name>{desc}<Point><coordinates>{}</coordinates></Point></Placemark>\n",
             xml(&place.name),
             kml_tuple(&place.point)
+        ));
+    }
+    for area in &geo.areas {
+        let ring: Vec<String> = area.points.iter().map(kml_tuple).collect();
+        s.push_str(&format!(
+            "  <Placemark><name>{}</name><Polygon><outerBoundaryIs><LinearRing><coordinates>{}</coordinates></LinearRing></outerBoundaryIs></Polygon></Placemark>\n",
+            xml(&area.name),
+            ring.join(" ")
         ));
     }
     for track in &geo.tracks {
@@ -276,9 +345,18 @@ pub fn write_kml(geo: &Geo) -> String {
 
 pub fn to_csv(geo: &Geo) -> Result<Vec<u8>, String> {
     let mut w = csv::Writer::from_writer(Vec::new());
-    w.write_record(["kind", "name", "lat", "lon", "elevation", "time", "segment"])
-        .map_err(|e| e.to_string())?;
-    let mut row = |kind: &str, name: &str, p: &Point, segment: &str| {
+    w.write_record([
+        "kind",
+        "name",
+        "lat",
+        "lon",
+        "elevation",
+        "time",
+        "segment",
+        "description",
+    ])
+    .map_err(|e| e.to_string())?;
+    let mut row = |kind: &str, name: &str, p: &Point, segment: &str, desc: &str| {
         let elevation = p.elevation.map(|e| e.to_string()).unwrap_or_default();
         w.write_record([
             kind,
@@ -288,17 +366,23 @@ pub fn to_csv(geo: &Geo) -> Result<Vec<u8>, String> {
             &elevation,
             p.time.as_deref().unwrap_or(""),
             segment,
+            desc,
         ])
         .map_err(|e| e.to_string())
     };
     for place in &geo.places {
-        row("place", &place.name, &place.point, "")?;
+        row("place", &place.name, &place.point, "", &place.description)?;
     }
     for track in &geo.tracks {
         for (n, segment) in track.segments().iter().enumerate() {
             for p in *segment {
-                row("track", &track.name, p, &(n + 1).to_string())?;
+                row("track", &track.name, p, &(n + 1).to_string(), "")?;
             }
+        }
+    }
+    for area in &geo.areas {
+        for p in &area.points {
+            row("area", &area.name, p, "", "")?;
         }
     }
     w.into_inner().map_err(|e| e.to_string())

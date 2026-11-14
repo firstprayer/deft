@@ -298,6 +298,9 @@ pub const WORD_FORMS: &[(&str, &str)] = &[
     ("caption", "subtitles"),
     ("captions", "subtitles"),
     ("transcript", "subtitles"),
+    ("shake", "shaky"),
+    ("shakes", "shaky"),
+    ("shaking", "shaky"),
 ];
 
 /// Crude stemming so "pages" matches "page" and "images" matches "image".

@@ -79,7 +79,7 @@ fn dispatch(args: &[String], stdin: impl FnOnce() -> Vec<u8>) -> Result<Outcome>
         "engine" => top::engine(rest),
         "skill" if wants_help(rest) => Ok(Outcome::text(top::SKILL_HELP.to_string())),
         "skill" => top::skill(rest),
-        "doctor" => top::doctor(),
+        "doctor" => top::doctor(rest),
         name => {
             let reg = registry();
             if let Some(group) = reg.group(name) {

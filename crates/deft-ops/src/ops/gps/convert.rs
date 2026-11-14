@@ -10,6 +10,7 @@ pub static OP: Op = Op {
     details: &[
         "KML has no times, so a GPX track loses them when converted to KML.",
         "Heart rate and other GPX extensions are not kept.",
+        "Place descriptions are kept; CSV has a description column.",
     ],
     input: Input::each(IN, "gpx|kml"),
     output: Output::one(OUT, "gpx|kml|csv"),

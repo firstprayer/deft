@@ -918,3 +918,20 @@ fn word_replace_counts_a_shape_once() {
     // Both copies of the box change.
     assert_eq!(xml.matches("words in a box").count(), 2, "{xml}");
 }
+
+#[test]
+fn a_cover_no_chapter_shows_goes_first() {
+    let book = epub::Book {
+        chapters: vec!["<p>Chapter one</p>".into()],
+        cover: Some("my cover.jpg".into()),
+        ..Default::default()
+    };
+    let md = book.markdown().unwrap();
+    assert!(md.starts_with("![Cover](my%20cover.jpg)"), "{md}");
+    let shown = epub::Book {
+        chapters: vec!["<p><img src=\"images/c.jpg\" alt=\"\"/></p>".into()],
+        cover: Some("c.jpg".into()),
+        ..Default::default()
+    };
+    assert_eq!(shown.markdown().unwrap().matches("c.jpg").count(), 1);
+}
