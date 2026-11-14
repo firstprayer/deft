@@ -186,6 +186,7 @@ fn stats_and_splits() {
 #[test]
 fn identifiers_are_not_numbers() {
     // 2024897743160061 fits a double, but Excel shows 15 digits: 2024897743160060.
+    // 2024251305450100 is exact in a double, and still an invoice number.
     for s in [
         "007",
         "+1234",
@@ -193,12 +194,13 @@ fn identifiers_are_not_numbers() {
         "12E3",
         "12345678901234567890",
         "2024897743160061",
+        "2024251305450100",
     ] {
         assert_eq!(parse_scalar(s, false), Cell::Text(s.into()), "{s}");
     }
     assert_eq!(parse_scalar("1.5e-7", false).number(), Some(1.5e-7));
     assert_eq!(parse_scalar("1E+5", false).number(), Some(1e5));
-    // Exactly what a double holds, so a large amount stays a number.
+    // A round amount stays a number.
     assert_eq!(
         parse_scalar("15832800000000000", false).number(),
         Some(15832800000000000.0)

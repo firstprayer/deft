@@ -239,9 +239,11 @@ fn number_in_name_only(s: &str, n: f64) -> bool {
     let bare_exponent = digits
         .split_once(['e', 'E'])
         .is_some_and(|(m, e)| !m.contains('.') && e.bytes().all(|b| b.is_ascii_digit()));
-    // Excel keeps 15 significant digits; a whole number with more is an id
-    // (an invoice, a card, a tracking number) and stays text.
-    let long = whole && digits.trim_matches('0').len() > 15;
+    // A whole number of 16 digits or more is an id (an invoice, a card, a
+    // tracking number): Excel shows it as 2.02425E+15 and edits it with 15
+    // digits. A round amount, ending in many zeros, stays a number.
+    let zeros = digits.len() - digits.trim_end_matches('0').len();
+    let long = whole && digits.len() >= 16 && zeros < 6;
     bare_exponent || long || (whole && format!("{n:.0}") != s)
 }
 
