@@ -100,8 +100,94 @@ fn cell(d: &Data) -> Cell {
     }
 }
 
+/// ODS cells can hold pictures; a picture's title and description are not
+/// cell text, but calamine collects all text inside a cell. Drop drawings
+/// from content.xml before reading.
+fn without_drawings(bytes: &[u8]) -> Option<Vec<u8>> {
+    use std::io::{Read, Write};
+    let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).ok()?;
+    let mut content = String::new();
+    zip.by_name("content.xml")
+        .ok()?
+        .read_to_string(&mut content)
+        .ok()?;
+    if !content.contains("<draw:") {
+        return None;
+    }
+    let cleaned = strip_elements(&content, "draw:");
+    let mut out = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    for i in 0..zip.len() {
+        let mut f = zip.by_index(i).ok()?;
+        let name = f.name().to_string();
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        out.start_file(name.as_str(), options).ok()?;
+        if name == "content.xml" {
+            out.write_all(cleaned.as_bytes()).ok()?;
+        } else {
+            let mut buf = Vec::new();
+            f.read_to_end(&mut buf).ok()?;
+            out.write_all(&buf).ok()?;
+        }
+    }
+    Some(out.finish().ok()?.into_inner())
+}
+
+/// Remove every element whose name starts with `prefix` (such as `draw:`),
+/// with what it contains.
+fn strip_elements(xml: &str, prefix: &str) -> String {
+    let open = format!("<{prefix}");
+    let mut out = String::with_capacity(xml.len());
+    let mut rest = xml;
+    while let Some(at) = rest.find(&open) {
+        out.push_str(&rest[..at]);
+        let tail = &rest[at..];
+        let Some(end) = tail.find('>') else {
+            return out;
+        };
+        if tail[..end].ends_with('/') {
+            rest = &tail[end + 1..];
+            continue;
+        }
+        // Skip to the matching close tag, counting nested drawings.
+        let mut depth = 0usize;
+        let mut i = 0;
+        let close = format!("</{prefix}");
+        loop {
+            let next_open = tail[i..].find(&open).map(|n| n + i);
+            let next_close = tail[i..].find(&close).map(|n| n + i);
+            match (next_open, next_close) {
+                (Some(o), Some(c)) if o < c => {
+                    let e = tail[o..].find('>').map_or(tail.len(), |n| o + n);
+                    if !tail[o..e].ends_with('/') {
+                        depth += 1;
+                    }
+                    i = e + 1;
+                }
+                (_, Some(c)) => {
+                    depth -= 1;
+                    i = tail[c..].find('>').map_or(tail.len(), |n| c + n + 1);
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                _ => return out,
+            }
+        }
+        rest = &tail[i..];
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Read every sheet of a workbook.
 pub fn read_workbook(bytes: &[u8]) -> Result<Vec<Table>> {
+    let cleaned = if bytes.starts_with(b"PK") {
+        without_drawings(bytes)
+    } else {
+        None
+    };
+    let bytes = cleaned.as_deref().unwrap_or(bytes);
     let mut wb = open_workbook_auto_from_rs(Cursor::new(bytes.to_vec()))
         .map_err(|e| err(ErrorCode::InputCorrupt, format!("workbook: {e}")))?;
     let mut out = Vec::new();

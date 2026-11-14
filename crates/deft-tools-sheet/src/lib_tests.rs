@@ -265,3 +265,12 @@ fn json_keeps_both_of_two_columns_with_one_name() {
     let out: serde_json::Value = serde_json::from_slice(&write_json(&t).unwrap()).unwrap();
     assert_eq!(out, serde_json::json!([{"a": 1, "a_2": 2}]));
 }
+
+#[test]
+fn drawings_in_ods_cells_are_not_text() {
+    let xml = r#"<table:table-cell><text:p>Back</text:p><draw:frame a="1"><draw:image/><svg:desc>Logo</svg:desc></draw:frame></table:table-cell>"#;
+    assert_eq!(
+        strip_elements(xml, "draw:"),
+        "<table:table-cell><text:p>Back</text:p></table:table-cell>"
+    );
+}
