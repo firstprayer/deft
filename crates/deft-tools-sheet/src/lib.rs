@@ -340,6 +340,18 @@ fn decode_legacy(bytes: &[u8]) -> Option<(String, &'static str)> {
     Some((text.into_owned(), enc.name()))
 }
 
+/// A number with a decimal point, such as 1148.7 or -0.25, that cannot be
+/// a thousands group (1.234).
+fn dot_decimal(s: &str) -> bool {
+    let s = s.strip_prefix('-').unwrap_or(s);
+    s.split_once('.').is_some_and(|(a, b)| {
+        !a.is_empty()
+            && !b.is_empty()
+            && b.len() != 3
+            && a.bytes().chain(b.bytes()).all(|c| c.is_ascii_digit())
+    })
+}
+
 /// Read CSV; the delimiter is detected from the first line.
 pub fn read_csv(bytes: &[u8], name: &str) -> Result<Table> {
     let mut notes = Vec::new();
@@ -353,23 +365,26 @@ pub fn read_csv(bytes: &[u8], name: &str) -> Result<Table> {
     let bytes = decoded.as_deref().map_or(bytes, str::as_bytes);
     let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes);
     let delimiter = detect_delimiter(bytes);
+    let mut records = Vec::new();
     let mut r = csv::ReaderBuilder::new()
         .has_headers(false)
         .flexible(true)
         .delimiter(delimiter)
         .from_reader(bytes);
-    let mut rows = Vec::new();
+    let mut rows: Vec<Vec<Cell>> = Vec::new();
     for rec in r.records() {
         let rec = rec.map_err(|e| match e.kind() {
             csv::ErrorKind::Utf8 { .. } => err(ErrorCode::InputCorrupt, "csv: not UTF-8 text")
                 .hint("convert it to UTF-8 first, for example with iconv"),
             _ => err(ErrorCode::InputCorrupt, format!("csv: {e}")),
         })?;
-        rows.push(
-            rec.iter()
-                .map(|s| parse_scalar(s, delimiter == b';'))
-                .collect(),
-        );
+        records.push(rec);
+    }
+    // A semicolon usually means comma decimals, but not in a file that writes
+    // its numbers with a dot (1148.7), such as Brazil's open data.
+    let decimal_comma = delimiter == b';' && !records.iter().flatten().any(dot_decimal);
+    for rec in &records {
+        rows.push(rec.iter().map(|s| parse_scalar(s, decimal_comma)).collect());
     }
     Ok(Table {
         name: name.into(),

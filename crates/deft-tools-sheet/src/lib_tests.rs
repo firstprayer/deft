@@ -291,3 +291,12 @@ fn drawings_in_ods_cells_are_not_text() {
         "<table:table-cell><text:p>Back</text:p></table:table-cell>"
     );
 }
+
+#[test]
+fn semicolon_files_with_dot_decimals_keep_comma_text() {
+    let t = read_csv(b"doc;value\n3800,00;1148.7\n", "br").unwrap();
+    assert_eq!(t.rows[1][0], Cell::Text("3800,00".into()));
+    assert_eq!(t.rows[1][1].number(), Some(1148.7));
+    let t = read_csv(b"doc;value\nx;1.234,50\n", "de").unwrap();
+    assert_eq!(t.rows[1][1].number(), Some(1234.5));
+}
