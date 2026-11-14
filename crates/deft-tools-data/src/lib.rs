@@ -706,7 +706,15 @@ pub fn render_doc(doc: &Doc, format: Format, style: Style) -> Result<(Vec<u8>, V
             let Value::Object(m) = &v else { unreachable!() };
             toml_out::to_toml(m, Some(&comments), &doc.floats)
         }
-        Format::Xml => xml::render(&v),
+        Format::Xml => {
+            let (text, renamed) = xml::render(&v);
+            if renamed > 0 {
+                warnings.push(format!(
+                    "{renamed} keys are not XML names; written as <item key=\"...\">"
+                ));
+            }
+            text
+        }
         other => {
             return Err(err(
                 ErrorCode::InputUnsupported,

@@ -197,6 +197,40 @@ fn nan_and_inf_survive_into_yaml_and_toml_and_are_reported_for_json() {
 }
 
 #[test]
+fn xml_keeps_keys_that_are_not_names_and_empty_lists() {
+    let (out, w) = render(
+        &json!({"r": {"+1": 4, "runWarnings": [], "a/b.py": "x"}}),
+        Format::Xml,
+        Style::default(),
+    )
+    .unwrap();
+    let out = String::from_utf8(out).unwrap();
+    assert!(out.contains("<item key=\"+1\">4</item>"), "{out}");
+    assert!(out.contains("<runWarnings/>"));
+    assert!(out.contains("<item key=\"a/b.py\">x</item>"));
+    assert!(w[0].contains("2 keys are not XML names"));
+}
+
+#[test]
+fn plist_keys_stay_with_their_values() {
+    let src = br#"<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleName</key><string>IINA</string><key>Types</key><array><dict><key>n</key><integer>3</integer><key>ok</key><true/></dict></array></dict></plist>"#;
+    let v = parse(src, Format::Xml).unwrap();
+    assert_eq!(
+        v,
+        json!({"plist": {"@version": "1.0", "dict": {"CFBundleName": "IINA", "Types": [{"n": 3, "ok": true}]}}})
+    );
+}
+
+#[test]
+fn mixed_xml_content_keeps_its_order() {
+    let v = parse(b"<p>Some <b>bold</b> <i>and</i> text</p>", Format::Xml).unwrap();
+    assert_eq!(
+        v,
+        json!({"p": {"#content": ["Some ", {"b": "bold"}, " ", {"i": "and"}, " text"]}})
+    );
+}
+
+#[test]
 fn json_floats_keep_their_last_digit() {
     let v = parse(b"[90.95299999999995, 14.116999999999999]", Format::Json).unwrap();
     assert_eq!(v.to_string(), "[90.95299999999995,14.116999999999999]");
