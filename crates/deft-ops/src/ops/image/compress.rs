@@ -1,6 +1,5 @@
 use deft_core::prelude::*;
 
-const FORMATS: &[Format] = &[Format::Jpeg, Format::Png, Format::Webp];
 /// GIF is taken only to be refused with the right advice.
 const INPUTS: &[Format] = &[Format::Jpeg, Format::Png, Format::Webp, Format::Gif];
 /// Below this JPEG or WebP quality a photo shows blocks and colour shifts.
@@ -15,7 +14,8 @@ pub static OP: Op = Op {
         "A target reached only below quality 30 gives a warning: resizing first keeps it sharper.",
     ],
     input: Input::each(INPUTS, "JPEG, PNG or WebP"),
-    output: Output::one(FORMATS, "image"),
+    // GIF here too, so `-o out.gif` reaches the refusal that says why.
+    output: Output::one(INPUTS, "image"),
     params: &[
         param(
             "quality",
@@ -225,5 +225,9 @@ mod tests {
         assert_eq!(e.code, ErrorCode::InputUnsupported);
         assert!(e.message.contains("first frame"), "{}", e.message);
         assert!(e.hint.is_none());
+        assert!(
+            super::OP.output.formats.contains(&Format::Gif),
+            "-o out.gif reaches it"
+        );
     }
 }

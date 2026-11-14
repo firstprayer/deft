@@ -2,7 +2,8 @@ use super::_common::IN;
 use deft_core::prelude::*;
 use deft_tools_image::exif::Fields;
 
-const OUT: &[Format] = &[Format::Jpeg, Format::Png, Format::Webp, Format::Tiff];
+/// The formats tags are written into.
+const WRITES: &[Format] = &[Format::Jpeg, Format::Png, Format::Webp, Format::Tiff];
 
 pub static OP: Op = Op {
     id: "image.meta",
@@ -13,7 +14,8 @@ pub static OP: Op = Op {
         "Tags can be written into JPEG, PNG, WebP and TIFF; other formats, such as HEIC, are read only.",
     ],
     input: Input::each(IN, "image"),
-    output: Output::one(OUT, "image"),
+    // Every input format, so `-o out.heic` reaches the refusal that says why.
+    output: Output::one(IN, "image"),
     params: &[
         param("title", Kind::Text, "Description"),
         param("author", Kind::Text, "Artist"),
@@ -75,7 +77,7 @@ fn run(job: &Job) -> Result<OpResult> {
         let n = tags.len();
         return Ok(OpResult::report(tags, format!("{n} tags")));
     }
-    if !OUT.contains(&format) {
+    if !WRITES.contains(&format) {
         return Err(err(
             ErrorCode::InputUnsupported,
             format!(
@@ -95,4 +97,27 @@ fn run(job: &Job) -> Result<OpResult> {
     }
     let bytes = deft_tools_image::exif::write(input.bytes()?, format, &fields)?;
     Ok(OpResult::one(Produced::bytes(bytes, format)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::_common::testing::try_run;
+    use deft_core::prelude::*;
+
+    #[test]
+    fn writing_a_heic_is_refused_with_the_formats_that_work() {
+        let e = try_run(
+            &super::OP,
+            vec![(b"....ftypheic".to_vec(), Format::Heic)],
+            &[("author", "Ada")],
+        )
+        .unwrap_err();
+        assert_eq!(e.code, ErrorCode::InputUnsupported);
+        assert!(
+            e.message.contains("JPEG, PNG, WebP and TIFF"),
+            "{}",
+            e.message
+        );
+        assert!(super::OP.output.formats.contains(&Format::Heic));
+    }
 }
