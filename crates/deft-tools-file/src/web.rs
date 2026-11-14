@@ -133,21 +133,64 @@ pub fn fetch_pictures(urls: &[String], limits: Limits) -> HashMap<String, Result
         .build();
     let agent: ureq::Agent = config.into();
     let start = Instant::now();
-    let queue = Mutex::new(unique.iter().enumerate());
+    let host = |url: &str| {
+        let rest = absolute(url).unwrap_or_default();
+        let rest = rest
+            .split_once("://")
+            .map_or(rest.as_str(), |(_, r)| r)
+            .to_string();
+        rest.split(['/', '?', '#'])
+            .next()
+            .unwrap_or("")
+            .to_ascii_lowercase()
+    };
+    // Each site's first picture goes first, so one silent site does not
+    // hold up the others.
+    let mut seen: HashMap<String, usize> = HashMap::new();
+    let mut order: Vec<(usize, usize, &String)> = unique
+        .iter()
+        .enumerate()
+        .map(|(i, u)| {
+            let n = seen.entry(host(u)).or_default();
+            *n += 1;
+            (*n, i, *u)
+        })
+        .collect();
+    order.sort();
+    let queue = Mutex::new(order.into_iter().map(|(_, i, u)| (i, u)));
     let results = Mutex::new(HashMap::new());
+    // A site that does not answer once is not waited for again.
+    let silent: Mutex<Vec<String>> = Mutex::new(Vec::new());
     std::thread::scope(|s| {
         for _ in 0..limits.parallel.clamp(1, 16) {
             s.spawn(|| {
                 loop {
                     let next = queue.lock().map(|mut q| q.next()).ok().flatten();
                     let Some((n, url)) = next else { break };
+                    let site = host(url);
+                    let gave_up = silent.lock().map(|s| s.contains(&site)).unwrap_or(false);
                     let result = if n >= limits.max_count {
                         Err("too many pictures in one document".to_string())
                     } else if start.elapsed() > limits.total {
                         Err("time limit for downloads reached".to_string())
+                    } else if gave_up {
+                        Err("the site did not answer".to_string())
                     } else {
                         fetch_one(&agent, url, &limits)
                     };
+                    // No answer at all, as opposed to an answer deft cannot use.
+                    let no_answer = result.as_ref().is_err_and(|e| {
+                        !e.starts_with("HTTP ")
+                            && !matches!(
+                                e.as_str(),
+                                "not a picture"
+                                    | "larger than the size limit"
+                                    | "not a web address"
+                            )
+                    });
+                    if no_answer && let Ok(mut s) = silent.lock() {
+                        s.push(site);
+                    }
                     if let Ok(mut r) = results.lock() {
                         r.insert((*url).clone(), result);
                     }
