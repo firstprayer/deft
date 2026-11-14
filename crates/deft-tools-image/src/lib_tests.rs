@@ -319,3 +319,32 @@ fn tags_are_written_into_webp_without_touching_the_picture() {
     );
     assert_eq!(twice.windows(4).filter(|w| *w == b"EXIF").count(), 1);
 }
+
+#[test]
+fn gps_behind_a_pointer_of_the_ifd_type_is_found() {
+    // A little-endian TIFF: IFD0 with a GPS pointer of type 13 (IFD), and a
+    // GPS IFD with latitude 49 N, as a Parrot Sequoia camera writes it.
+    let mut t = b"II\x2A\0\x08\0\0\0".to_vec();
+    t.extend_from_slice(&[1, 0]);
+    t.extend_from_slice(&[0x25, 0x88, 13, 0, 1, 0, 0, 0, 26, 0, 0, 0]);
+    t.extend_from_slice(&[0; 4]);
+    assert_eq!(t.len(), 26);
+    t.extend_from_slice(&[2, 0]);
+    t.extend_from_slice(&[1, 0, 2, 0, 2, 0, 0, 0, b'N', 0, 0, 0]);
+    t.extend_from_slice(&[2, 0, 5, 0, 3, 0, 0, 0, 56, 0, 0, 0]);
+    t.extend_from_slice(&[0; 4]);
+    assert_eq!(t.len(), 56);
+    for (n, d) in [(49u32, 1u32), (0, 1), (0, 1)] {
+        t.extend_from_slice(&n.to_le_bytes());
+        t.extend_from_slice(&d.to_le_bytes());
+    }
+    let tags = crate::exif::read(&t);
+    assert_eq!(
+        tags.get("latitude").and_then(|v| v.as_f64()),
+        None,
+        "no longitude, no pair"
+    );
+    assert!(tags.contains_key("GPSLatitude"), "{tags:?}");
+    assert!(metadata_summary(&t, Format::Tiff).1, "has GPS");
+}
+

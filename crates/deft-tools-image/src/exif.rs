@@ -12,7 +12,50 @@ fn degrees(field: &exif::Field) -> Option<f64> {
     Some(part(0) + part(1) / 60.0 + part(2) / 3600.0)
 }
 
+/// A TIFF whose Exif or GPS pointer has the IFD type (13) instead of LONG, as
+/// some cameras write it, patched to LONG; the reader skips such pointers and
+/// with them every Exif and GPS tag. None when nothing needs patching.
+pub(crate) fn long_pointers(bytes: &[u8]) -> Option<Vec<u8>> {
+    let big = match bytes.get(..4)? {
+        b"MM\0\x2A" => true,
+        b"II\x2A\0" => false,
+        _ => return None,
+    };
+    let u16_at = |i: usize| -> Option<u16> {
+        let b: [u8; 2] = bytes.get(i..i + 2)?.try_into().ok()?;
+        Some(if big {
+            u16::from_be_bytes(b)
+        } else {
+            u16::from_le_bytes(b)
+        })
+    };
+    let u32_at = |i: usize| -> Option<u32> {
+        let b: [u8; 4] = bytes.get(i..i + 4)?.try_into().ok()?;
+        Some(if big {
+            u32::from_be_bytes(b)
+        } else {
+            u32::from_le_bytes(b)
+        })
+    };
+    let ifd = u32_at(4)? as usize;
+    let fix: Vec<usize> = (0..u16_at(ifd)?.min(1024) as usize)
+        .map(|k| ifd + 2 + k * 12)
+        .filter(|&e| matches!(u16_at(e), Some(0x8769 | 0x8825)) && u16_at(e + 2) == Some(13))
+        .collect();
+    if fix.is_empty() {
+        return None;
+    }
+    let mut out = bytes.to_vec();
+    let long: [u8; 2] = if big { [0, 4] } else { [4, 0] };
+    for e in fix {
+        out[e + 2..e + 4].copy_from_slice(&long);
+    }
+    Some(out)
+}
+
 fn parse(bytes: &[u8]) -> Option<exif::Exif> {
+    let patched = long_pointers(bytes);
+    let bytes = patched.as_deref().unwrap_or(bytes);
     // One odd tag should not hide the rest, such as a location.
     let mut reader = exif::Reader::new();
     reader.continue_on_error(true);
