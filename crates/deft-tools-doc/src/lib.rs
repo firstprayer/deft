@@ -27,6 +27,9 @@ pub struct Span {
     pub image: Option<String>,
     /// A note marker: `[1]` in the text, `[1]:` where the note itself starts.
     pub note: bool,
+    /// A number the document gives a paragraph, such as "2.1" or "(a)",
+    /// which Word does not count as words.
+    pub label: bool,
 }
 
 impl Span {
@@ -42,6 +45,15 @@ impl Span {
         Span {
             text: text.into(),
             note: true,
+            ..Default::default()
+        }
+    }
+
+    /// A paragraph's number, see `Span::label`.
+    pub fn label(text: impl Into<String>) -> Span {
+        Span {
+            text: text.into(),
+            label: true,
             ..Default::default()
         }
     }
@@ -97,25 +109,54 @@ pub struct Document {
     pub fallbacks: std::collections::HashMap<String, Vec<u8>>,
 }
 
-fn spans_text(spans: &[Span], out: &mut String) {
+fn spans_text(spans: &[Span], labels: bool, out: &mut String) {
     for s in spans {
-        out.push_str(&s.text);
+        if labels || !s.label {
+            out.push_str(&s.text);
+        }
     }
 }
 
-fn blocks_text(blocks: &[Block], out: &mut String) {
+/// Plain text of blocks. With `labels`, list items keep their numbers or
+/// bullets, and numbered paragraphs their numbers, as Word's own "plain
+/// text" does; without, the text is what Word counts as words.
+fn blocks_text(blocks: &[Block], labels: bool, depth: usize, out: &mut String) {
+    let indent = "  ".repeat(depth);
     for b in blocks {
         match b {
             Block::Heading(_, s) | Block::Paragraph(s) => {
-                spans_text(s, out);
+                out.push_str(&indent);
+                spans_text(s, labels, out);
                 out.push('\n');
             }
-            Block::List { items, .. } => {
-                for item in items {
-                    blocks_text(item, out);
+            Block::List {
+                ordered,
+                start,
+                items,
+            } => {
+                for (n, item) in items.iter().enumerate() {
+                    for (i, inner) in item.iter().enumerate() {
+                        match inner {
+                            Block::Paragraph(s) if i == 0 && labels => {
+                                out.push_str(&indent);
+                                if *ordered {
+                                    out.push_str(&format!("{}. ", start + n as u64));
+                                } else {
+                                    out.push_str("- ");
+                                }
+                                spans_text(s, labels, out);
+                                out.push('\n');
+                            }
+                            other => {
+                                blocks_text(std::slice::from_ref(other), labels, depth + 1, out);
+                                // Each block ends in a blank line; items stay together.
+                                out.pop();
+                            }
+                        }
+                    }
                 }
             }
-            Block::Quote(inner) => blocks_text(inner, out),
+            Block::Quote(inner) => blocks_text(inner, labels, depth, out),
             Block::Code(c) => {
                 out.push_str(c);
                 out.push('\n');
@@ -126,11 +167,24 @@ fn blocks_text(blocks: &[Block], out: &mut String) {
                         .iter()
                         .map(|c| {
                             let mut t = String::new();
-                            spans_text(c, &mut t);
+                            spans_text(c, labels, &mut t);
                             t
                         })
                         .collect();
-                    out.push_str(&cells.join("\t"));
+                    // Cells of one line share a line, tab-separated. A row
+                    // with paragraphs in a cell gives each cell its own
+                    // lines, as Word's plain text does, so list numbers in
+                    // cells start their lines.
+                    let filled: Vec<&String> =
+                        cells.iter().filter(|c| !c.trim().is_empty()).collect();
+                    if filled.len() <= 1 || filled.iter().any(|c| c.contains('\n')) {
+                        let lines: Vec<&str> = filled.iter().map(|c| c.trim()).collect();
+                        out.push_str(&lines.join("\n"));
+                    } else {
+                        let cells: Vec<String> =
+                            cells.iter().map(|c| c.replace('\n', " ")).collect();
+                        out.push_str(&cells.join("\t"));
+                    }
                     out.push('\n');
                 }
             }
@@ -145,14 +199,17 @@ impl Document {
     /// Plain text, one paragraph per line block.
     pub fn text(&self) -> String {
         let mut out = String::new();
-        blocks_text(&self.blocks, &mut out);
+        blocks_text(&self.blocks, true, 0, &mut out);
         let trimmed = out.trim_end().to_string();
         trimmed + "\n"
     }
 
-    /// Words as Word counts them; see `deft_core::text::count_words`.
+    /// Words as Word counts them, without list numbers; see
+    /// `deft_core::text::count_words`.
     pub fn words(&self) -> usize {
-        deft_core::text::count_words(&self.text())
+        let mut out = String::new();
+        blocks_text(&self.blocks, false, 0, &mut out);
+        deft_core::text::count_words(&out)
     }
 }
 
