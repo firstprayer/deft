@@ -46,16 +46,16 @@ resize my photos to 1080 pixels wide | image resize
 convert heic photos to jpg | image convert
 remove gps location from photos before posting | image strip
 make a favicon from my logo | image favicon
-put my logo on a video | video watermark
-steady a shaky phone video | video stabilize
-make a landscape video fit a vertical 9:16 frame with black bars | video pad
+put my logo on a video | -
+steady a shaky phone video | -
+make a landscape video fit a vertical 9:16 frame with black bars | -
 turn a word document into markdown | doc to-md
 replace a name everywhere in a docx | doc replace
 get the text out of a powerpoint | slides to-text
 excel to csv | sheet convert
 pivot table of sales by region and month | sheet pivot
 split a big csv into files of 1000 rows | sheet split
-compare two json config files | json diff
+compare two json config files | -
 validate json against a schema | json validate
 markdown to pdf | md to-pdf
 make an epub from markdown chapters | md to-epub
