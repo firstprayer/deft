@@ -513,13 +513,18 @@ pub(super) fn find(reg: &Registry, query: &str) -> Vec<(String, &'static Op, u32
         }
     }
 
+    let files = files(query);
+    // Tables out of a PDF: no command finds them well enough on real files,
+    // and `pdf extract-images` only looks alike.
+    let pdf_tables =
+        files.inputs.contains(&Format::Pdf) && all.iter().any(|w| w == "table" || w == "tables");
     let undone = all.iter().any(|w| UNDONE.contains(&w.as_str()))
-        || all.windows(2).any(|w| w[0] == "black" && w[1] == "out");
+        || all.windows(2).any(|w| w[0] == "black" && w[1] == "out")
+        || pdf_tables;
     if undone {
         return vec![];
     }
 
-    let files = files(query);
     // A format with its own group is handled there: "merge two json files" is
     // not a job for `sheet merge`, which also reads JSON rows.
     let homes: Vec<&str> = files

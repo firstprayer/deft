@@ -632,7 +632,6 @@ impl PageText {
             .map(|r| [r[0] - 1.0, r[1] - 1.0, r[2] - r[0] + 2.0, r[3] - r[1] + 2.0])
             .collect()
     }
-
 }
 
 impl Renderer {

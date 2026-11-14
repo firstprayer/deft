@@ -3,30 +3,29 @@ source: crates/deft-cli/../../tests/unit/help.rs
 expression: "help::group(g.name)"
 ---
 deft pdf - commands (input -> output)
-  info            pdf -> report       Pages, size, metadata, fonts, images
-  compare         pdf... -> report    Compare two PDFs: text and pixels
-  compress        pdf -> pdf          Make smaller: --level, --target-size 2MB
-  crop            pdf -> pdf          Trim pages: --margin, --box, --auto
-  decrypt         pdf -> pdf          Remove a password you know
-  delete          pdf -> pdf          Remove pages: --pages 2,5-7
-  encrypt         pdf -> pdf          Protect with a password (AES-256)
-  extract-images  pdf -> image...     Save embedded pictures, unchanged
-  extract-sheets  pdf -> csv|xlsx...  Save each table apart [beta]
-  fields          pdf -> report       List form fields
-  fill            pdf -> pdf          Fill a form from JSON: --data values.json
-  flatten         pdf -> pdf          Bake forms into pages
-  from-images     image... -> pdf     One page per image
-  from-md         md -> pdf           Typeset Markdown as PDF
-  merge           pdf... -> pdf       Join PDFs in the given order
-  meta            pdf -> pdf          Read or set metadata and bookmarks
-  number          pdf -> pdf          Add page numbers: --format
-  ocr             pdf -> pdf|txt      Make a scan searchable
-  resize          pdf -> pdf          Fit pages to --page-size a4
-  rotate          pdf -> pdf          Turn pages clockwise: --angle 90, --pages
-  search          pdf -> report       Find text: --text invoice
-  select          pdf -> pdf          Keep and reorder pages
-  split           pdf -> pdf...       Split: per page, --every N, --ranges
-  to-images       pdf -> png|jpg...   Render pages: --dpi, --pages
-  to-text         pdf -> txt          Extract text
-  watermark       pdf -> pdf          Stamp text or an image on pages
+  info            pdf -> report      Pages, size, metadata, fonts, images
+  compare         pdf... -> report   Compare two PDFs: text and pixels
+  compress        pdf -> pdf         Make smaller: --level, --target-size 2MB
+  crop            pdf -> pdf         Trim pages: --margin, --box, --auto
+  decrypt         pdf -> pdf         Remove a password you know
+  delete          pdf -> pdf         Remove pages: --pages 2,5-7
+  encrypt         pdf -> pdf         Protect with a password (AES-256)
+  extract-images  pdf -> image...    Save embedded pictures, unchanged
+  fields          pdf -> report      List form fields
+  fill            pdf -> pdf         Fill a form from JSON: --data values.json
+  flatten         pdf -> pdf         Bake forms into pages
+  from-images     image... -> pdf    One page per image
+  from-md         md -> pdf          Typeset Markdown as PDF
+  merge           pdf... -> pdf      Join PDFs in the given order
+  meta            pdf -> pdf         Read or set metadata and bookmarks
+  number          pdf -> pdf         Add page numbers: --format
+  ocr             pdf -> pdf|txt     Make a scan searchable
+  resize          pdf -> pdf         Fit pages to --page-size a4
+  rotate          pdf -> pdf         Turn pages clockwise: --angle 90, --pages
+  search          pdf -> report      Find text: --text invoice
+  select          pdf -> pdf         Keep and reorder pages
+  split           pdf -> pdf...      Split: per page, --every N, --ranges
+  to-images       pdf -> png|jpg...  Render pages: --dpi, --pages
+  to-text         pdf -> txt         Extract text
+  watermark       pdf -> pdf         Stamp text or an image on pages
 More: deft pdf <command> --help
