@@ -9,11 +9,17 @@ mod diff;
 pub mod geo;
 mod query;
 mod schema;
+mod toml_format;
 mod xml;
 
 pub use diff::{Change, diff};
 pub use query::query;
 pub use schema::Checked;
+
+/// Tidy TOML text, keeping its comments; see `toml_format`.
+pub fn format_toml(text: &str, sort: bool) -> Result<String> {
+    toml_format::format(text, sort).map_err(|e| bad(Format::Toml, e))
+}
 
 fn bad(format: Format, e: impl std::fmt::Display) -> deft_core::error::DeftError {
     err(ErrorCode::InputCorrupt, format!("invalid {format}: {e}"))

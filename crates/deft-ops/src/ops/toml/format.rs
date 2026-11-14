@@ -4,6 +4,7 @@ use deft_core::prelude::*;
 pub static OP: Op = Op {
     id: "toml.format",
     summary: "Tidy a file: --sort-keys",
+    details: &["Comments, blank lines and number spellings are kept."],
     input: Input::each(TOML, "toml"),
     output: Output::one(&[Format::Toml], "toml"),
     params: &[SORT_KEYS],

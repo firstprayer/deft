@@ -87,37 +87,25 @@ pub fn convert(job: &Job) -> Result<OpResult> {
     write(job, &load(job.input())?, Default::default())
 }
 
-/// A YAML file of several documents stays several documents.
-fn documents(job: &Job, docs: &[Json], style: deft_tools_data::Style) -> Result<OpResult> {
-    let mut text = Vec::new();
-    for (i, doc) in docs.iter().enumerate() {
-        if i > 0 {
-            text.extend_from_slice(b"---\n");
-        }
-        text.extend(deft_tools_data::render(doc, Format::Yaml, style)?.0);
-    }
-    let mut res = OpResult::one(Produced::bytes(text, Format::Yaml));
-    for w in lost(&job.inputs) {
-        res = res.warn(w);
-    }
-    Ok(res)
-}
-
+/// TOML is tidied in its own text, so comments and spellings stay.
 pub fn format(job: &Job) -> Result<OpResult> {
-    let p = job.params;
-    let style = deft_tools_data::Style {
-        compact: p.flag("compact"),
-        sort_keys: p.flag("sort-keys"),
-        indent: p.opt_int("indent").unwrap_or(2) as usize,
-    };
     let input = job.input();
-    if input.format == Some(Format::Yaml) {
-        let docs = deft_tools_data::yaml_documents(input.bytes()?)?;
-        if docs.len() > 1 {
-            return documents(job, &docs, style);
-        }
-    }
-    write(job, &load(input)?, style)
+    let text = std::str::from_utf8(input.bytes()?).map_err(|e| {
+        err(
+            ErrorCode::InputCorrupt,
+            format!("{}: not UTF-8 text: {e}", input.display),
+        )
+    })?;
+    let text = text.strip_prefix('\u{FEFF}').unwrap_or(text);
+    let out =
+        deft_tools_data::format_toml(text, job.params.flag("sort-keys")).map_err(|mut e| {
+            e.message = format!("{}: {}", input.display, e.message);
+            e
+        })?;
+    Ok(OpResult::one(Produced::bytes(
+        out.into_bytes(),
+        Format::Toml,
+    )))
 }
 
 pub fn merge(job: &Job) -> Result<OpResult> {

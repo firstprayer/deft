@@ -54,6 +54,7 @@ jaq-json = { version = "=2.0.3", features = ["serde"] }
 serde_yaml = "=0.9.34"
 toml = { version = "=0.8.23", features = ["preserve_order"] }
 # Versions that other dependencies already pull in.
+toml_edit = "=0.22.27"
 fancy-regex = "=0.16.2"
 url = "=2.5.8"
 roxmltree = "=0.21.2"
