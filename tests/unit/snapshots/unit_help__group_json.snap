@@ -3,7 +3,6 @@ source: crates/deft-cli/../../tests/unit/help.rs
 expression: "help::group(g.name)"
 ---
 deft json - commands (input -> output)
-  convert   json -> data       Change format: --to json|jsonl|yaml|toml|xml
-  diff      json... -> report  Compare two files by structure
-  validate  json -> report     Check syntax, or a JSON Schema with --schema
+  convert   json -> data    Change format: --to json|jsonl|yaml|toml|xml
+  validate  json -> report  Check syntax, or a JSON Schema with --schema
 More: deft json <command> --help

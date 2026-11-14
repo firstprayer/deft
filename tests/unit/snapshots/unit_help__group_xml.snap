@@ -3,9 +3,5 @@ source: crates/deft-cli/../../tests/unit/help.rs
 expression: "help::group(g.name)"
 ---
 deft xml - commands (input -> output)
-  convert   xml -> data       Change format: --to json|yaml|toml|jsonl
-  diff      xml... -> report  Compare two files by structure
-  format    xml -> xml        Tidy a file: --sort-keys
-  merge     xml... -> xml     Deep-merge files; later files win
-  validate  xml -> report     Check syntax, or a JSON Schema with --schema
+  convert  xml -> data  Change format: --to json|yaml|toml|jsonl
 More: deft xml <command> --help
