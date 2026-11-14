@@ -123,3 +123,16 @@ fn a_polygon_is_an_area_not_a_track() {
     let back = parse_kml(&write_kml(&geo)).unwrap();
     assert_eq!(back.areas[0].points.len(), 4);
 }
+
+#[test]
+fn extended_data_describes_a_place_without_a_description() {
+    let kml = r#"<kml xmlns="http://www.opengis.net/kml/2.2"><Document><Placemark><name>Cache</name>
+<ExtendedData><Data name="gc_num"><value>GC7FA4</value></Data>
+<SchemaData><SimpleData name="placer">Sverdrup2</SimpleData></SchemaData></ExtendedData>
+<Point><coordinates>-71.2,46.8,0</coordinates></Point></Placemark></Document></kml>"#;
+    let geo = parse_kml(kml).unwrap();
+    assert_eq!(
+        geo.places[0].description,
+        "gc_num: GC7FA4\nplacer: Sverdrup2"
+    );
+}

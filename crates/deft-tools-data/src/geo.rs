@@ -151,6 +151,31 @@ fn gx_track(shape: roxmltree::Node) -> Vec<Point> {
         .collect()
 }
 
+/// A placemark's ExtendedData as "name: value" lines, for a place with no
+/// description: Google Earth keeps a geocache's details there.
+fn extended_data(mark: roxmltree::Node) -> String {
+    let Some(data) = mark
+        .children()
+        .find(|c| c.tag_name().name() == "ExtendedData")
+    else {
+        return String::new();
+    };
+    let mut lines = vec![];
+    for field in data.descendants() {
+        let value = match field.tag_name().name() {
+            "Data" => child_text(field, "value"),
+            "SimpleData" => field.text().map(|t| t.trim().to_string()),
+            _ => continue,
+        };
+        if let (Some(name), Some(value)) = (field.attribute("name"), value)
+            && !value.is_empty()
+        {
+            lines.push(format!("{name}: {value}"));
+        }
+    }
+    lines.join("\n")
+}
+
 pub fn parse_kml(text: &str) -> Result<Geo, String> {
     let doc = roxmltree::Document::parse(text).map_err(|e| e.to_string())?;
     let mut geo = Geo::default();
@@ -159,7 +184,9 @@ pub fn parse_kml(text: &str) -> Result<Geo, String> {
         .filter(|n| n.tag_name().name() == "Placemark")
     {
         let name = child_text(mark, "name").unwrap_or_default();
-        let description = child_text(mark, "description").unwrap_or_default();
+        let description = child_text(mark, "description")
+            .filter(|d| !d.is_empty())
+            .unwrap_or_else(|| extended_data(mark));
         for shape in mark.descendants().filter(|n| n.is_element()) {
             let points = || {
                 child_text(shape, "coordinates")
