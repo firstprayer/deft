@@ -252,6 +252,158 @@ pub fn save_protected(doc: &mut Document) -> Result<Vec<u8>> {
     crate::writer::write_encrypted(doc, &state, encryption_dictionary(&state)?)
 }
 
+/// Decrypt the attachments of a file where only they are encrypted (Acrobat's
+/// "encrypt only file attachments", which `load` reads without a password),
+/// so the document needs no password at all. A /Crypt filter on any stream
+/// goes too. Does nothing to other files.
+pub fn decrypt_attachments(doc: &mut Document, password: Option<&str>) -> Result<()> {
+    let Ok(key) = doc.trailer.get(b"Encrypt").cloned() else {
+        return Ok(());
+    };
+    let locked = || {
+        match password {
+        Some(_) => err(
+            ErrorCode::InputEncrypted,
+            "wrong password: it does not open the encrypted attachments",
+        ),
+        None => err(
+            ErrorCode::InputEncrypted,
+            "the attachments of this PDF are encrypted, so its password cannot be removed without it",
+        )
+        .hint("add --password <password>; only the attachments need it"),
+    }
+    };
+    let state = EncryptionState::decode(doc, password.unwrap_or("")).map_err(|_| locked())?;
+    let dict = deref(doc, &key).as_dict().map_err(|_| locked())?;
+    let name = |k: &[u8]| {
+        dict.get(k)
+            .ok()
+            .and_then(|o| o.as_name().ok())
+            .map(<[u8]>::to_vec)
+    };
+    // Attachments use /EFF, else the stream filter.
+    let default = name(b"EFF")
+        .or_else(|| name(b"StmF"))
+        .unwrap_or_else(|| b"Identity".to_vec());
+    let broken = || {
+        err(
+            ErrorCode::InputCorrupt,
+            "could not decrypt the attachments of this PDF",
+        )
+    };
+    let attached = embedded_files(doc);
+    let ids: Vec<ObjectId> = doc.objects.keys().copied().collect();
+    for id in ids {
+        let Ok(Object::Stream(stream)) = doc.get_object_mut(id) else {
+            continue;
+        };
+        let embedded = attached.binary_search(&id).is_ok();
+        let has_crypt = stream
+            .filters()
+            .is_ok_and(|f| f.iter().any(|n| *n == b"Crypt"));
+        if !embedded && !has_crypt {
+            continue;
+        }
+        let filters: Vec<Vec<u8>> = stream
+            .filters()
+            .map(|f| f.iter().map(|n| n.to_vec()).collect())
+            .unwrap_or_default();
+        let crypt = filters.iter().position(|f| f == b"Crypt");
+        let filter = match crypt {
+            // A /Crypt filter names its own crypt filter; none means Identity.
+            Some(at) => {
+                let parms = match stream.dict.get(b"DecodeParms") {
+                    Ok(Object::Array(a)) => a.get(at).cloned(),
+                    Ok(o) => Some(o.clone()),
+                    Err(_) => None,
+                };
+                parms
+                    .and_then(|p| p.as_dict().ok().and_then(|d| d.get(b"Name").ok()).cloned())
+                    .and_then(|n| n.as_name().ok().map(<[u8]>::to_vec))
+                    .unwrap_or_else(|| b"Identity".to_vec())
+            }
+            None if embedded => default.clone(),
+            // Other streams use /StmF, which is Identity in these files.
+            None => b"Identity".to_vec(),
+        };
+        if filter != b"Identity" {
+            let crypt_filter = state.crypt_filters().get(&filter).ok_or_else(broken)?;
+            let k = crypt_filter
+                .compute_key(state.file_encryption_key(), id)
+                .map_err(|_| broken())?;
+            let plain = crypt_filter
+                .decrypt(&k, &stream.content)
+                .map_err(|_| broken())?;
+            stream.set_content(plain);
+        }
+        if let Some(at) = crypt {
+            drop_filter(&mut stream.dict, at, filters.len());
+        }
+        // A wrong key gives noise, which a compressed stream shows.
+        if stream
+            .filters()
+            .is_ok_and(|f| f.iter().any(|n| *n == b"FlateDecode"))
+            && stream.decompressed_content().is_err()
+        {
+            return Err(broken());
+        }
+    }
+    doc.trailer.remove(b"Encrypt");
+    if let Ok(id) = key.as_reference() {
+        doc.objects.remove(&id);
+    }
+    doc.encryption_state = None;
+    Ok(())
+}
+
+/// Remove filter `at` of `count` from a stream dictionary, with its parameters.
+fn drop_filter(dict: &mut Dictionary, at: usize, count: usize) {
+    if count <= 1 {
+        dict.remove(b"Filter");
+        dict.remove(b"DecodeParms");
+        return;
+    }
+    if let Ok(Object::Array(a)) = dict.get_mut(b"Filter") {
+        a.remove(at);
+    }
+    match dict.get_mut(b"DecodeParms") {
+        Ok(Object::Array(a)) if a.len() > at => {
+            a.remove(at);
+        }
+        Ok(Object::Array(_)) => {}
+        Ok(_) => {
+            dict.remove(b"DecodeParms");
+        }
+        Err(_) => {}
+    }
+}
+
+/// The streams holding attached files: those a file specification's /EF
+/// names, and those marked /EmbeddedFile.
+fn embedded_files(doc: &Document) -> Vec<ObjectId> {
+    let mut out = Vec::new();
+    for (&id, o) in &doc.objects {
+        let dict = match o {
+            Object::Dictionary(d) => d,
+            Object::Stream(s) => {
+                if s.dict.has_type(b"EmbeddedFile") {
+                    out.push(id);
+                }
+                &s.dict
+            }
+            _ => continue,
+        };
+        if let Ok(ef) = dict.get(b"EF").map(|o| deref(doc, o))
+            && let Ok(ef) = ef.as_dict()
+        {
+            out.extend(ef.iter().filter_map(|(_, v)| v.as_reference().ok()));
+        }
+    }
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
 #[cfg(test)]
 #[path = "meta_tests.rs"]
 mod tests;

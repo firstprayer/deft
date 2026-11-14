@@ -389,29 +389,52 @@ pub fn ocr_text(ctx: &Ctx, image: &Path, lang: &str, needed_by: &str) -> Result<
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }
 
-/// A PDF page holding only the invisible text of one image. Returns its path.
-pub fn ocr_layer(
+/// What tesseract read on one page image.
+pub struct OcrPage {
+    pub text: String,
+    /// The page holding only the invisible text, when one was asked for.
+    pub layer: Option<PathBuf>,
+    /// Tesseract could not load its orientation data (osd), so a page turned
+    /// sideways or upside down was read as it is.
+    pub no_orientation: bool,
+}
+
+/// Read one page image, turning it upright first when tesseract finds it on
+/// its side or upside down (page segmentation mode 1, which needs the osd
+/// data that ships with tesseract). The image is at `dpi`. With `layer`, also
+/// write the invisible text as a PDF page; text and layer come from one reading.
+pub fn ocr_page(
     ctx: &Ctx,
     image: &Path,
     lang: &str,
     dpi: i64,
+    layer: bool,
     needed_by: &str,
-) -> Result<PathBuf> {
+) -> Result<OcrPage> {
     let program = require(ctx, "tesseract", needed_by)?;
-    let base = image.with_extension("layer");
+    let base = image.with_extension("ocr");
     let mut args = tesseract_args(image, &base.display().to_string(), lang);
     args.extend([
+        "--psm".to_string(),
+        "1".to_string(),
         "--dpi".to_string(),
         dpi.to_string(),
-        "-c".to_string(),
-        "textonly_pdf=1".to_string(),
-        "pdf".to_string(),
     ]);
+    if layer {
+        args.extend(["-c".to_string(), "textonly_pdf=1".to_string()]);
+    }
+    args.push("txt".to_string());
+    if layer {
+        args.push("pdf".to_string());
+    }
     let out = run(ctx, &program, &args).map_err(|e| tesseract_error(e, lang))?;
-    let pdf = base.with_extension("layer.pdf");
-    // Without its pdf.ttf in the tessdata folder tesseract writes no PDF and
-    // still exits 0.
-    if std::fs::metadata(&pdf).map_or(true, |m| m.len() == 0) {
+    let text = std::fs::read(base.with_extension("ocr.txt"))
+        .map(|b| String::from_utf8_lossy(&b).to_string())
+        .unwrap_or_default();
+    let pdf = base.with_extension("ocr.pdf");
+    if layer && std::fs::metadata(&pdf).map_or(true, |m| m.len() == 0) {
+        // Without its pdf.ttf in the tessdata folder tesseract writes no PDF
+        // and still exits 0.
         let why = tail(&out.stderr, 3);
         return Err(err(
             ErrorCode::EngineFailed,
@@ -419,5 +442,10 @@ pub fn ocr_layer(
         )
         .hint("tesseract needs pdf.ttf in its tessdata folder (TESSDATA_PREFIX) to write PDF"));
     }
-    Ok(pdf)
+    Ok(OcrPage {
+        text,
+        layer: layer.then_some(pdf),
+        no_orientation: out.stderr.contains("osd language failed to load")
+            || out.stderr.contains("Failed loading language 'osd'"),
+    })
 }

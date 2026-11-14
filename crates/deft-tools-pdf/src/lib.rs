@@ -10,7 +10,6 @@ pub mod compare;
 pub mod extract;
 pub mod fonts;
 pub mod forms;
-pub mod layout;
 pub mod meta;
 mod outline;
 pub mod pages;
@@ -1024,6 +1023,8 @@ pub enum PdfImage {
         width: u32,
         height: u32,
         components: u8,
+        /// The colour profile the JPEG's numbers are in.
+        icc: Option<Vec<u8>>,
     },
     /// 8-bit raw samples, Flate-compressed on embedding.
     Raw {
@@ -1052,19 +1053,27 @@ impl PdfImage {
         max_pixels: u64,
     ) -> Result<PdfImage> {
         use deft_core::format::Format;
+        let icc = deft_tools_image::icc_profile(bytes, format);
         if format == Format::Jpeg
             && deft_tools_image::exif_orientation(bytes) == 1
             && let Some((width, height, components)) = deft_tools_image::jpeg_info(bytes)
             && (components == 1 || components == 3)
         {
+            let model: &[u8] = if components == 1 { b"GRAY" } else { b"RGB " };
             return Ok(PdfImage::Jpeg {
                 bytes: bytes.to_vec(),
                 width,
                 height,
                 components,
+                icc: icc.filter(|p| p.get(16..20) == Some(model)),
             });
         }
         let img = deft_tools_image::decode(bytes, format, max_pixels)?;
+        // Decoded pixels go in as sRGB, so a page shows them as the file does.
+        let img = icc
+            .filter(|p| deft_tools_image::profile_fits(p, &img))
+            .and_then(|p| deft_tools_image::to_srgb(&img, &p))
+            .unwrap_or(img);
         if format == Format::Jpeg {
             // Rotated or CMYK JPEG: re-encode upright at high quality.
             let jpg = deft_tools_image::encode(
@@ -1082,6 +1091,7 @@ impl PdfImage {
                 width,
                 height,
                 components,
+                icc: None,
             });
         }
         Ok(PdfImage::from_image(&img))
@@ -1124,11 +1134,26 @@ pub fn embed_image(doc: &mut Document, img: &PdfImage) -> ObjectId {
             width,
             height,
             components,
+            icc,
         } => {
-            let cs = if *components == 1 {
+            let device = if *components == 1 {
                 "DeviceGray"
             } else {
                 "DeviceRGB"
+            };
+            let cs = match icc {
+                Some(profile) => {
+                    let dict = dictionary! {
+                        "N" => *components as i64, "Alternate" => device, "Filter" => "FlateDecode",
+                    };
+                    let id =
+                        doc.add_object(Stream::new(dict, flate(profile)).with_compression(false));
+                    Object::Array(vec![
+                        Object::Name(b"ICCBased".to_vec()),
+                        Object::Reference(id),
+                    ])
+                }
+                None => Object::Name(device.as_bytes().to_vec()),
             };
             let dict = dictionary! {
                 "Type" => "XObject", "Subtype" => "Image", "Width" => *width as i64, "Height" => *height as i64,
@@ -1584,6 +1609,41 @@ impl Renderer {
         }
         image::RgbImage::from_raw(pw, ph, rgb)
             .ok_or_else(|| err(ErrorCode::Internal, "render buffer"))
+    }
+
+    /// For each box on a page (zero-based), the share of it, from 0 to 1, that
+    /// already has ink: anything clearly darker or more colourful than white.
+    /// Boxes are (left, bottom, right, top) in points from the bottom-left of
+    /// the page as shown. Rendered coarsely, which is enough to see text.
+    pub fn ink(&self, index: usize, boxes: &[[f64; 4]]) -> Result<Vec<f64>> {
+        let pages = self.pdf.pages();
+        let Some(page) = pages.get(index) else {
+            return Ok(vec![0.0; boxes.len()]);
+        };
+        let (w, h) = page.render_dimensions();
+        // About 50 dpi, less for a poster.
+        let dpi = (50.0f64).min((2.0e6 / (w as f64 * h as f64).max(1.0)).sqrt() * 72.0);
+        let img = self.render(index, dpi, u64::MAX)?;
+        let (iw, ih) = (img.width() as f64, img.height() as f64);
+        let (sx, sy) = (iw / w as f64, ih / h as f64);
+        Ok(boxes
+            .iter()
+            .map(|&[l, b, r, t]| {
+                let x0 = (l * sx).floor().clamp(0.0, iw) as u32;
+                let x1 = (r * sx).ceil().clamp(0.0, iw) as u32;
+                let y0 = ((h as f64 - t) * sy).floor().clamp(0.0, ih) as u32;
+                let y1 = ((h as f64 - b) * sy).ceil().clamp(0.0, ih) as u32;
+                let (mut all, mut inked) = (0u32, 0u32);
+                for y in y0..y1 {
+                    for x in x0..x1 {
+                        let px = img.get_pixel(x, y).0;
+                        all += 1;
+                        inked += u32::from(px.iter().any(|&c| c < 195));
+                    }
+                }
+                f64::from(inked) / f64::from(all.max(1))
+            })
+            .collect())
     }
 }
 

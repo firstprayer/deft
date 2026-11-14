@@ -37,3 +37,25 @@ fn utf16_text_is_not_mp3() {
     assert_ne!(sniff(b"\xFF\xFEa\0b\0", None), Some(Format::Mp3));
     assert_eq!(sniff(b"\xFF\xFB\x90\x00", None), Some(Format::Mp3));
 }
+
+#[test]
+fn data_commands_read_by_content() {
+    let toml = &[Format::Toml];
+    assert_eq!(
+        read_as_data(None, toml, b"[[package]]\n"),
+        Some(Format::Toml)
+    );
+    let xml = &[Format::Xml];
+    assert_eq!(
+        read_as_data(Some(Format::Gpx), xml, b"<?xml version=\"1.0\"?><gpx/>"),
+        Some(Format::Xml)
+    );
+    assert_eq!(
+        read_as_data(None, xml, b"<Project Sdk=\"x\">"),
+        Some(Format::Xml)
+    );
+    // Binary content and other groups are left alone.
+    assert_eq!(read_as_data(None, toml, b"\0\x01"), None);
+    assert_eq!(read_as_data(None, &[Format::Csv], b"a,b"), None);
+    assert_eq!(read_as_data(Some(Format::Png), xml, b"<x/>"), None);
+}

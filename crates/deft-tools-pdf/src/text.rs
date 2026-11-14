@@ -3,7 +3,6 @@
 //! and gives real positions, so text, search and tables all agree.
 
 use crate::Renderer;
-use crate::layout::Run;
 use deft_core::error::Result;
 use hayro::hayro_interpret::font::{Glyph as Drawn, GlyphRun};
 use hayro::hayro_interpret::hayro_cmap::BfString;
@@ -20,8 +19,11 @@ use std::collections::HashSet;
 const UNITS: f64 = 1000.0;
 /// A gap this wide, in ems, is a space between words.
 const WORD_GAP: f64 = 0.2;
-/// One this wide separates cells: LaTeX writes a whole table row in one operator.
-const CELL_GAP: f64 = 0.7;
+/// On a line whose letters touch, a gap this wide is a space too: justified
+/// text squeezes word spaces below `WORD_GAP`.
+const TIGHT_WORD_GAP: f64 = 0.12;
+/// Letters this close, in ems, touch.
+const TOUCHING: f64 = 0.03;
 /// A step off the baseline this tall, in ems, starts a new line. Less is a
 /// superscript or a subscript.
 const LINE_STEP: f64 = 0.6;
@@ -139,6 +141,8 @@ fn unicode(glyph: &Drawn<'_>) -> String {
 struct Collector {
     glyphs: Vec<Glyph>,
     runs: usize,
+    /// Where images are drawn, as (left, top, right, bottom).
+    images: Vec<[f64; 4]>,
 }
 
 impl Collector {
@@ -158,7 +162,20 @@ impl<'a> Device<'a> for Collector {
     fn draw_path(&mut self, _: &BezPath, _: DrawProps<'a>, _: &DrawMode) {}
     fn push_clip_path(&mut self, _: &ClipPath) {}
     fn push_transparency_group(&mut self, _: f32, _: Option<SoftMask<'a>>, _: BlendMode) {}
-    fn draw_image(&mut self, _: Image<'a, '_>, _: ImageDrawProps<'a>) {}
+    fn draw_image(&mut self, image: Image<'a, '_>, props: ImageDrawProps<'a>) {
+        // The transform takes the image's pixels to the page.
+        let (w, h) = (f64::from(image.width()), f64::from(image.height()));
+        let corners = [(0.0, 0.0), (w, 0.0), (0.0, h), (w, h)]
+            .map(|(x, y)| props.transform * Point::new(x, y));
+        let xs = corners.map(|p| p.x);
+        let ys = corners.map(|p| p.y);
+        self.images.push([
+            xs.into_iter().fold(f64::MAX, f64::min),
+            ys.into_iter().fold(f64::MAX, f64::min),
+            xs.into_iter().fold(f64::MIN, f64::max),
+            ys.into_iter().fold(f64::MIN, f64::max),
+        ]);
+    }
     fn pop_clip(&mut self) {}
     fn pop_transparency_group(&mut self) {}
 
@@ -248,6 +265,7 @@ fn join_gbk(glyphs: &mut [Glyph]) {
 /// positions call for has no glyph.
 fn reading(glyphs: &[Glyph]) -> Vec<(char, Option<usize>)> {
     let mut out: Vec<(char, Option<usize>)> = Vec::new();
+    let tight = tight_lines(glyphs);
     // The last glyph with text: one whose text another glyph of its cluster
     // carries is passed over.
     let mut last: Option<&Glyph> = None;
@@ -256,6 +274,7 @@ fn reading(glyphs: &[Glyph]) -> Vec<(char, Option<usize>)> {
             continue;
         }
         if let Some(last) = last {
+            let word_gap = if tight[i] { TIGHT_WORD_GAP } else { WORD_GAP };
             let blank = out.last().is_none_or(|(c, _)| c.is_whitespace());
             // Chinese and Japanese put no spaces between words.
             let close = out.last().is_some_and(|(c, _)| is_cjk(*c))
@@ -264,7 +283,7 @@ fn reading(glyphs: &[Glyph]) -> Vec<(char, Option<usize>)> {
                 out.push(('\n', None));
             } else if !blank && !glyph.is_blank() && !close {
                 let (along, _) = last.step_to(glyph);
-                if along > last.size().max(glyph.size()) * WORD_GAP {
+                if along > last.size().max(glyph.size()) * word_gap {
                     out.push((' ', None));
                 }
             }
@@ -273,7 +292,86 @@ fn reading(glyphs: &[Glyph]) -> Vec<(char, Option<usize>)> {
         last = Some(glyph);
     }
     logical_order(&mut out, glyphs);
+    despace(&mut out);
     out
+}
+
+/// For each glyph, whether the letters of its line touch: the middle gap
+/// between them is under `TOUCHING`. Such a line is set tight, so a narrower
+/// gap is still a space between words.
+fn tight_lines(glyphs: &[Glyph]) -> Vec<bool> {
+    let mut out = vec![false; glyphs.len()];
+    let mut start = 0;
+    while start < glyphs.len() {
+        let mut end = start + 1;
+        let mut gaps = Vec::new();
+        let mut prev = start;
+        while end < glyphs.len() && glyphs[prev].same_line(&glyphs[end]) {
+            let (a, b) = (&glyphs[prev], &glyphs[end]);
+            if !a.is_blank() && !b.is_blank() && !a.text.is_empty() && !b.text.is_empty() {
+                gaps.push(a.step_to(b).0 / a.size().max(b.size()).max(f64::EPSILON));
+            }
+            prev = end;
+            end += 1;
+        }
+        if gaps.len() >= 8 {
+            gaps.sort_by(f64::total_cmp);
+            let middle = gaps[gaps.len() / 2];
+            if middle.abs() < TOUCHING {
+                out[start..end].fill(true);
+            }
+        }
+        start = end;
+    }
+    out
+}
+
+/// Text that has a space glyph after nearly every letter, and two between
+/// words, as some OCR layers are written ("T h e  N a ti o n al"): drop the
+/// single spaces and keep one of each pair. Each line is judged on its own.
+fn despace(out: &mut Vec<(char, Option<usize>)>) {
+    let mut kept = Vec::with_capacity(out.len());
+    for line in out.split_inclusive(|c| c.0 == '\n') {
+        if !letter_spaced(line) {
+            kept.extend_from_slice(line);
+            continue;
+        }
+        let mut i = 0;
+        while i < line.len() {
+            if line[i].0 == ' ' {
+                let mut j = i;
+                while j < line.len() && line[j].0 == ' ' {
+                    j += 1;
+                }
+                if j - i >= 2 {
+                    kept.push(line[i]);
+                }
+                i = j;
+            } else {
+                kept.push(line[i]);
+                i += 1;
+            }
+        }
+    }
+    *out = kept;
+}
+
+/// Whether a line reads as letters with single spaces between them and
+/// double spaces between words: mostly pieces of one or two letters, and at
+/// least one double space. Chinese, Japanese and Korean do not count: their
+/// words can be one or two characters long.
+fn letter_spaced(line: &[(char, Option<usize>)]) -> bool {
+    let text: String = line.iter().map(|c| c.0).collect();
+    let text = text.trim();
+    if !text.contains("  ") {
+        return false;
+    }
+    let pieces: Vec<&str> = text.split(' ').filter(|p| !p.is_empty()).collect();
+    let short = pieces
+        .iter()
+        .filter(|p| p.chars().count() <= 2 && p.chars().all(|c| c.is_alphabetic() && !is_cjk(c)))
+        .count();
+    pieces.len() >= 6 && short * 10 >= pieces.len() * 7
 }
 
 fn is_rtl(c: char) -> bool {
@@ -378,6 +476,8 @@ pub struct PageText {
     /// The size of the page as shown.
     pub width: f64,
     pub height: f64,
+    /// Where images are drawn, as (left, top, right, bottom) from the top-left.
+    pub images: Vec<[f64; 4]>,
 }
 
 /// A place the text was found.
@@ -391,6 +491,50 @@ pub struct Hit {
 }
 
 impl PageText {
+    /// How many characters the page shows that could be decoded, not counting
+    /// white space.
+    pub fn chars(&self) -> usize {
+        self.glyphs
+            .iter()
+            .flat_map(|g| g.text.chars())
+            .filter(|c| !c.is_whitespace() && *c != '\u{FFFD}')
+            .count()
+    }
+
+    fn share(&self, boxes: impl Iterator<Item = [f64; 4]>) -> f64 {
+        let area = (self.width * self.height).max(1.0);
+        let inside: f64 = boxes
+            .map(|[l, t, r, b]| {
+                let w = r.min(self.width) - l.max(0.0);
+                let h = b.min(self.height) - t.max(0.0);
+                w.max(0.0) * h.max(0.0)
+            })
+            .sum();
+        (inside / area).min(1.0)
+    }
+
+    /// The share of the page, from 0 to 1, that images cover.
+    pub fn image_cover(&self) -> f64 {
+        self.share(self.images.iter().copied())
+    }
+
+    /// The share of the page, from 0 to 1, that the boxes of its characters cover.
+    pub fn text_cover(&self) -> f64 {
+        self.share(
+            self.glyphs
+                .iter()
+                .filter(|g| !g.is_blank())
+                .map(Glyph::bounds),
+        )
+    }
+
+    /// A page that is a picture with little or no text on it, such as a scan
+    /// without a text layer or with only a short stamp: reading it with OCR
+    /// finds the text.
+    pub fn is_scan(&self) -> bool {
+        self.image_cover() > 0.5 && (self.chars() < 20 || self.text_cover() < 0.02)
+    }
+
     /// The page as lines, in drawing order.
     pub fn text(&self) -> String {
         let all: String = reading(&self.glyphs).iter().map(|c| c.0).collect();
@@ -488,32 +632,6 @@ impl PageText {
             .map(|r| [r[0] - 1.0, r[1] - 1.0, r[2] - r[0] + 2.0, r[3] - r[1] + 2.0])
             .collect()
     }
-
-    /// Pieces of text for finding tables, with the baseline measured from the
-    /// bottom of the page. One piece is what one operator drew, cut at wide gaps.
-    pub fn runs(&self) -> Vec<Run> {
-        let apart = |a: &Glyph, b: &Glyph| {
-            a.run != b.run || !a.same_line(b) || a.step_to(b).0 >= a.size() * CELL_GAP
-        };
-        let mut out = Vec::new();
-        for piece in self.glyphs.chunk_by(|a, b| !apart(a, b)) {
-            let first = piece.iter().position(|g| !g.is_blank());
-            let last = piece.iter().rposition(|g| !g.is_blank());
-            let (Some(first), Some(last)) = (first, last) else {
-                continue;
-            };
-            let kept = &piece[first..=last];
-            let text: String = reading(kept).iter().map(|c| c.0).collect();
-            out.push(Run {
-                x: kept[0].start.x,
-                y: self.height - kept[0].start.y,
-                size: kept[0].size(),
-                text,
-                width: (kept[kept.len() - 1].end - kept[0].start).hypot(),
-            });
-        }
-        out
-    }
 }
 
 impl Renderer {
@@ -541,6 +659,7 @@ impl Renderer {
                     glyphs: found.glyphs,
                     width: width as f64,
                     height: height as f64,
+                    images: found.images,
                 },
             );
         }

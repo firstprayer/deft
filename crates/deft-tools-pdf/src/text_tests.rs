@@ -15,17 +15,8 @@ fn page(glyphs: Vec<Glyph>) -> PageText {
         glyphs,
         width: 612.0,
         height: 792.0,
+        images: vec![],
     }
-}
-
-#[test]
-fn a_gap_wider_than_a_cell_splits_one_operator() {
-    let runs = page(vec![glyph("6", 10.0, 5.0, 0), glyph("7", 30.0, 5.0, 0)]).runs();
-    assert_eq!(runs.len(), 2);
-    assert_eq!(runs[0].text, "6");
-    assert_eq!(runs[1].text, "7");
-    assert!((runs[1].x - 30.0).abs() < 0.01, "{}", runs[1].x);
-    assert!((runs[1].y - 692.0).abs() < 0.01, "{}", runs[1].y);
 }
 
 #[test]
@@ -176,4 +167,78 @@ fn vertical_text_reads_down_the_column() {
     ])
     .text();
     assert_eq!(text, "あいう");
+}
+
+#[test]
+fn a_picture_with_a_short_stamp_of_text_is_a_scan() {
+    let stamp: Vec<Glyph> = "Published: October 2, 1880 Copyright The New York Times"
+        .chars()
+        .enumerate()
+        .map(|(i, c)| glyph(&c.to_string(), 10.0 + i as f64 * 5.0, 5.0, 0))
+        .collect();
+    let mut scan = page(stamp.clone());
+    scan.images = vec![[0.0, 0.0, 612.0, 792.0]];
+    assert!(scan.chars() >= 20);
+    assert!(scan.is_scan());
+    // The same line on a page without a picture is a text page.
+    assert!(!page(stamp).is_scan());
+    // A full text layer over the picture makes it searchable already.
+    let mut layer = Vec::new();
+    for line in 0..60 {
+        for i in 0..90 {
+            let mut g = glyph("e", 10.0 + i as f64 * 6.5, 6.0, line);
+            g.start.y = 20.0 + line as f64 * 12.0;
+            g.end.y = g.start.y;
+            layer.push(g);
+        }
+    }
+    let mut ocred = page(layer);
+    ocred.images = vec![[0.0, 0.0, 612.0, 792.0]];
+    assert!(!ocred.is_scan(), "{}", ocred.text_cover());
+}
+
+/// Glyphs of `words` set touching, with `space` ems between words.
+fn set(words: &[&str], space: f64) -> PageText {
+    let mut glyphs = Vec::new();
+    let mut x = 10.0;
+    for w in words {
+        for c in w.chars() {
+            glyphs.push(glyph(&c.to_string(), x, 5.0, 0));
+            x += 5.0;
+        }
+        x += space * 10.0;
+    }
+    page(glyphs)
+}
+
+#[test]
+fn a_squeezed_word_space_in_tight_text_is_a_space() {
+    let words = ["The", "documents", "may", "come", "from", "teaching"];
+    assert_eq!(
+        set(&words, 0.17).text(),
+        "The documents may come from teaching"
+    );
+    // Kerning-sized gaps are not spaces.
+    assert_eq!(set(&words, 0.05).text(), "Thedocumentsmaycomefromteaching");
+}
+
+#[test]
+fn a_space_after_every_letter_is_dropped() {
+    let spaced = "T h e  N a ti o n al  P oli c e  C hi efs";
+    let glyphs: Vec<Glyph> = spaced
+        .chars()
+        .enumerate()
+        .map(|(i, c)| glyph(&c.to_string(), 10.0 + i as f64 * 3.0, 3.0, 0))
+        .collect();
+    let spaced = page(glyphs);
+    assert_eq!(spaced.text(), "The National Police Chiefs");
+    assert_eq!(spaced.find("police").len(), 1);
+    // Ordinary words with a double space stay as they are.
+    let plain = "The office is open  from nine";
+    let glyphs: Vec<Glyph> = plain
+        .chars()
+        .enumerate()
+        .map(|(i, c)| glyph(&c.to_string(), 10.0 + i as f64 * 3.0, 3.0, 0))
+        .collect();
+    assert_eq!(page(glyphs).text(), plain);
 }

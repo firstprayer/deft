@@ -78,6 +78,9 @@ enum Space {
     Rgb,
     Cmyk,
     Indexed(Vec<u8>, usize),
+    /// One ink (a Separation or a one-colorant DeviceN): the colour at no
+    /// tint and at full tint.
+    Tint([u8; 3], [u8; 3]),
 }
 
 /// Channels of an image a compressor can decode: gray, RGB or CMYK.
@@ -86,7 +89,7 @@ pub(crate) fn decodable_channels(doc: &Document, o: &Object) -> Option<usize> {
         Space::Gray => Some(1),
         Space::Rgb => Some(3),
         Space::Cmyk => Some(4),
-        Space::Indexed(..) => None,
+        Space::Indexed(..) | Space::Tint(..) => None,
     }
 }
 
@@ -118,7 +121,7 @@ fn color_space(doc: &Document, o: &Object) -> Option<Space> {
                         Space::Gray => 1,
                         Space::Rgb => 3,
                         Space::Cmyk => 4,
-                        Space::Indexed(..) => return None,
+                        Space::Indexed(..) | Space::Tint(..) => return None,
                     };
                     let table = match deref(doc, a.get(3)?) {
                         Object::String(s, _) => s.clone(),
@@ -127,11 +130,59 @@ fn color_space(doc: &Document, o: &Object) -> Option<Space> {
                     };
                     Some(Space::Indexed(table, comps))
                 }
+                b"Separation" | b"DeviceN" => {
+                    let names: Vec<&[u8]> = match deref(doc, a.get(1)?) {
+                        Object::Name(n) => vec![n.as_slice()],
+                        Object::Array(v) => v
+                            .iter()
+                            .filter_map(|o| deref(doc, o).as_name().ok())
+                            .collect(),
+                        _ => return None,
+                    };
+                    match names.as_slice() {
+                        [b"Black" | b"All"] => Some(Space::Tint([255; 3], [0; 3])),
+                        [_] => tint_ends(doc, a.get(2)?, a.get(3)?),
+                        _ => None,
+                    }
+                }
                 _ => None,
             }
         }
         _ => None,
     }
+}
+
+/// The colours of one ink at no and at full tint, when its tint transform is
+/// an exponential function (type 2) into gray, RGB or CMYK.
+fn tint_ends(doc: &Document, alternate: &Object, function: &Object) -> Option<Space> {
+    let f = match deref(doc, function) {
+        Object::Dictionary(d) => d,
+        Object::Stream(s) => &s.dict,
+        _ => return None,
+    };
+    if f.get(b"FunctionType").ok().and_then(num)? as i64 != 2 {
+        return None;
+    }
+    let values = |key: &[u8], default: f64| -> Vec<f64> {
+        f.get(key)
+            .ok()
+            .and_then(|o| deref(doc, o).as_array().ok())
+            .map(|a| a.iter().filter_map(|o| num(deref(doc, o))).collect())
+            .unwrap_or_else(|| vec![default])
+    };
+    let rgb = |v: &[f64]| -> Option<[u8; 3]> {
+        let b = |x: f64| (x.clamp(0.0, 1.0) * 255.0).round() as u8;
+        match (color_space(doc, alternate)?, v) {
+            (Space::Gray, [g]) => Some([b(*g); 3]),
+            (Space::Rgb, [r, g, bl]) => Some([b(*r), b(*g), b(*bl)]),
+            (Space::Cmyk, [c, m, y, k]) => Some(cmyk_to_rgb(b(*c), b(*m), b(*y), b(*k))),
+            _ => None,
+        }
+    };
+    Some(Space::Tint(
+        rgb(&values(b"C0", 0.0))?,
+        rgb(&values(b"C1", 1.0))?,
+    ))
 }
 
 /// Read sample `n` of a row at `bits` per component.
@@ -180,7 +231,7 @@ fn decode(doc: &Document, stream: &Stream) -> Option<DynamicImage> {
     };
     let data = stream.decompressed_content().ok()?;
     let comps = match space {
-        Space::Gray | Space::Indexed(..) => 1,
+        Space::Gray | Space::Indexed(..) | Space::Tint(..) => 1,
         Space::Rgb => 3,
         Space::Cmyk => 4,
     };
@@ -211,6 +262,13 @@ fn decode(doc: &Document, stream: &Stream) -> Option<DynamicImage> {
                         .collect();
                     rgb.extend_from_slice(&cmyk_to_rgb(v[0], v[1], v[2], v[3]));
                 }
+                Space::Tint(lo, hi) => {
+                    let t = scale(sample(row, x, bits)) as i32;
+                    for c in 0..3 {
+                        let (a, b) = (lo[c] as i32, hi[c] as i32);
+                        rgb.push((a + (b - a) * t / 255) as u8);
+                    }
+                }
                 Space::Indexed(table, n) => {
                     let i = sample(row, x, bits) as usize * n;
                     let entry = table.get(i..i + n).unwrap_or(&[0, 0, 0, 0][..*n]);
@@ -226,7 +284,10 @@ fn decode(doc: &Document, stream: &Stream) -> Option<DynamicImage> {
         }
     }
     let img = RgbImage::from_raw(w as u32, h as u32, rgb)?;
-    if matches!(space, Space::Gray) {
+    let gray = |c: &[u8; 3]| c[0] == c[1] && c[1] == c[2];
+    if matches!(&space, Space::Gray)
+        || matches!(&space, Space::Tint(lo, hi) if gray(lo) && gray(hi))
+    {
         return Some(DynamicImage::ImageLuma8(
             DynamicImage::ImageRgb8(img).to_luma8(),
         ));
@@ -253,6 +314,42 @@ fn with_soft_mask(doc: &Document, dict: &Dictionary, img: RgbImage) -> DynamicIm
         }
         _ => DynamicImage::ImageRgb8(img),
     }
+}
+
+/// Whether a JPEG from the PDF looks the same saved on its own. A CMYK JPEG
+/// does not: viewers read an Adobe CMYK JPEG as inverted ink, which a PDF
+/// does not, so it would show as a negative. Nor does one the PDF inverts
+/// with /Decode. Those are decoded as the page draws them instead.
+fn shows_as_drawn(doc: &Document, dict: &Dictionary, jpeg: &[u8]) -> bool {
+    let decoded_as_is = dict
+        .get(b"Decode")
+        .ok()
+        .and_then(|o| deref(doc, o).as_array().ok())
+        .and_then(|a| a.first().and_then(|v| num(deref(doc, v))))
+        .is_none_or(|first| first < 0.5);
+    decoded_as_is && jpeg_components(jpeg).is_some_and(|n| n != 4)
+}
+
+/// The number of colour components a JPEG's frame header names.
+fn jpeg_components(jpeg: &[u8]) -> Option<u8> {
+    let mut i = 2;
+    while i + 4 <= jpeg.len() {
+        if jpeg[i] != 0xFF {
+            return None;
+        }
+        let marker = jpeg[i + 1];
+        if marker == 0xFF {
+            i += 1;
+            continue;
+        }
+        let len = u16::from_be_bytes([jpeg[i + 2], jpeg[i + 3]]) as usize;
+        // Start of frame: SOF0-SOF15 except DHT, JPG and DAC.
+        if (0xC0..=0xCF).contains(&marker) && !matches!(marker, 0xC4 | 0xC8 | 0xCC) {
+            return jpeg.get(i + 9).copied();
+        }
+        i += 2 + len;
+    }
+    None
 }
 
 /// A JPEG packed inside other filters, such as [/FlateDecode /DCTDecode]:
@@ -360,7 +457,7 @@ fn decode_scan(
     if samples.len() < (w * h) as usize * channels {
         return None;
     }
-    // /Decode [1 0] inverts a one-channel image; a stencil mask paints its 0s.
+    // /Decode [1 0 ...] inverts the samples; a stencil mask paints its 0s.
     let inverted = d
         .get(b"Decode")
         .ok()
@@ -377,11 +474,19 @@ fn decode_scan(
             };
             DynamicImage::ImageLuma8(GrayImage::from_raw(w, h, gray)?)
         }
-        3 => DynamicImage::ImageRgb8(RgbImage::from_raw(w, h, samples.to_vec())?),
+        3 => {
+            let rgb: Vec<u8> = if inverted {
+                samples.iter().map(|v| 255 - v).collect()
+            } else {
+                samples.to_vec()
+            };
+            DynamicImage::ImageRgb8(RgbImage::from_raw(w, h, rgb)?)
+        }
         4 => {
+            let ink = |v: u8| if inverted { 255 - v } else { v };
             let rgb: Vec<u8> = samples
                 .chunks_exact(4)
-                .flat_map(|p| cmyk_to_rgb(p[0], p[1], p[2], p[3]))
+                .flat_map(|p| cmyk_to_rgb(ink(p[0]), ink(p[1]), ink(p[2]), ink(p[3])))
                 .collect();
             DynamicImage::ImageRgb8(RgbImage::from_raw(w, h, rgb)?)
         }
@@ -424,10 +529,12 @@ pub fn images(doc: &Document, indexes: &[usize]) -> Images {
             };
             let chain = filters(doc, &stream.dict);
             let last = chain.last().map(Vec::as_slice);
-            if chain.len() == 1 && last == Some(b"DCTDecode") {
-                out.images
-                    .push((i, Extracted::Jpeg(stream.content.clone())));
-            } else if let Some(jpeg) = wrapped_jpeg(stream, &chain) {
+            let jpeg = if chain.len() == 1 && last == Some(b"DCTDecode") {
+                Some(stream.content.clone())
+            } else {
+                wrapped_jpeg(stream, &chain)
+            };
+            if let Some(jpeg) = jpeg.filter(|j| shows_as_drawn(doc, &stream.dict, j)) {
                 out.images.push((i, Extracted::Jpeg(jpeg)));
             } else if matches!(
                 last,

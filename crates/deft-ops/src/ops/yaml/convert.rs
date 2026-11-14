@@ -4,6 +4,7 @@ use deft_core::prelude::*;
 pub static OP: Op = Op {
     id: "yaml.convert",
     summary: "Change format: --to json|toml|xml|jsonl",
+    details: &["Comments are kept in TOML."],
     input: Input::each(YAML, "yaml"),
     output: Output::one(TO_ANY, "data"),
     params: &[param(

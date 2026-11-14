@@ -30,7 +30,6 @@ Merge, split, compress, encrypt, forms, OCR, compare, convert
 | `deft pdf delete` | Remove pages: --pages 2,5-7 |  | `deft pdf delete three-pages.pdf --pages 2 -o shorter.pdf` |
 | `deft pdf encrypt` | Protect with a password (AES-256) |  | `deft pdf encrypt report.pdf --new-password s3cret -o locked.pdf` |
 | `deft pdf extract-images` | Save embedded pictures, unchanged |  | `deft pdf extract-images photos.pdf -o pictures/` |
-| `deft pdf extract-sheets` | Save each table apart |  | `deft pdf extract-sheets tables.pdf -o out/` |
 | `deft pdf fields` | List form fields |  | `deft pdf fields form.pdf --json` |
 | `deft pdf fill` | Fill a form from JSON: --data values.json |  | `deft pdf fill form.pdf --data form-values.json -o filled.pdf` |
 | `deft pdf flatten` | Bake forms into pages |  | `deft pdf flatten form.pdf -o flat.pdf` |

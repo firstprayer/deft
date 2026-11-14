@@ -4,7 +4,10 @@ use deft_core::prelude::*;
 pub static OP: Op = Op {
     id: "xml.convert",
     summary: "Change format: --to json|yaml|toml|jsonl",
-    details: &["Attributes become @name keys; repeated elements become lists."],
+    details: &[
+        "Attributes become @name keys; repeated elements become lists.",
+        "Text mixed with elements becomes a #content list in order; a plist <dict> becomes an object.",
+    ],
     input: Input::each(XML, "xml"),
     output: Output::one(TO_ANY, "data"),
     params: &[param(

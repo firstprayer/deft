@@ -3,7 +3,7 @@
 
 use crate::registry::registry;
 use deft_core::error::{DeftError, ErrorCode, Result, err};
-use deft_core::format::{Format, sniff, sniff_file};
+use deft_core::format::{Format, read_as_data, sniff, sniff_file};
 use deft_core::job::{Ctx, Data, InputFile, Job, OpResult, Params, Produced};
 use deft_core::spec::{Accept, InputArity, Op, OutputArity};
 use deft_core::value::Value;
@@ -202,8 +202,11 @@ fn expand_inputs(op: &Op, req: &Request) -> Result<Vec<InputFile>> {
                 out.push(InputFile::file(path, None));
                 continue;
             }
-            let format = sniff_file(&path)?;
+            let mut format = sniff_file(&path)?;
             if let Accept::Formats(allowed) = op.input.accept {
+                if !format.is_some_and(|f| allowed.contains(&f)) {
+                    format = read_as_data(format, allowed, &head(&path)?).or(format);
+                }
                 match format {
                     Some(f) if allowed.contains(&f) => {}
                     Some(f) => {
@@ -253,6 +256,16 @@ fn expand_inputs(op: &Op, req: &Request) -> Result<Vec<InputFile>> {
         )),
         _ => Ok(out),
     }
+}
+
+/// The first bytes of a file.
+fn head(path: &Path) -> Result<Vec<u8>> {
+    use std::io::Read;
+    let mut buf = Vec::with_capacity(4096);
+    std::fs::File::open(path)
+        .and_then(|f| f.take(4096).read_to_end(&mut buf))
+        .map_err(|e| err(ErrorCode::InputCorrupt, format!("{}: {e}", path.display())))?;
+    Ok(buf)
 }
 
 /// Refuse an old or password-protected Office file with what to do about it.

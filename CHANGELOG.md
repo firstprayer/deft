@@ -7,7 +7,6 @@ Deft follows semantic versioning. Before 1.0, a minor version may change command
 ### Added
 
 - `gps` group: GPX and KML conversion, distance, time and climb.
-- `pdf extract-sheets`: each table in a PDF as its own CSV, or as a sheet in one XLSX.
 - `deft find` says when no command does a job.
 - `html to-docx --main` and `html to-pdf --main`.
 - `calendar to-csv` adds `status` and `except` columns, and `calendar from-csv` reads them.
@@ -21,6 +20,11 @@ Deft follows semantic versioning. Before 1.0, a minor version may change command
 - `calendar to-csv` shows the last day of an all-day event, not the day after it.
 - `gps info` and `gps convert` treat track segments separately, and `climb_m` ignores rises under 2 m.
 - `md to-pdf`, `md to-docx`, `md to-epub`, `html to-pdf` and `html to-docx` download the web pictures a document links to and embed them. A picture that cannot be downloaded is left out with one warning, keeping its alt text. This is the only time deft goes online.
+- `pdf ocr` reads at 300 dpi by default, turns sideways and upside-down pages upright, reads scans that carry only a short text stamp, and warns when nothing was recognised.
+- `pdf number` without `--position` moves the number off existing text or pictures, to the first free corner, and says where it went; a given `--position` is kept, with a warning when it is taken.
+- `pdf to-text` points to `pdf ocr` for scans of any length, and keeps word spaces in tightly justified text.
+- `pdf decrypt` decrypts attachments that are encrypted on their own, or refuses; it no longer writes a file that is still encrypted.
+- `pdf encrypt` warns that Apple viewers cannot open a file whose password is not ASCII, and describes `--no-print` and `--no-copy` as requests to the viewer.
 
 ### Removed
 
@@ -42,7 +46,7 @@ Deft follows semantic versioning. Before 1.0, a minor version may change command
 ### Fixed
 
 - `pdf encrypt` output opens in Apple's PDF readers. `pdf to-text` and `search` read fonts that came out as garbage before, and ligatures.
-- `pdf merge` keeps every form and bookmark. `extract-sheets` uses real glyph widths.
+- `pdf merge` keeps every form and bookmark.
 - HEIC photos from phones come out whole and upright. `image strip` removes everything after a JPEG's end. `image info` finds GPS in every format. Display P3 colour survives.
 - `image compress` never grows a file and fails when it misses a target. `image trim --speck` ignores dust.
 - `video watermark` and `pad` handle phone rotation.
