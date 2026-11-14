@@ -197,6 +197,12 @@ fn nan_and_inf_survive_into_yaml_and_toml_and_are_reported_for_json() {
 }
 
 #[test]
+fn json_floats_keep_their_last_digit() {
+    let v = parse(b"[90.95299999999995, 14.116999999999999]", Format::Json).unwrap();
+    assert_eq!(v.to_string(), "[90.95299999999995,14.116999999999999]");
+}
+
+#[test]
 fn a_repeated_yaml_key_takes_the_last_value_with_a_warning() {
     let doc = read(b"a:\n  x: 1\n  x: 2\nb: [1]\n", Format::Yaml).unwrap();
     assert_eq!(doc.value, json!({"a": {"x": 2}, "b": [1]}));
