@@ -5,10 +5,12 @@ use deft_core::error::{ErrorCode, Result, err};
 use deft_core::format::Format;
 use serde_json::{Map, Value, json};
 
+mod diff;
 pub mod geo;
 mod query;
 mod xml;
 
+pub use diff::{Change, diff};
 pub use query::query;
 
 fn bad(format: Format, e: impl std::fmt::Display) -> deft_core::error::DeftError {
@@ -305,30 +307,6 @@ pub fn merge(a: &mut Value, b: Value, append: bool) {
     }
 }
 
-/// One difference between two documents.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Change {
-    pub path: String,
-    pub kind: &'static str,
-    pub before: Option<Value>,
-    pub after: Option<Value>,
-}
-
-impl Change {
-    pub fn to_json(&self) -> Value {
-        let mut m = Map::new();
-        m.insert("path".into(), json!(self.path));
-        m.insert("kind".into(), json!(self.kind));
-        if let Some(b) = &self.before {
-            m.insert("before".into(), b.clone());
-        }
-        if let Some(a) = &self.after {
-            m.insert("after".into(), a.clone());
-        }
-        Value::Object(m)
-    }
-}
-
 /// YAML 1.1 parsers such as PyYAML read `yes`, `on` and `2026-11-06` as a bool or a
 /// date. serde_yaml writes them bare, because they are plain strings in YAML 1.2.
 fn ambiguous_in_yaml(s: &str) -> bool {
@@ -383,87 +361,6 @@ fn to_yaml(v: &Value) -> std::result::Result<String, serde_yaml::Error> {
         text = text.replace(&format!("deft-yaml-quote-{n}-end"), &format!("'{s}'"));
     }
     Ok(text)
-}
-
-/// Structural differences, with paths in jq syntax such as `.a.b[2]`.
-pub fn diff(a: &Value, b: &Value) -> Vec<Change> {
-    let mut out = Vec::new();
-    walk_diff("", a, b, &mut out);
-    out
-}
-
-fn key_path(base: &str, key: &str) -> String {
-    let plain = !key.is_empty()
-        && key.chars().all(|c| c.is_alphanumeric() || c == '_')
-        && !key.starts_with(|c: char| c.is_ascii_digit());
-    if plain {
-        format!("{base}.{key}")
-    } else {
-        format!("{base}[{key:?}]")
-    }
-}
-
-fn walk_diff(path: &str, a: &Value, b: &Value, out: &mut Vec<Change>) {
-    match (a, b) {
-        (Value::Object(x), Value::Object(y)) => {
-            for (k, va) in x {
-                let p = key_path(path, k);
-                match y.get(k) {
-                    Some(vb) => walk_diff(&p, va, vb, out),
-                    None => out.push(Change {
-                        path: p,
-                        kind: "removed",
-                        before: Some(va.clone()),
-                        after: None,
-                    }),
-                }
-            }
-            for (k, vb) in y {
-                if !x.contains_key(k) {
-                    out.push(Change {
-                        path: key_path(path, k),
-                        kind: "added",
-                        before: None,
-                        after: Some(vb.clone()),
-                    });
-                }
-            }
-        }
-        (Value::Array(x), Value::Array(y)) => {
-            // jq needs the dot when the document itself is a list.
-            let base = if path.is_empty() { "." } else { path };
-            for i in 0..x.len().max(y.len()) {
-                let p = format!("{base}[{i}]");
-                match (x.get(i), y.get(i)) {
-                    (Some(va), Some(vb)) => walk_diff(&p, va, vb, out),
-                    (Some(va), None) => out.push(Change {
-                        path: p,
-                        kind: "removed",
-                        before: Some(va.clone()),
-                        after: None,
-                    }),
-                    (None, Some(vb)) => out.push(Change {
-                        path: p,
-                        kind: "added",
-                        before: None,
-                        after: Some(vb.clone()),
-                    }),
-                    (None, None) => {}
-                }
-            }
-        }
-        _ if a != b => out.push(Change {
-            path: if path.is_empty() {
-                ".".into()
-            } else {
-                path.into()
-            },
-            kind: "changed",
-            before: Some(a.clone()),
-            after: Some(b.clone()),
-        }),
-        _ => {}
-    }
 }
 
 /// Check a document against a JSON Schema. Returns the problems found.
