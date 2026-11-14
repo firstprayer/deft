@@ -43,8 +43,6 @@ The script checks the download, then sets up the skill for Claude Code and Codex
 deft pdf compress report.pdf --target-size 2MB
 deft pdf watermark contract.pdf --text CONFIDENTIAL
 deft image resize photos/*.jpg --size 1200x -o web/
-deft video stabilize shaky.mp4 -o steady.mp4
-deft video pad clip.mp4 --size 1080x1920 -o vertical.mp4
 deft md to-pdf notes.md
 deft convert notes.md -o notes.pdf
 deft sheet pivot sales.xlsx --rows city --columns year --values amount -o totals.csv
@@ -61,7 +59,7 @@ deft pdf fill form.pdf --data values.json --flatten -o filled.pdf
 
 ## Engines
 
-`video` uses ffmpeg, and so does reading HEIC and AVIF. OCR uses tesseract. `deft doctor` shows what is available.
+Reading HEIC and AVIF uses ffmpeg. OCR uses tesseract. `deft doctor` shows what is available.
 
 ## Documentation
 
