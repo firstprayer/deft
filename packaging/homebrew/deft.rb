@@ -3,28 +3,28 @@
 class Deft < Formula
   desc "One command for the file jobs AI agents otherwise script"
   homepage "https://deftcli.com"
-  version "0.1.0"
+  version "0.2.0"
   license :cannot_represent
 
   on_macos do
     on_arm do
-      url "https://github.com/firstprayer/deft/releases/download/v0.1.0/deft-aarch64-apple-darwin.tar.gz"
-      sha256 "e7955438e2e59dd79fe3b3db5ca29851c1a3faf1f0d048a64cdc2509c9bdf659"
+      url "https://github.com/firstprayer/deft/releases/download/v0.2.0/deft-aarch64-apple-darwin.tar.gz"
+      sha256 "5a4f825bbb20d599292855c7e3bf15feff8966c2ea2ecdb7ea868a3f78f68467"
     end
     on_intel do
-      url "https://github.com/firstprayer/deft/releases/download/v0.1.0/deft-x86_64-apple-darwin.tar.gz"
-      sha256 "ad08d5a3e661eef13c8ce698aa2fe3fc5f724abd97c7d1947b484a53cd68b266"
+      url "https://github.com/firstprayer/deft/releases/download/v0.2.0/deft-x86_64-apple-darwin.tar.gz"
+      sha256 "9be003a8d52c0920add22f5da6daeae0f7f61db6bca25147f866e43805e374a4"
     end
   end
 
   on_linux do
     on_arm do
-      url "https://github.com/firstprayer/deft/releases/download/v0.1.0/deft-aarch64-unknown-linux-musl.tar.gz"
-      sha256 "e9768fe395494622c36004dc509d7952e91050dd72753eb3a20bd813fc5e482a"
+      url "https://github.com/firstprayer/deft/releases/download/v0.2.0/deft-aarch64-unknown-linux-musl.tar.gz"
+      sha256 "a445df8612820c36e42405e76f8f169c903c91c1b926217e5fe367c45df573c3"
     end
     on_intel do
-      url "https://github.com/firstprayer/deft/releases/download/v0.1.0/deft-x86_64-unknown-linux-musl.tar.gz"
-      sha256 "61eead775aabb33376b059ba9f452c106695d85a1c9062b28202fe502aba6b54"
+      url "https://github.com/firstprayer/deft/releases/download/v0.2.0/deft-x86_64-unknown-linux-musl.tar.gz"
+      sha256 "5143239dc856ac79c74d72875e254901d999fec220923823c38b229ced8c1f91"
     end
   end
 
@@ -35,7 +35,8 @@ class Deft < Formula
 
   def caveats
     <<~EOS
-      Video and audio commands need ffmpeg:  brew install ffmpeg
+      HEIC and AVIF images need ffmpeg:      brew install ffmpeg
+      OCR needs tesseract:                   brew install tesseract
       Check what is available with:          deft doctor
       Teach your agents to use deft with:    deft skill install --agent all
     EOS
