@@ -891,7 +891,7 @@ dependencies = [
 
 [[package]]
 name = "deft-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -899,14 +899,14 @@ dependencies = [
 
 [[package]]
 name = "deft-engines"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "deft-core",
 ]
 
 [[package]]
 name = "deft-ops"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "deft-core",
  "deft-engines",
@@ -926,7 +926,7 @@ dependencies = [
 
 [[package]]
 name = "deft-tools-data"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "boon",
  "csv",
@@ -948,7 +948,7 @@ dependencies = [
 
 [[package]]
 name = "deft-tools-doc"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "deft-core",
  "encoding_rs",
@@ -963,7 +963,7 @@ dependencies = [
 
 [[package]]
 name = "deft-tools-file"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "chardetng",
@@ -974,7 +974,7 @@ dependencies = [
 
 [[package]]
 name = "deft-tools-image"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "barcoders",
  "crc32fast",
@@ -995,7 +995,7 @@ dependencies = [
 
 [[package]]
 name = "deft-tools-pdf"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "deft-core",
  "deft-tools-image",
@@ -1015,7 +1015,7 @@ dependencies = [
 
 [[package]]
 name = "deft-tools-sheet"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "calamine",
  "chardetng",
@@ -1031,7 +1031,7 @@ dependencies = [
 
 [[package]]
 name = "deft-tools-text"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "deft-core",
  "deft-tools-file",
@@ -1045,7 +1045,7 @@ dependencies = [
 
 [[package]]
 name = "deftcli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "deft-core",
  "deft-engines",
@@ -5540,7 +5540,7 @@ checksum = "9440ea3e5aeabb0ac63af70daf835274065238cdd0cec83418f417eae38bacee"
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "deft-core",
  "deft-ops",

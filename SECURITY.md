@@ -10,7 +10,7 @@ There is one maintainer, so there is no guaranteed response time. You will get a
 
 ## Supported versions
 
-Deft has not had a release. After 0.1.0, only the latest release gets security fixes.
+Only the latest release gets security fixes.
 
 ## What is in scope
 

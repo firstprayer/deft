@@ -156,7 +156,7 @@ The skill text is generated from the command registry, so reinstall it after upd
 
 ## Engines
 
-Video and audio commands run ffmpeg. It does not ship inside deft.
+Deft runs ffmpeg to read HEIC and AVIF images, and tesseract for OCR. Neither ships inside deft.
 
 ```bash
 deft doctor                     # what is available
@@ -164,7 +164,7 @@ deft engine list
 deft engine run ffmpeg -- -i a.mp4 -c copy b.mkv    # anything deft has no command for
 ```
 
-ffmpeg must be installed by hand. See [INSTALL.md](INSTALL.md).
+Install them by hand. See [INSTALL.md](INSTALL.md).
 
 ## Plugins
 

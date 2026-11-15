@@ -4,7 +4,7 @@
 
 [deftcli.com](https://deftcli.com)
 
-When an AI agent has a file job, it writes a script, debugs it, checks the output and throws the script away. Deft is one binary that turns those jobs into single commands: PDF, images, video, audio, spreadsheets, Word files, Markdown and more. The agent spends fewer tokens and less time, and fails less often.
+When an AI agent has a file job, it writes a script, debugs it, checks the output and throws the script away. Deft is one binary that turns those jobs into single commands: PDF, images, Word and PowerPoint files, spreadsheets, Markdown, HTML, e-books, JSON, YAML and more. The agent spends fewer tokens and less time, and fails less often.
 
 ```console
 $ deft pdf compress photos.pdf
@@ -15,16 +15,14 @@ ok pdf.compress photos.pdf -> photos.compressed.pdf  704KB -> 272KB (-61%)  0.10
 
 The same agent, with and without deft:
 
-| 85 supported tasks | With deft | Without |
+| 147 tasks | With deft | Without |
 |---|---:|---:|
-| Tasks solved | **85** | 78 |
-| Failed commands | **3** | 70 |
-| Tokens | **745,522** (27% fewer) | 1,024,324 |
-| Time | **1,096 s** (57% less) | 2,545 s |
+| Tasks solved | **147** | 140 |
+| Failed commands | **18** | 212 |
+| Tokens | **1,940,543** (24% fewer) | 2,555,050 |
+| Time | **3,032 s** (56% less) | 6,929 s |
 
-**Method.** 100 tasks written the way a person asks, of which 85 are ones deft supports; 9 are known gaps and 6 need the network and were not run. Codex with gpt-6-luna at medium effort, in its sandbox with no network. The latest attempt counts: 22 of 188 task and arm pairs were rerun, and 8 of those went from fail to pass, 4 in each arm. The "with" arm adds deft and its skill text. The "without" arm uses what the machine has, which included ffmpeg, Ghostscript, Pillow and pandas. Tokens are uncached input plus output. Results are judged with tools other than deft.
-
-**Limits.** One agent; Claude Code has not been measured. Deft was improved against these same tasks, so this is a development benchmark, not a held-out test. On 31 of the 85 tasks deft used more tokens, because the agent reads help first: a plain `tar` still wins on a trivial job. The savings come from jobs where an agent would otherwise write code, such as PDF, images, Markdown and sheets. Cases, results and the harness are in [evals/](evals/README.md).
+**Method.** 147 everyday file jobs written the way a person asks, 59 of them multi-step. Claude Code with Opus 5.5 at medium effort, in its sandbox, one attempt per task. The "with" arm has deft installed with its skill; the "without" arm uses what the machine has, which included ffmpeg, Ghostscript, Pillow and pandas. Tokens are uncached input plus output. Results are judged with tools other than deft. Every task and run, with its trace, is at [deftcli.com/evals](https://deftcli.com/evals/).
 
 ## Quick start
 
@@ -35,7 +33,7 @@ curl -fsSL https://deftcli.com/install.sh | sh
 deft doctor                         # shows what is available
 ```
 
-The script checks the download, then sets up the skill for Claude Code and Codex. Video and audio commands need ffmpeg. See [docs/INSTALL.md](docs/INSTALL.md) for Homebrew and other routes.
+The script checks the download, then sets up the skill for Claude Code and Codex. Reading HEIC and AVIF needs ffmpeg, and OCR needs tesseract. See [docs/INSTALL.md](docs/INSTALL.md) for Homebrew and other routes.
 
 ## Examples
 

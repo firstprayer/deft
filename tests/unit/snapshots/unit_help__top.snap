@@ -2,7 +2,7 @@
 source: crates/deft-cli/../../tests/unit/help.rs
 expression: "help::top()"
 ---
-deft 0.1.0 - local file toolkit. Usage: deft <group> <command> [inputs] [-o output]
+deft 0.2.0 - local file toolkit. Usage: deft <group> <command> [inputs] [-o output]
 
 Groups:
   pdf      Merge, split, compress, encrypt, forms, OCR, compare, convert

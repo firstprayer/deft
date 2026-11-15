@@ -4,11 +4,13 @@ Deft follows semantic versioning. Before 1.0, a minor version may change command
 
 ## Unreleased
 
+## 0.2.0 - 2026-11-15
+
 ### Added
 
 - `gps` group: GPX and KML conversion, distance, time and climb.
+- `json`, `toml`, `yaml` and `xml` groups replace `data`. Each converts to the others; JSON, TOML and YAML validate against a JSON Schema; TOML and YAML merge and diff; TOML formats.
 - `deft find` says when no command does a job.
-- `calendar to-csv` adds `status` and `except` columns, and `calendar from-csv` reads them.
 
 ### Changed
 
@@ -17,7 +19,6 @@ Deft follows semantic versioning. Before 1.0, a minor version may change command
 - YAML output quotes strings such as `yes`, `on` and dates, which older parsers misread.
 - Word readers keep footnotes, endnotes, text boxes, nested tables, content controls and list levels, and `doc replace` reaches notes.
 - `doc to-html` embeds pictures. Pictures in PDFs keep their natural size.
-- `calendar to-csv` shows the last day of an all-day event, not the day after it.
 - `gps info` and `gps convert` treat track segments separately, and `climb_m` ignores rises under 2 m.
 - `md to-pdf`, `md to-docx`, `md to-epub`, `html to-pdf` and `html to-docx` download the web pictures a document links to and embed them. A picture that cannot be downloaded is left out with one warning, keeping its alt text. This is the only time deft goes online.
 - `pdf ocr` reads at 300 dpi by default, turns sideways and upside-down pages upright, reads scans that carry only a short text stamp, and warns when nothing was recognised.
@@ -41,8 +42,8 @@ Deft follows semantic versioning. Before 1.0, a minor version may change command
 - `pdf redact`: a redaction that misses a word is a leak, and on real files it missed text in attachments, comments and fonts it could not decode. Deft does not promise safety it cannot give.
 - `video add-audio`, `add-subtitles`, `chunk`, `compress`, `convert`, `frames`, `from-images`, `info`, `merge`, `speed`, `strip` and `to-gif`: on real files an agent did each as well with one ffmpeg line. 
 - `sheet query`, `filter`, `sort`, `select`, `group`, `dedupe` and `join`: an agent does these in one line with sqlite3, DuckDB or pandas. Deft no longer includes SQLite.
-- The `email` and `file` groups.
-- Commands whose output was not good enough: `pdf to-docx`, `to-md`, `to-sheet` and `to-pdfa`; `slides to-pdf`; `md to-pptx`.
+- The `email` and `file` groups, and the `data` group, now split by format.
+- Commands whose output was not good enough: `pdf to-docx`, `to-md`, `to-sheet` and `to-pdfa`; `slides to-pdf`; `md to-pptx`; `image to-video`.
 
 ### Fixed
 
@@ -50,14 +51,13 @@ Deft follows semantic versioning. Before 1.0, a minor version may change command
 - `pdf merge` keeps every form and bookmark.
 - HEIC photos from phones come out whole and upright. `image strip` removes everything after a JPEG's end. `image info` finds GPS in every format. Display P3 colour survives.
 - `image compress` never grows a file and fails when it misses a target. `image trim --speck` ignores dust.
-- `video watermark` and `pad` handle phone rotation.
 - Word readers keep footnotes, text boxes and nested tables. EPUB keeps every chapter and refuses DRM. HTML keeps the headline and declared charset.
-- Text options keep their spaces. `-o` works on report commands.
+- `-o` works on report commands.
 - Report commands write their result as JSON with `-o name.json` instead of ignoring `-o`.
 - Text options keep their spaces, so `doc replace --find ' '` works.
 - `sheet merge` lines columns up by header. `sheet extract --range` counts from A1 when a sheet starts later. Comma decimals in semicolon files are numbers, and ids such as 12E3 stay text.
 - UTF-16 text is no longer taken for MP3. `deft info` identifies locked PDFs and directories.
-- `deft convert` writes every page into a directory. `data format` keeps YAML documents apart and warns about comments.
+- `deft convert` writes every page into a directory. YAML formatting keeps documents apart and warns about comments.
 
 ## 0.1.0
 
