@@ -6,17 +6,21 @@ On macOS or Linux:
 
 ```bash
 curl -fsSL https://deftcli.com/install.sh | sh
+```
+
+The script downloads the release for your system, checks its SHA-256 and puts `deft` in `~/.local/bin`. It puts that folder on your `PATH` the way uv's installer does: it writes `~/.local/bin/env` (and `env.fish`), which add the folder once, and sources it from `~/.profile`, `~/.bashrc`, `~/.zshenv` and `~/.zprofile`, from `~/.bash_profile` and `~/.bash_login` when they exist, and from fish's `conf.d`. Machines that already have uv share the same line. Open a new terminal before you run `deft`. It then installs the skill for each agent folder it finds. The binary is about 45 MB.
+
+```bash
 deft version
 deft doctor
 ```
-
-The script downloads the release for your system, checks its SHA-256 and puts `deft` in `~/.local/bin`. It then installs the skill for each agent folder it finds. The binary is about 45 MB.
 
 | Variable | Effect |
 |---|---|
 | `DEFT_VERSION` | A tag such as `v0.1.0`. The default is the latest release |
 | `DEFT_INSTALL_DIR` | Where the binary goes |
 | `DEFT_NO_SKILL` | Set it to skip the skill |
+| `DEFT_NO_MODIFY_PATH` | Set it to leave your shell's startup files alone |
 
 ## Homebrew
 
@@ -66,6 +70,8 @@ To update, run the install script or `brew upgrade deft` again.
 
 ```bash
 rm ~/.local/bin/deft
+# and the lines marked "Added by the deft installer" in your shell's startup files
+# (keep ~/.local/bin/env if uv or another tool uses it)
 rm -rf ~/.claude/skills/deft ~/.agents/skills/deft
 ```
 
